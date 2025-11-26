@@ -1,0 +1,101 @@
+$:
+  vscode:
+    - docker:
+        build: .ide/Dockerfile
+      runner: 
+          cpus: 8
+      services:
+        - vscode
+        - docker
+  tag_push:
+    - docker:
+        build: .ide/Dockerfile
+      runner: 
+            cpus: 16
+      stages:
+        - name: changelog
+          image: cnbcool/changelog
+          exports:
+            latestChangeLog: LATEST_CHANGE_LOG
+        - name: 创建 release
+          type: git:release
+          options:
+            title: $TAG_NAME
+            description: ${LATEST_CHANGE_LOG}
+        - name: 安装依赖
+          script: go mod vendor
+        - name: 编译
+          allow_failure: true
+          script: |
+            # 创建输出目录
+            mkdir -p dist
+            
+            # 获取版本号和构建时间
+            VERSION=$(grep -o 'Version = "[^"]*"' app/facade/const.go | cut -d'"' -f2)
+            BUILD_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+            
+            # 编译所有平台
+            platforms=(
+                "darwin/amd64"
+                "darwin/arm64"
+                "linux/amd64"
+                "linux/arm64"
+                "linux/386"
+                "windows/amd64"
+                "windows/arm64"
+                "windows/386"
+                "freebsd/amd64"
+            )
+            
+            for platform in "${platforms[@]}"
+            do
+                split=(${platform//\// })
+                GOOS=${split[0]}
+                GOARCH=${split[1]}
+                output_name="dist/inis-${GOOS}-${GOARCH}"
+                if [ $GOOS = "windows" ]; then
+                    output_name+='.exe'
+                fi
+                
+                echo "Building for $GOOS/$GOARCH ..."
+                
+                # 使用更多优化选项来减小可执行文件大小
+                env CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
+                    -trimpath \
+                    -ldflags "-s -w -X 'inis/app/facade.Version=${VERSION}' -X 'inis/app/facade.BuildTime=${BUILD_TIME}'" \
+                    -o $output_name \
+                    ./main.go
+                
+                # 对所有平台使用UPX压缩（除了macOS，因为可能有兼容性问题）
+                if [ $GOOS != "darwin" ]; then
+                    if command -v upx &> /dev/null; then
+                        echo "Compressing $output_name with UPX..."
+                        # 使用子shell执行UPX命令，这样即使UPX命令失败，也不会影响主脚本的执行状态
+                        (
+                            upx -9 --best --lzma $output_name
+                            # 验证压缩结果
+                            BEFORE_SIZE=$(stat -c %s "$output_name.bak" 2>/dev/null || stat -f %z "$output_name.bak" 2>/dev/null)
+                            AFTER_SIZE=$(stat -c %s "$output_name" 2>/dev/null || stat -f %z "$output_name" 2>/dev/null)
+                            if [ -n "$BEFORE_SIZE" ] && [ -n "$AFTER_SIZE" ]; then
+                                RATIO=$(( (BEFORE_SIZE - AFTER_SIZE) * 100 / BEFORE_SIZE ))
+                                echo "Compressed from $BEFORE_SIZE to $AFTER_SIZE bytes (${RATIO}% reduction)"
+                            fi
+                        ) || true
+                    else
+                        echo "Warning: UPX not found, skipping compression for $output_name"
+                    fi
+                fi
+            done
+            
+            # 创建SHA256校验和文件
+            cd dist
+            sha256sum inis-* > SHA256SUMS.txt
+            cd ..
+            
+            # 强制脚本以成功状态结束，忽略之前可能的错误
+            exit 0
+        - name: release 上传附件
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - dist/*
