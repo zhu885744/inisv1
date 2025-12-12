@@ -3,10 +3,6 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"image"
 	"inis/app/facade"
 	"inis/app/middleware"
@@ -14,6 +10,10 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 // Gin - gin引擎
@@ -37,9 +37,9 @@ func init() {
 func initAppToml() {
 
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "app",
+		Path:    "config",
+		Mode:    "toml",
+		Name:    "app",
 		Content: utils.Replace(facade.TempApp, nil),
 	}).Read()
 
@@ -280,9 +280,19 @@ func notRoute(Gin *gin.Engine) {
 // console 控制台
 func console() {
 	port := AppToml.Get("app.port", 8080)
-	char := "/** \n" +
-		" *    版本号：%s  端口：%d\n" +
-		" *    服务已启动\n" +
-		" **/"
+	char := `
+    ██╗███╗   ██╗██╗███████╗
+    ██║████╗  ██║██║██╔════╝
+    ██║██╔██╗ ██║██║███████╗
+    ██║██║╚██╗██║██║╚════██║
+    ██║██║ ╚████║██║███████║
+    ╚═╝╚═╝  ╚═══╝╚═╝╚══════╝
+    
+    ──────────────────────────────
+      版本号: %-10s  端口: %-6d    
+      状态: 服务已启动               
+    ──────────────────────────────
+    
+    `
 	fmt.Println(fmt.Sprintf(char, facade.Version, port))
 }

@@ -2,10 +2,10 @@ package route
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"inis/app/api/controller"
 	middle "inis/app/api/middleware"
 	global "inis/app/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 func Route(Gin *gin.Engine) {
@@ -23,7 +23,7 @@ func Route(Gin *gin.Engine) {
 
 	// 允许动态挂载的路由
 	allow := map[string]controller.ApiInterface{
-		"exp":    		 &controller.EXP{},
+		"exp":           &controller.EXP{},
 		"test":          &controller.Test{},
 		"comm":          &controller.Comm{},
 		"toml":          &controller.Toml{},
@@ -43,12 +43,14 @@ func Route(Gin *gin.Engine) {
 		"placard":       &controller.Placard{},
 		"api-keys":      &controller.ApiKeys{},
 		"ip-black":      &controller.IpBlack{},
-		"qps-warn":   	 &controller.QpsWarn{},
+		"qps-warn":      &controller.QpsWarn{},
 		"auth-group":    &controller.AuthGroup{},
 		"auth-pages":    &controller.AuthPages{},
 		"auth-rules":    &controller.AuthRules{},
 		"links-group":   &controller.LinksGroup{},
 		"article-group": &controller.ArticleGroup{},
+		"album":         &controller.Album{},
+		"album-group":   &controller.AlbumGroup{},
 	}
 
 	// 动态配置路由

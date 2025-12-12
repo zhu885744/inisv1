@@ -3,14 +3,17 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"net/http"
-	"strings"
-	"time"
 )
+
+// 是否输出调试信息
+var debugMode = false
 
 func init() {
 	go Hub.run()
@@ -46,6 +49,18 @@ func (this Index) Connect(ctx *gin.Context) {
 	// 生成客户端ID
 	id := guid()
 
+	// 检查请求头中是否包含Upgrade: websocket
+	if ctx.GetHeader("Upgrade") != "websocket" {
+		// 只在debug模式下输出错误信息
+		if debugMode {
+			fmt.Println("非WebSocket连接请求:", ctx.Request.RemoteAddr)
+		}
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "非WebSocket连接请求",
+		})
+		return
+	}
+
 	conn, err := socket.Upgrade(ctx.Writer, ctx.Request, map[string][]string{
 		// 客户端ID
 		"X-Client-Id": {id},
@@ -53,7 +68,10 @@ func (this Index) Connect(ctx *gin.Context) {
 		"X-Client-info": {"Welcome to inis pro socket service！"},
 	})
 	if err != nil {
-		fmt.Println(err)
+		// 只在debug模式下输出错误信息
+		if debugMode {
+			fmt.Println("WebSocket升级错误:", err)
+		}
 		return
 	}
 	client := &client{
