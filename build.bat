@@ -2,14 +2,14 @@
 chcp 936 > nul 2>&1
 setlocal enabledelayedexpansion
 
-:: ======================== 极简配置（无复杂解析） ========================
+:: ======================== 极简配置 ========================
 :: 直接定义平台参数（避免for/f解析错误）
 set "p1_goos=linux"&set "p1_goarch=amd64"&set "p1_out=inis_linux_amd64"&set "p1_desc=Linux x86_64 (云服务器)"
 set "p2_goos=linux"&set "p2_goarch=arm64"&set "p2_out=inis_linux_arm64"&set "p2_desc=Linux ARM64 (鲲鹏/树莓派4)"
 set "p3_goos=windows"&set "p3_goarch=amd64"&set "p3_out=inis_windows_amd64.exe"&set "p3_desc=Windows x86_64"
 set "p4_goos=windows"&set "p4_goarch=arm64"&set "p4_out=inis_windows_arm64.exe"&set "p4_desc=Windows ARM64"
 set "p5_goos=darwin"&set "p5_goarch=amd64"&set "p5_out=inis_darwin_amd64"&set "p5_desc=macOS x86_64 (Intel)"
-set "p6_goos=darwin"&set "p6_goarch=arm64"&set "p6_out=inis_darwin_amd64"&set "p6_desc=macOS M1/M2"
+set "p6_goos=darwin"&set "p6_goarch=arm64"&set "p6_out=inis_darwin_arm64"&set "p6_desc=macOS M1/M2"
 
 :: 默认输出目录
 set "DEFAULT_OUTPUT_DIR=./dist"
@@ -18,7 +18,7 @@ set "DEFAULT_COMPRESS_LEVEL=6"
 
 :: ======================== 界面展示 ========================
 cls
-echo ======================== inis 编译工具（含UPX压缩） ========================
+echo ======================== inis 编译工具 ========================
 echo.
 echo 请选择要编译的平台：
 echo 1 - %p1_desc%
@@ -56,9 +56,10 @@ echo 选择的平台：!sel!
 echo 输出目录：!OUTPUT_DIR!
 echo.
 
-:: ======================== 检查UPX并选择压缩等级 ========================
+:: ======================== 检查UPX并选择压缩相关配置 ========================
 set "COMPRESS_ENABLE=true"
 set "COMPRESS_LEVEL="
+set "SKIP_COMPRESS=false"
 
 :: 检查UPX是否安装
 echo [检查] UPX压缩工具...
@@ -69,14 +70,30 @@ if errorlevel 1 (
 ) else (
     echo [成功] UPX已安装，支持压缩功能。
     echo.
-    :: 选择压缩等级
-    :level_loop
-    set /p "COMPRESS_LEVEL=请输入UPX压缩等级（1-9，1最快9最好，默认：%DEFAULT_COMPRESS_LEVEL%）："
-    if "!COMPRESS_LEVEL!"=="" set "COMPRESS_LEVEL=!DEFAULT_COMPRESS_LEVEL!"
-    :: 校验压缩等级
-    if !COMPRESS_LEVEL! lss 1 goto level_loop
-    if !COMPRESS_LEVEL! gtr 9 goto level_loop
-    echo [信息] 已选择压缩等级：!COMPRESS_LEVEL!
+    :: 新增：选择是否跳过压缩
+    :skip_compress_loop
+    set "SKIP_COMPRESS_INPUT="
+    set /p "SKIP_COMPRESS_INPUT=是否跳过UPX压缩？(y/n，默认：n)："
+    if /i "!SKIP_COMPRESS_INPUT!"=="y" set "SKIP_COMPRESS=true"
+    if /i "!SKIP_COMPRESS_INPUT!"=="n" set "SKIP_COMPRESS=false"
+    if "!SKIP_COMPRESS_INPUT!"=="" set "SKIP_COMPRESS=false"
+    :: 校验输入
+    if not "!SKIP_COMPRESS_INPUT!"=="" (
+        if /i not "!SKIP_COMPRESS_INPUT!"=="y" if /i not "!SKIP_COMPRESS_INPUT!"=="n" goto skip_compress_loop
+    )
+
+    if "!SKIP_COMPRESS!"=="true" (
+        echo [信息] 已选择跳过UPX压缩
+    ) else (
+        :: 选择压缩等级
+        :level_loop
+        set /p "COMPRESS_LEVEL=请输入UPX压缩等级（1-9，1最快9最好，默认：%DEFAULT_COMPRESS_LEVEL%）："
+        if "!COMPRESS_LEVEL!"=="" set "COMPRESS_LEVEL=!DEFAULT_COMPRESS_LEVEL!"
+        :: 校验压缩等级
+        if !COMPRESS_LEVEL! lss 1 goto level_loop
+        if !COMPRESS_LEVEL! gtr 9 goto level_loop
+        echo [信息] 已选择压缩等级：!COMPRESS_LEVEL!
+    )
 )
 echo.
 
@@ -137,44 +154,49 @@ for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
     )
 )
 
-:: ======================== UPX压缩（修复：批处理正确的多条件判断） ========================
-:: 修复1：用嵌套if实现多条件判断（避免and语法错误）
+:: ======================== UPX压缩（新增跳过逻辑） ========================
+:: 多条件判断：UPX启用 + 未选择跳过 + 非macOS平台
 if "!COMPRESS_ENABLE!"=="true" (
-    if not "!goos!"=="darwin" (
-        echo.
-        echo [开始] UPX压缩（等级：!COMPRESS_LEVEL!）...
-        upx -!COMPRESS_LEVEL! --best --lzma "!output_file!" > nul 2>&1
-        if errorlevel 1 (
-            echo [警告] 压缩失败！
-        ) else (
-            echo [成功] 压缩完成：!output_file!
-            :: 显示压缩后文件大小
-            for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
-                set "size_after=%%f"
-                :: 计算压缩率
-                set /a "compress_rate=(!size_before! - !size_after!) * 100 / !size_before!"
-                :: 转换单位
-                if !size_after! gtr 1048576 (
-                    set /a "size_mb=!size_after! / 1048576"
-                    set /a "size_mb_remain=!size_after! %% 1048576"
-                    set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
-                    if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
-                    echo [信息] 压缩后文件大小：!size_mb!.!size_mb_decimal! MB（压缩率：!compress_rate!%%）
-                ) else if !size_after! gtr 1024 (
-                    set /a "size_kb=!size_after! / 1024"
-                    set /a "size_kb_remain=!size_after! %% 1024"
-                    set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
-                    if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
-                    echo [信息] 压缩后文件大小：!size_kb!.!size_kb_decimal! KB（压缩率：!compress_rate!%%）
-                ) else (
-                    echo [信息] 压缩后文件大小：!size_after! 字节（压缩率：!compress_rate!%%）
+    if "!SKIP_COMPRESS!"=="false" (
+        if not "!goos!"=="darwin" (
+            echo.
+            echo [开始] UPX压缩（等级：!COMPRESS_LEVEL!）...
+            upx -!COMPRESS_LEVEL! --best --lzma "!output_file!" > nul 2>&1
+            if errorlevel 1 (
+                echo [警告] 压缩失败！
+            ) else (
+                echo [成功] 压缩完成：!output_file!
+                :: 显示压缩后文件大小
+                for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
+                    set "size_after=%%f"
+                    :: 计算压缩率
+                    set /a "compress_rate=(!size_before! - !size_after!) * 100 / !size_before!"
+                    :: 转换单位
+                    if !size_after! gtr 1048576 (
+                        set /a "size_mb=!size_after! / 1048576"
+                        set /a "size_mb_remain=!size_after! %% 1048576"
+                        set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
+                        if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
+                        echo [信息] 压缩后文件大小：!size_mb!.!size_mb_decimal! MB（压缩率：!compress_rate!%%）
+                    ) else if !size_after! gtr 1024 (
+                        set /a "size_kb=!size_after! / 1024"
+                        set /a "size_kb_remain=!size_after! %% 1024"
+                        set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
+                        if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
+                        echo [信息] 压缩后文件大小：!size_kb!.!size_kb_decimal! KB（压缩率：!compress_rate!%%）
+                    ) else (
+                        echo [信息] 压缩后文件大小：!size_after! 字节（压缩率：!compress_rate!%%）
+                    )
                 )
             )
+        ) else (
+            :: 仅当是macOS平台时才提示
+            echo.
+            echo [提示] macOS平台跳过UPX压缩（避免程序运行异常）。
         )
     ) else (
-        :: 仅当是macOS平台时才提示
         echo.
-        echo [提示] macOS平台跳过UPX压缩（避免程序运行异常）。
+        echo [信息] 已手动跳过UPX压缩步骤
     )
 )
 
