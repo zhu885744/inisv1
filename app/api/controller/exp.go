@@ -1,9 +1,6 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
@@ -11,6 +8,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type EXP struct {
@@ -18,6 +19,20 @@ type EXP struct {
 	base
 }
 
+// @Summary 获取EXP数据
+// @Description 根据不同方法获取EXP相关数据
+// @Tags EXP
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(one, all, sum, min, max, rand, count, column, active)
+// @Param id query int false "ID"
+// @Param where query string false "查询条件"
+// @Param or query string false "或条件"
+// @Param like query string false "模糊查询"
+// @Param cache query string false "是否使用缓存"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/exp/{method} [get]
 // IGET - GET请求本体
 func (this *EXP) IGET(ctx *gin.Context) {
 	// 转小写
@@ -42,6 +57,23 @@ func (this *EXP) IGET(ctx *gin.Context) {
 	}
 }
 
+// @Summary 创建/保存EXP数据
+// @Description 根据不同方法创建或保存EXP相关数据
+// @Tags EXP
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(save, create, like, share, collect, check-in)
+// @Param id body int false "ID（更新时需要）"
+// @Param value body string false "值"
+// @Param type body string false "类型"
+// @Param description body string false "描述"
+// @Param json body string false "JSON数据"
+// @Param text body string false "文本数据"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Failure 400 {object} map[string]interface{} "参数错误"
+// @Failure 401 {object} map[string]interface{} "未登录"
+// @Router /api/exp/{method} [post]
 // IPOST - POST请求本体
 func (this *EXP) IPOST(ctx *gin.Context) {
 
@@ -52,8 +84,8 @@ func (this *EXP) IPOST(ctx *gin.Context) {
 		"save":     this.save,
 		"create":   this.create,
 		"like":     this.like,
-		"share" :   this.share,
-		"collect" : this.collect,
+		"share":    this.share,
+		"collect":  this.collect,
 		"check-in": this.checkIn,
 	}
 	err := this.call(allow, method, ctx)
@@ -67,6 +99,23 @@ func (this *EXP) IPOST(ctx *gin.Context) {
 	go this.delCache()
 }
 
+// @Summary 更新EXP数据
+// @Description 根据不同方法更新EXP相关数据
+// @Tags EXP
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(update, restore)
+// @Param id body int true "ID"
+// @Param value body string false "值"
+// @Param type body string false "类型"
+// @Param description body string false "描述"
+// @Param json body string false "JSON数据"
+// @Param text body string false "文本数据"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Failure 400 {object} map[string]interface{} "参数错误"
+// @Failure 403 {object} map[string]interface{} "无权限"
+// @Router /api/exp/{method} [put]
 // IPUT - PUT请求本体
 func (this *EXP) IPUT(ctx *gin.Context) {
 	// 转小写
@@ -87,6 +136,18 @@ func (this *EXP) IPUT(ctx *gin.Context) {
 	go this.delCache()
 }
 
+// @Summary 删除EXP数据
+// @Description 根据不同方法删除或清空EXP相关数据
+// @Tags EXP
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(remove, delete, clear)
+// @Param ids body string true "ID列表（逗号分隔）"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Failure 400 {object} map[string]interface{} "参数错误"
+// @Failure 403 {object} map[string]interface{} "无权限"
+// @Router /api/exp/{method} [delete]
 // IDEL - DELETE请求本体
 func (this *EXP) IDEL(ctx *gin.Context) {
 	// 转小写
@@ -116,7 +177,7 @@ func (this *EXP) INDEX(ctx *gin.Context) {
 // 删除缓存
 func (this *EXP) delCache() {
 	// 删除缓存
-	facade.Cache.DelTags([]any{"[GET]","exp"})
+	facade.Cache.DelTags([]any{"[GET]", "exp"})
 }
 
 // one 获取指定数据
@@ -181,8 +242,8 @@ func (this *EXP) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"order":       "create_time desc",
+		"page":  1,
+		"order": "create_time desc",
 	})
 
 	// 表数据结构体
@@ -245,7 +306,7 @@ func (this *EXP) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -338,7 +399,7 @@ func (this *EXP) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -398,7 +459,7 @@ func (this *EXP) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -689,7 +750,7 @@ func (this *EXP) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -732,7 +793,7 @@ func (this *EXP) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -741,7 +802,7 @@ func (this *EXP) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.EXP{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
@@ -764,7 +825,7 @@ func (this *EXP) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -807,7 +868,7 @@ func (this *EXP) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // checkIn 每日签到
@@ -821,20 +882,20 @@ func (this *EXP) checkIn(ctx *gin.Context) {
 	}
 
 	err := (&model.EXP{}).Add(model.EXP{
-		Uid:	user.Id,
-		Type:	"check-in",
+		Uid:  user.Id,
+		Type: "check-in",
 	})
 
 	if err != nil {
-		this.json(ctx, gin.H{ "value": 0 }, err.Error(), 202)
+		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
 		return
 	}
 
-	this.json(ctx, gin.H{ "value": 30 }, facade.Lang(ctx, "签到成功！"), 200)
+	this.json(ctx, gin.H{"value": 30}, facade.Lang(ctx, "签到成功！"), 200)
 }
 
 // share 分享
-func (this *EXP) share(ctx *gin.Context)  {
+func (this *EXP) share(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
@@ -875,27 +936,27 @@ func (this *EXP) share(ctx *gin.Context)  {
 	}
 
 	err := (&model.EXP{}).Add(model.EXP{
-		Type:	  	 "share",
-		Uid:	  	 user.Id,
-		BindId:   	 cast.ToInt(params["bind_id"]),
-		BindType: 	 cast.ToString(params["bind_type"]),
+		Type:        "share",
+		Uid:         user.Id,
+		BindId:      cast.ToInt(params["bind_id"]),
+		BindType:    cast.ToString(params["bind_type"]),
 		Description: cast.ToString(params["description"]),
 	})
 
 	if err != nil {
-		this.json(ctx, gin.H{ "value": 0 }, err.Error(), 202)
+		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
 		return
 	}
 
-	this.json(ctx, gin.H{ "value": 1 }, facade.Lang(ctx, "分享成功！"), 200)
+	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, "分享成功！"), 200)
 }
 
 // collect 收藏
-func (this *EXP) collect(ctx *gin.Context)  {
+func (this *EXP) collect(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"state":	 1,
+		"state":     1,
 		"bind_type": "article",
 	})
 
@@ -957,13 +1018,13 @@ func (this *EXP) collect(ctx *gin.Context)  {
 				this.json(ctx, nil, tx.Error.Error(), 400)
 				return
 			}
-			this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "取消收藏成功！"), 200)
+			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "取消收藏成功！"), 200)
 			return
 		}
 
 		// 重复收藏
 		if cast.ToInt(params["state"]) == 1 && cast.ToInt(item["state"]) == 1 {
-			this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "已经收藏过了！"), 400)
+			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "已经收藏过了！"), 400)
 			return
 		}
 
@@ -972,11 +1033,11 @@ func (this *EXP) collect(ctx *gin.Context)  {
 			"state": 1,
 		})
 		if tx.Error != nil {
-			this.json(ctx, gin.H{ "value": 0 }, tx.Error.Error(), 400)
+			this.json(ctx, gin.H{"value": 0}, tx.Error.Error(), 400)
 			return
 		}
 
-		this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "收藏成功！"), 200)
+		this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "收藏成功！"), 200)
 		return
 	}
 
@@ -988,27 +1049,27 @@ func (this *EXP) collect(ctx *gin.Context)  {
 	}
 
 	err := (&model.EXP{}).Add(model.EXP{
-		Type:	  	 "collect",
-		Uid:	  	 user.Id,
-		BindId:   	 cast.ToInt(params["bind_id"]),
-		BindType: 	 cast.ToString(params["bind_type"]),
+		Type:        "collect",
+		Uid:         user.Id,
+		BindId:      cast.ToInt(params["bind_id"]),
+		BindType:    cast.ToString(params["bind_type"]),
 		Description: cast.ToString(params["description"]),
 	})
 
 	if err != nil {
-		this.json(ctx, gin.H{ "value": 0 }, err.Error(), 202)
+		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
 		return
 	}
 
-	this.json(ctx, gin.H{ "value": 1 }, facade.Lang(ctx, "收藏成功！"), 200)
+	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, "收藏成功！"), 200)
 }
 
 // like 点赞
-func (this *EXP) like(ctx *gin.Context)  {
+func (this *EXP) like(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"state":	 1,
+		"state":     1,
 		"bind_type": "article",
 	})
 
@@ -1075,13 +1136,13 @@ func (this *EXP) like(ctx *gin.Context)  {
 				this.json(ctx, nil, tx.Error.Error(), 400)
 				return
 			}
-			this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "点踩成功！"), 200)
+			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "点踩成功！"), 200)
 			return
 		}
 
 		// 重复点赞
 		if cast.ToInt(params["state"]) == 1 && cast.ToInt(item["state"]) == 1 {
-			this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "已经点过赞啦！"), 400)
+			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "已经点过赞啦！"), 400)
 			return
 		}
 
@@ -1090,11 +1151,11 @@ func (this *EXP) like(ctx *gin.Context)  {
 			"state": 1,
 		})
 		if tx.Error != nil {
-			this.json(ctx, gin.H{ "value": 0 }, tx.Error.Error(), 400)
+			this.json(ctx, gin.H{"value": 0}, tx.Error.Error(), 400)
 			return
 		}
 
-		this.json(ctx, gin.H{ "value": 0 }, facade.Lang(ctx, "点赞成功！"), 200)
+		this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "点赞成功！"), 200)
 		return
 	}
 
@@ -1106,20 +1167,20 @@ func (this *EXP) like(ctx *gin.Context)  {
 	}
 
 	err := (&model.EXP{}).Add(model.EXP{
-		Type:	  	 "like",
-		Uid:	  	 user.Id,
-		State: 		 cast.ToInt(params["state"]),
-		BindId:   	 cast.ToInt(params["bind_id"]),
-		BindType: 	 cast.ToString(params["bind_type"]),
-		Description: utils.Default(cast.ToString(params["description"]), msg + "奖励"),
+		Type:        "like",
+		Uid:         user.Id,
+		State:       cast.ToInt(params["state"]),
+		BindId:      cast.ToInt(params["bind_id"]),
+		BindType:    cast.ToString(params["bind_type"]),
+		Description: utils.Default(cast.ToString(params["description"]), msg+"奖励"),
 	})
 
 	if err != nil {
-		this.json(ctx, gin.H{ "value": 0 }, err.Error(), 202)
+		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
 		return
 	}
 
-	this.json(ctx, gin.H{ "value": 1 }, facade.Lang(ctx, msg + "成功！"), 200)
+	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, msg+"成功！"), 200)
 }
 
 // active 活跃度排行
@@ -1150,9 +1211,9 @@ func (this *EXP) active(ctx *gin.Context) {
 	// 表数据结构体
 	var table []model.EXP
 
-	sql   := "SELECT uid, SUM(value) AS total, COUNT(id) as number FROM inis_exp WHERE create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY SUM(value) DESC LIMIT ?"
+	sql := "SELECT uid, SUM(value) AS total, COUNT(id) as number FROM inis_exp WHERE create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY SUM(value) DESC LIMIT ?"
 	total := facade.DB.Model(&table).Query(sql, params["start"], params["end"], this.meta.limit(ctx)).Column("uid", "total", "number")
-	list  := cast.ToSlice(total)
+	list := cast.ToSlice(total)
 
 	cacheName := this.cache.name(ctx)
 	// 开启了缓存 并且 缓存中有数据
@@ -1168,14 +1229,14 @@ func (this *EXP) active(ctx *gin.Context) {
 
 		wg := sync.WaitGroup{}
 
-		for key, val  := range list {
+		for key, val := range list {
 			wg.Add(1)
 			go func(key int, val any) {
 				defer wg.Done()
-				value      := cast.ToStringMap(val)
-				field      := []string{"id", "nickname", "avatar", "description", "login_time", "title", "gender", "result"}
-				author     := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
-				item       :=  facade.Comm.WithField(author, field)
+				value := cast.ToStringMap(val)
+				field := []string{"id", "nickname", "avatar", "description", "login_time", "title", "gender", "result"}
+				author := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
+				item := facade.Comm.WithField(author, field)
 				item["exp"] = cast.ToInt(value["total"])
 				item["count"] = value["number"]
 				result[key] = item

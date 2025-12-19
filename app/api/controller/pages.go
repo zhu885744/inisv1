@@ -1,23 +1,43 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
+// Pages - 页面管理控制器
+// @Summary 页面管理API
+// @Description 提供页面相关的CRUD操作及数据统计功能
+// @Tags Pages
 type Pages struct {
 	// 继承
 	base
 }
 
-// IGET - GET请求本体
+// IGET - 获取页面数据
+// @Summary 获取页面数据
+// @Description 根据不同方法获取页面相关数据
+// @Tags Pages
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(one, all, sum, min, max, rand, count, column)
+// @Param id query int false "页面ID"
+// @Param key query string false "页面标识"
+// @Param where query string false "查询条件"
+// @Param order query string false "排序方式"
+// @Param field query string false "字段过滤"
+// @Param page query int false "页码"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/pages/{method} [get]
 func (this *Pages) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -40,7 +60,25 @@ func (this *Pages) IGET(ctx *gin.Context) {
 	}
 }
 
-// IPOST - POST请求本体
+// IPOST - 创建/保存页面
+// @Summary 创建/保存页面
+// @Description 创建新页面或保存页面数据（包含创建和更新）
+// @Tags Pages
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(save, create)
+// @Param key formData string true "页面标识"
+// @Param title formData string true "页面标题"
+// @Param content formData string true "页面内容"
+// @Param remark formData string false "页面备注"
+// @Param tags formData string false "页面标签"
+// @Param editor formData string false "编辑器类型"
+// @Param json formData string false "JSON数据"
+// @Param text formData string false "文本数据"
+// @Success 200 {object} map[string]interface{} "成功响应，包含页面ID"
+// @Failure 401 {object} map[string]interface{} "未登录"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/pages/{method} [post]
 func (this *Pages) IPOST(ctx *gin.Context) {
 
 	// 转小写
@@ -61,7 +99,26 @@ func (this *Pages) IPOST(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// IPUT - PUT请求本体
+// IPUT - 更新/恢复页面数据
+// @Summary 更新/恢复页面数据
+// @Description 根据不同方法更新或恢复页面相关数据
+// @Tags Pages
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(update, restore)
+// @Param id formData int true "页面ID"
+// @Param key formData string false "页面标识"
+// @Param title formData string false "页面标题"
+// @Param content formData string false "页面内容"
+// @Param remark formData string false "页面备注"
+// @Param tags formData string false "页面标签"
+// @Param editor formData string false "编辑器类型"
+// @Param json formData string false "JSON数据"
+// @Param text formData string false "文本数据"
+// @Success 200 {object} map[string]interface{} "成功响应，包含页面ID"
+// @Failure 401 {object} map[string]interface{} "未登录"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/pages/{method} [put]
 func (this *Pages) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -81,7 +138,18 @@ func (this *Pages) IPUT(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// IDEL - DELETE请求本体
+// IDEL - 删除页面数据
+// @Summary 删除页面数据
+// @Description 根据不同方法删除页面数据（支持软删除、硬删除和清空回收站）
+// @Tags Pages
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(remove, delete, clear)
+// @Param ids formData string true "页面ID列表，逗号分隔"
+// @Success 200 {object} map[string]interface{} "成功响应，包含删除的ID列表"
+// @Failure 401 {object} map[string]interface{} "未登录"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/pages/{method} [delete]
 func (this *Pages) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -102,7 +170,14 @@ func (this *Pages) IDEL(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// INDEX - GET请求本体
+// INDEX - 首页请求
+// @Summary 首页请求
+// @Description 首页默认请求处理
+// @Tags Pages
+// @Accept json
+// @Produce json
+// @Success 202 {object} map[string]interface{} "成功响应"
+// @Router /api/pages [get]
 func (this *Pages) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
@@ -176,9 +251,9 @@ func (this *Pages) one(ctx *gin.Context) {
 			return
 		}
 		_ = (&model.EXP{}).Add(model.EXP{
-			Uid:  user.Id,
-			Type: "visit",
-			BindId: cast.ToInt(item["id"]),
+			Uid:      user.Id,
+			Type:     "visit",
+			BindId:   cast.ToInt(item["id"]),
 			BindType: "page",
 		})
 	}()
@@ -259,7 +334,7 @@ func (this *Pages) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -362,7 +437,7 @@ func (this *Pages) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -427,7 +502,7 @@ func (this *Pages) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -713,7 +788,7 @@ func (this *Pages) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -751,7 +826,7 @@ func (this *Pages) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -760,7 +835,7 @@ func (this *Pages) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Pages{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	ids := utils.Unity.Ids(item.Column("id"))
 
@@ -778,7 +853,7 @@ func (this *Pages) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -816,7 +891,7 @@ func (this *Pages) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // 获取配置

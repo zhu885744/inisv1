@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	api "inis/app/api/route"
 	dev "inis/app/dev/route"
 	index "inis/app/index/route"
@@ -11,13 +10,33 @@ import (
 	socket "inis/app/socket/route"
 	"inis/app/timer"
 	app "inis/config"
+	_ "inis/docs"
+
+	"github.com/fsnotify/fsnotify"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-/*
- * Author: 兔子 or racns
- * Email: 97783391@qq.com or inis.cn66@gmail.com
- * Desc: 这是一个基于Gin框架和Gorm二次封装的Go语言Web开发框架
- */
+// @title inis CMS API
+// @version 1.0
+// @description 基于Gin框架和Gorm二次封装的Go语言Web开发框架
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name 兔子 or racns
+// @contact.url https://github.com/racns/inis
+// @contact.email 97783391@qq.com
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host localhost:8000
+// @BasePath /api/
+// @schemes http https
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+
 func main() {
 
 	// 监听服务
@@ -34,6 +53,10 @@ func main() {
 func run() {
 	// 允许跨域
 	app.Gin.Use(middleware.Cors(), middleware.Install())
+
+	// Swagger路由配置
+	app.Gin.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// 注册路由
 	app.Use(api.Route, dev.Route, index.Route, inis.Route, socket.Route)
 	// 运行服务

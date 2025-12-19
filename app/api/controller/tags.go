@@ -1,23 +1,42 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
+// Tags - 标签管理控制器
+// @Summary 标签管理API
+// @Description 提供标签相关的CRUD操作及数据统计功能
+// @Tags Tags
 type Tags struct {
 	// 继承
 	base
 }
 
-// IGET - GET请求本体
+// IGET - 获取标签数据
+// @Summary 获取标签数据
+// @Description 根据不同方法获取标签相关数据
+// @Tags Tags
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(one, all, sum, min, max, rand, count, column)
+// @Param id query int false "标签ID"
+// @Param where query string false "查询条件"
+// @Param order query string false "排序方式"
+// @Param field query string false "字段过滤"
+// @Param page query int false "页码"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/tags/{method} [get]
 func (this *Tags) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -40,7 +59,21 @@ func (this *Tags) IGET(ctx *gin.Context) {
 	}
 }
 
-// IPOST - POST请求本体
+// IPOST - 创建/保存标签
+// @Summary 创建/保存标签
+// @Description 创建新标签或保存标签数据（包含创建和更新）
+// @Tags Tags
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(save, create)
+// @Param name formData string true "标签名称"
+// @Param description formData string false "标签描述"
+// @Param avatar formData string false "标签头像"
+// @Param json formData string false "JSON数据"
+// @Param text formData string false "文本数据"
+// @Success 200 {object} map[string]interface{} "成功响应，包含标签ID"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/tags/{method} [post]
 func (this *Tags) IPOST(ctx *gin.Context) {
 
 	// 转小写
@@ -61,7 +94,23 @@ func (this *Tags) IPOST(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// IPUT - PUT请求本体
+// IPUT - 更新/恢复标签
+// @Summary 更新/恢复标签
+// @Description 更新标签数据或恢复已删除的标签
+// @Tags Tags
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(update, restore)
+// @Param id formData int true "标签ID"
+// @Param name formData string false "标签名称"
+// @Param description formData string false "标签描述"
+// @Param avatar formData string false "标签头像"
+// @Param json formData string false "JSON数据"
+// @Param text formData string false "文本数据"
+// @Param ids formData string false "标签ID列表（用于恢复）"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/tags/{method} [put]
 func (this *Tags) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -81,7 +130,17 @@ func (this *Tags) IPUT(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// IDEL - DELETE请求本体
+// IDEL - 删除标签
+// @Summary 删除标签
+// @Description 软删除、真实删除标签或清空回收站
+// @Tags Tags
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(remove, delete, clear)
+// @Param ids formData string true "标签ID列表（逗号分隔）"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/tags/{method} [delete]
 func (this *Tags) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -102,7 +161,14 @@ func (this *Tags) IDEL(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// INDEX - GET请求本体
+// INDEX - 标签索引接口
+// @Summary 标签索引接口
+// @Description 标签模块的索引接口（无实际功能）
+// @Tags Tags
+// @Accept json
+// @Produce json
+// @Success 202 {object} map[string]interface{} "响应信息"
+// @Router /api/tags/index [get]
 func (this *Tags) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
@@ -110,7 +176,7 @@ func (this *Tags) INDEX(ctx *gin.Context) {
 // 删除缓存
 func (this *Tags) delCache() {
 	// 删除缓存
-	facade.Cache.DelTags([]any{"[GET]","tags"})
+	facade.Cache.DelTags([]any{"[GET]", "tags"})
 }
 
 // one 获取指定数据
@@ -175,8 +241,8 @@ func (this *Tags) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"order":       "create_time desc",
+		"page":  1,
+		"order": "create_time desc",
 	})
 
 	// 表数据结构体
@@ -239,7 +305,7 @@ func (this *Tags) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -326,7 +392,7 @@ func (this *Tags) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -378,7 +444,7 @@ func (this *Tags) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -664,7 +730,7 @@ func (this *Tags) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -702,7 +768,7 @@ func (this *Tags) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -711,7 +777,7 @@ func (this *Tags) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Tags{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	ids := utils.Unity.Ids(item.Column("id"))
 
@@ -729,7 +795,7 @@ func (this *Tags) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -767,5 +833,5 @@ func (this *Tags) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }

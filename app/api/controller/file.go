@@ -9,18 +9,32 @@ import (
 	"mime/multipart"
 	"regexp"
 	"strings"
+
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 )
 
+// File - 文件管理控制器
+// @Summary 文件管理API
+// @Description 提供文件上传、随机图片、图片转base64等功能的API接口
+// @Tags File
 type File struct {
 	// 继承
 	base
 }
 
-// IGET - GET请求本体
+// IGET - 获取文件相关信息
+// @Summary 获取文件相关信息
+// @Description 根据不同方法获取文件相关数据（随机图、转base64等）
+// @Tags File
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(rand, to-base64)
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/file/{method} [get]
 func (this *File) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -37,7 +51,17 @@ func (this *File) IGET(ctx *gin.Context) {
 	}
 }
 
-// IPOST - POST请求本体
+// IPOST - 上传文件
+// @Summary 上传文件
+// @Description 上传文件到服务器（支持图片、文档、压缩包、音视频等多种类型）
+// @Tags File
+// @Accept multipart/form-data
+// @Produce json
+// @Param method path string true "方法名" Enums(upload)
+// @Param file formData file true "要上传的文件"
+// @Success 200 {object} map[string]interface{} "成功响应，包含文件路径"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/file/{method} [post]
 func (this *File) IPOST(ctx *gin.Context) {
 
 	// 转小写
@@ -54,7 +78,16 @@ func (this *File) IPOST(ctx *gin.Context) {
 	}
 }
 
-// IPUT - PUT请求本体
+// IPUT - 更新文件信息
+// @Summary 更新文件信息
+// @Description 更新文件相关数据（当前暂不支持）
+// @Tags File
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/file/{method} [put]
 func (this *File) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -68,7 +101,16 @@ func (this *File) IPUT(ctx *gin.Context) {
 	}
 }
 
-// IDEL - DELETE请求本体
+// IDEL - 删除文件
+// @Summary 删除文件
+// @Description 删除文件（当前暂不支持）
+// @Tags File
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/file/{method} [delete]
 func (this *File) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -82,7 +124,14 @@ func (this *File) IDEL(ctx *gin.Context) {
 	}
 }
 
-// INDEX - GET请求本体
+// INDEX - 文件管理首页
+// @Summary 文件管理首页
+// @Description 文件管理控制器首页（没什么用）
+// @Tags File
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Router /api/file [get]
 func (this *File) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 200)
 }

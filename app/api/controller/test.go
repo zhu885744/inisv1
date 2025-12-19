@@ -3,21 +3,41 @@ package controller
 import (
 	"context"
 	"fmt"
+
 	// JWT "github.com/dgrijalva/jwt-go"
+	"inis/app/facade"
+	"mime/multipart"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-pay/gopay"
 	"github.com/go-pay/gopay/alipay"
 	"github.com/google/uuid"
-	"inis/app/facade"
-	"mime/multipart"
-	"strings"
 )
 
+// Test - 测试控制器
+// @Summary 测试API控制器
+// @Description 提供各种测试功能的API接口
+// @Tags Test
 type Test struct {
 	// 继承
 	base
 }
 
+// @Summary 获取测试数据
+// @Description 根据不同方法获取测试相关数据
+// @Tags Test
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(request, alipay)
+// @Param id query int false "ID"
+// @Param where query string false "查询条件"
+// @Param or query string false "或条件"
+// @Param like query string false "模糊查询"
+// @Param cache query string false "是否使用缓存"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/test/{method} [get]
 // IGET - GET请求本体
 func (this *Test) IGET(ctx *gin.Context) {
 	// 转小写
@@ -35,6 +55,20 @@ func (this *Test) IGET(ctx *gin.Context) {
 	}
 }
 
+// @Summary 提交测试数据
+// @Description 根据不同方法提交测试相关数据
+// @Tags Test
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(return-url, notify-url, request, upload)
+// @Param id query int false "ID"
+// @Param where query string false "查询条件"
+// @Param or query string false "或条件"
+// @Param like query string false "模糊查询"
+// @Param file formData file false "上传文件"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/test/{method} [post]
 // IPOST - POST请求本体
 func (this *Test) IPOST(ctx *gin.Context) {
 
@@ -55,6 +89,19 @@ func (this *Test) IPOST(ctx *gin.Context) {
 	}
 }
 
+// @Summary 更新测试数据
+// @Description 根据不同方法更新测试相关数据
+// @Tags Test
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(request)
+// @Param id query int false "ID"
+// @Param where query string false "查询条件"
+// @Param or query string false "或条件"
+// @Param like query string false "模糊查询"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/test/{method} [put]
 // IPUT - PUT请求本体
 func (this *Test) IPUT(ctx *gin.Context) {
 	// 转小写
@@ -71,6 +118,19 @@ func (this *Test) IPUT(ctx *gin.Context) {
 	}
 }
 
+// @Summary 删除测试数据
+// @Description 根据不同方法删除测试相关数据
+// @Tags Test
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(request)
+// @Param id query int false "ID"
+// @Param where query string false "查询条件"
+// @Param or query string false "或条件"
+// @Param like query string false "模糊查询"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/test/{method} [delete]
 // IDEL - DELETE请求本体
 func (this *Test) IDEL(ctx *gin.Context) {
 	// 转小写
@@ -87,6 +147,13 @@ func (this *Test) IDEL(ctx *gin.Context) {
 	}
 }
 
+// @Summary 测试首页
+// @Description 测试控制器首页接口
+// @Tags Test
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Router /api/test [get]
 // INDEX - GET请求本体
 func (this *Test) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "好的！"), 200)

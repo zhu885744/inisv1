@@ -2,16 +2,17 @@ package facade
 
 import (
 	"fmt"
+	"reflect"
+	"regexp"
+	"strings"
+	"time"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
-	"reflect"
-	"regexp"
-	"strings"
-	"time"
 )
 
 var MySQL *MySqlStruct
@@ -29,8 +30,8 @@ func (this *MySqlStruct) init() {
 	username := cast.ToString(DBToml.Get("mysql.username", ""))
 	database := cast.ToString(DBToml.Get("mysql.database", ""))
 	password := cast.ToString(DBToml.Get("mysql.password", ""))
-	charset  := cast.ToString(DBToml.Get("mysql.charset", "utf8mb4"))
-	prefix   := cast.ToString(DBToml.Get("mysql.prefix", "inis_"))
+	charset := cast.ToString(DBToml.Get("mysql.charset", "utf8mb4"))
+	prefix := cast.ToString(DBToml.Get("mysql.prefix", "inis_"))
 
 	conn, err := gorm.Open(mysql.New(mysql.Config{
 		DSN: fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Local", username, password, hostname, hostport, database, charset),
@@ -903,7 +904,7 @@ func (this *ModelStruct) Inc(column any, step ...int) *ModelStruct {
 		size = step[0]
 	}
 
-	this.model.UpdateColumn("`" + cast.ToString(column) + "`", gorm.Expr("`" + cast.ToString(column) + "` + ?", size))
+	this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` + ?", size))
 
 	return this
 }
@@ -917,7 +918,7 @@ func (this *ModelStruct) Dec(column any, step ...int) *ModelStruct {
 		size = step[0]
 	}
 
-	this.model.UpdateColumn("`" + cast.ToString(column) + "`", gorm.Expr("`" + cast.ToString(column) + "` - ?", size))
+	this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` - ?", size))
 
 	return this
 }

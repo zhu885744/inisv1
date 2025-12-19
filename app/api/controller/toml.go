@@ -3,6 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"inis/app/facade"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+
 	AliYunClient "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	AliYunUtil "github.com/alibabacloud-go/openapi-util/service"
 	AliYunUtilV2 "github.com/alibabacloud-go/tea-utils/v2/service"
@@ -19,20 +26,27 @@ import (
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/unti-io/go-utils/utils"
 	"gopkg.in/gomail.v2"
-	"inis/app/facade"
-	"net/http"
-	"net/url"
-	"regexp"
-	"strings"
-	"time"
 )
 
+// Toml - 配置管理控制器
+// @Summary 配置管理API
+// @Description 提供系统配置相关的API接口，包括短信、缓存、加密、存储等配置管理
+// @Tags Config
 type Toml struct {
 	// 继承
 	base
 }
 
-// IGET - GET请求本体
+// IGET - 获取配置信息
+// @Summary 获取配置信息
+// @Description 根据不同方法获取系统配置相关数据
+// @Tags Config
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名" Enums(log, sms, cache, crypt, storage)
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/toml/{method} [get]
 func (this *Toml) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -52,20 +66,29 @@ func (this *Toml) IGET(ctx *gin.Context) {
 	}
 }
 
-// IPOST - POST请求本体
+// IPOST - 测试配置服务
+// @Summary 测试配置服务
+// @Description 测试系统配置相关服务（短信、Redis、存储等）
+// @Tags Config
+// @Accept multipart/form-data
+// @Produce json
+// @Param method path string true "方法名" Enums(test-sms-email, test-sms-aliyun, test-sms-tencent, test-redis, test-oss, test-cos, test-kodo)
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/toml/{method} [post]
 func (this *Toml) IPOST(ctx *gin.Context) {
 
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"test-sms-email"  : this.testSMSEmail,
-		"test-sms-aliyun" : this.testSMSAliyun,
+		"test-sms-email":   this.testSMSEmail,
+		"test-sms-aliyun":  this.testSMSAliyun,
 		"test-sms-tencent": this.testSMSTencent,
-		"test-redis"	  : this.testRedis,
-		"test-oss"		  : this.testOSS,
-		"test-cos"		  : this.testCOS,
-		"test-kodo"	  	  : this.testKODO,
+		"test-redis":       this.testRedis,
+		"test-oss":         this.testOSS,
+		"test-cos":         this.testCOS,
+		"test-kodo":        this.testKODO,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -75,13 +98,22 @@ func (this *Toml) IPOST(ctx *gin.Context) {
 	}
 }
 
-// IPUT - PUT请求本体
+// IPUT - 更新配置信息
+// @Summary 更新配置信息
+// @Description 更新系统配置相关数据（短信、加密、缓存、存储等）
+// @Tags Config
+// @Accept multipart/form-data
+// @Produce json
+// @Param method path string true "方法名" Enums(sms, sms-email, sms-aliyun, sms-tencent, sms-drive, crypt-jwt, cache-default, cache-redis, cache-file, cache-ram, storage-default, storage-local, storage-oss, storage-cos, storage-kodo)
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/toml/{method} [put]
 func (this *Toml) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"sms":     	       this.putSMS,
+		"sms":             this.putSMS,
 		"sms-email":       this.putSMSEmail,
 		"sms-aliyun":      this.putSMSAliyun,
 		"sms-tencent":     this.putSMSTencent,
@@ -105,13 +137,21 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 	}
 }
 
-// IDEL - DELETE请求本体
+// IDEL - 删除配置信息
+// @Summary 删除配置信息
+// @Description 删除系统配置相关数据（当前暂不支持）
+// @Tags Config
+// @Accept json
+// @Produce json
+// @Param method path string true "方法名"
+// @Success 200 {object} map[string]interface{} "成功响应"
+// @Failure 405 {object} map[string]interface{} "方法调用错误"
+// @Router /api/toml/{method} [delete]
 func (this *Toml) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
-	allow := map[string]any{
-	}
+	allow := map[string]any{}
 	err := this.call(allow, method, ctx)
 
 	if err != nil {
@@ -120,7 +160,14 @@ func (this *Toml) IDEL(ctx *gin.Context) {
 	}
 }
 
-// INDEX - GET请求本体
+// INDEX - 配置管理首页
+// @Summary 配置管理首页
+// @Description 配置管理控制器首页（没什么用）
+// @Tags Config
+// @Accept json
+// @Produce json
+// @Success 202 {object} map[string]interface{} "成功响应"
+// @Router /api/toml [get]
 func (this *Toml) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
@@ -198,7 +245,7 @@ func (this *Toml) getCache(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 允许的查询范围
-	field := []any{"redis","file","ram"}
+	field := []any{"redis", "file", "ram"}
 
 	item := facade.CacheToml
 	if item.Error != nil {
@@ -218,7 +265,7 @@ func (this *Toml) getCache(ctx *gin.Context) {
 	}
 
 	result := cast.ToStringMap(item.Get(cast.ToString(params["name"])))
-	result["open"]    = cast.ToBool(item.Get("open"))
+	result["open"] = cast.ToBool(item.Get("open"))
 	result["default"] = item.Get("default")
 
 	// 获取指定
@@ -326,7 +373,7 @@ func (this *Toml) putSMSDrive(ctx *gin.Context) {
 		"default": "email",
 	})
 
-	opts  := make(map[string]any)
+	opts := make(map[string]any)
 	allow := []any{"email", "sms", "default"}
 
 	for key, value := range params {
@@ -456,9 +503,9 @@ func (this *Toml) putSMSAliyun(ctx *gin.Context) {
 	temp = utils.Replace(temp, map[string]any{
 		"${aliyun.access_key_id}":     params["access_key_id"],
 		"${aliyun.access_key_secret}": params["access_key_secret"],
-		"${aliyun.endpoint}":  		   params["endpoint"],
-		"${aliyun.sign_name}":  	   params["sign_name"],
-		"${aliyun.verify_code}": 	   params["verify_code"],
+		"${aliyun.endpoint}":          params["endpoint"],
+		"${aliyun.sign_name}":         params["sign_name"],
+		"${aliyun.verify_code}":       params["verify_code"],
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -523,12 +570,12 @@ func (this *Toml) putSMSTencent(ctx *gin.Context) {
 	temp := facade.TempSMS
 	temp = utils.Replace(temp, map[string]any{
 		"${tencent.secret_id}":      params["secret_id"],
-		"${tencent.secret_key}": 	 params["secret_key"],
-		"${tencent.endpoint}":  	 params["endpoint"],
+		"${tencent.secret_key}":     params["secret_key"],
+		"${tencent.endpoint}":       params["endpoint"],
 		"${tencent.sms_sdk_app_id}": params["sms_sdk_app_id"],
-		"${tencent.sign_name}":		 params["sign_name"],
-		"${tencent.verify_code}":	 params["verify_code"],
-		"${tencent.region}":		 params["region"],
+		"${tencent.sign_name}":      params["sign_name"],
+		"${tencent.verify_code}":    params["verify_code"],
+		"${tencent.region}":         params["region"],
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -604,7 +651,7 @@ func (this *Toml) testSMSEmail(ctx *gin.Context) {
 
 	item := gomail.NewMessage()
 	nickname := cast.ToString(params["nickname"])
-	account  := cast.ToString(params["account"])
+	account := cast.ToString(params["account"])
 	item.SetHeader("From", nickname+"<"+account+">")
 	// 发送给多个用户
 	item.SetHeader("To", cast.ToString(params["email"]))
@@ -798,10 +845,10 @@ func (this *Toml) putCryptJWT(ctx *gin.Context) {
 
 	temp := facade.TempCrypt
 	temp = utils.Replace(temp, map[string]any{
-		"${jwt.key}":      params["key"],
-		"${jwt.expire}":   params["expire"],
-		"${jwt.issuer}":   params["issuer"],
-		"${jwt.subject}":  params["subject"],
+		"${jwt.key}":     params["key"],
+		"${jwt.expire}":  params["expire"],
+		"${jwt.issuer}":  params["issuer"],
+		"${jwt.subject}": params["subject"],
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -878,17 +925,17 @@ func (this *Toml) putCacheFile(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx, map[string]any{
-		"path":     "runtime/cache",
-		"prefix":   "inis_",
-		"expire":   "2 * 60 * 60",
+		"path":   "runtime/cache",
+		"prefix": "inis_",
+		"expire": "2 * 60 * 60",
 	})
 
 	temp := facade.TempCache
 	temp = utils.Replace(temp, map[string]any{
-		"${file.path}":     params["path"],
-		"${file.prefix}":   params["prefix"],
-		"${file.expire}":   params["expire"],
-		"${open}":          cast.ToBool(facade.CacheToml.Get("open")),
+		"${file.path}":   params["path"],
+		"${file.prefix}": params["prefix"],
+		"${file.expire}": params["expire"],
+		"${open}":        cast.ToBool(facade.CacheToml.Get("open")),
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -914,13 +961,13 @@ func (this *Toml) putCacheRam(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx, map[string]any{
-		"expire":   "2 * 60 * 60",
+		"expire": "2 * 60 * 60",
 	})
 
 	temp := facade.TempCache
 	temp = utils.Replace(temp, map[string]any{
-		"${ram.expire}":   params["expire"],
-		"${open}":         cast.ToBool(facade.CacheToml.Get("open")),
+		"${ram.expire}": params["expire"],
+		"${open}":       cast.ToBool(facade.CacheToml.Get("open")),
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -987,7 +1034,7 @@ func (this *Toml) putCacheDefault(ctx *gin.Context) {
 		"open":  "false",
 	})
 
-	allow := []any{"redis","file","ram"}
+	allow := []any{"redis", "file", "ram"}
 
 	if !utils.In.Array(params["value"], allow) {
 		this.json(ctx, nil, facade.Lang(ctx, "value 只允许是 redis、file、ram ！"), 400)
@@ -1070,7 +1117,7 @@ func (this *Toml) putStorageLocal(ctx *gin.Context) {
 	temp := facade.TempStorage
 	temp = utils.Replace(temp, map[string]any{
 		"${local.domain}": params["domain"],
-		"${local.path}"  : params["path"],
+		"${local.path}":   params["path"],
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -1112,8 +1159,8 @@ func (this *Toml) testOSS(ctx *gin.Context) {
 		return
 	}
 
-	id       := cast.ToString(params["access_key_id"])
-	secret   := cast.ToString(params["access_key_secret"])
+	id := cast.ToString(params["access_key_id"])
+	secret := cast.ToString(params["access_key_secret"])
 	endpoint := cast.ToString(params["endpoint"])
 
 	client, err := oss.New(endpoint, id, secret)
@@ -1165,12 +1212,12 @@ func (this *Toml) putStorageOSS(ctx *gin.Context) {
 
 	temp := facade.TempStorage
 	temp = utils.Replace(temp, map[string]any{
-		"${oss.access_key_id}": 	cast.ToString(params["access_key_id"]),
+		"${oss.access_key_id}":     cast.ToString(params["access_key_id"]),
 		"${oss.access_key_secret}": cast.ToString(params["access_key_secret"]),
-		"${oss.endpoint}": 			cast.ToString(params["endpoint"]),
-		"${oss.bucket}": 			cast.ToString(params["bucket"]),
-		"${oss.domain}": 			cast.ToString(params["domain"]),
-		"${oss.path}"  : 			cast.ToString(params["path"]),
+		"${oss.endpoint}":          cast.ToString(params["endpoint"]),
+		"${oss.bucket}":            cast.ToString(params["bucket"]),
+		"${oss.domain}":            cast.ToString(params["domain"]),
+		"${oss.path}":              cast.ToString(params["path"]),
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -1222,11 +1269,11 @@ func (this *Toml) testCOS(ctx *gin.Context) {
 		return
 	}
 
-	appId     := cast.ToString(params["app_id"])
-	secretId  := cast.ToString(params["secret_id"])
+	appId := cast.ToString(params["app_id"])
+	secretId := cast.ToString(params["secret_id"])
 	secretKey := cast.ToString(params["secret_key"])
-	bucket    := cast.ToString(params["bucket"])
-	region    := cast.ToString(params["region"])
+	bucket := cast.ToString(params["bucket"])
+	region := cast.ToString(params["region"])
 
 	BucketURL, err := url.Parse(fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com", bucket, appId, region))
 	if err != nil {
@@ -1296,11 +1343,11 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 	temp = utils.Replace(temp, map[string]any{
 		"${cos.secret_id}":  cast.ToString(params["secret_id"]),
 		"${cos.secret_key}": cast.ToString(params["secret_key"]),
-		"${cos.app_id}": 	 cast.ToString(params["app_id"]),
-		"${cos.bucket}": 	 cast.ToString(params["bucket"]),
-		"${cos.region}": 	 cast.ToString(params["region"]),
-		"${cos.domain}": 	 cast.ToString(params["domain"]),
-		"${cos.path}"  : 	 cast.ToString(params["path"]),
+		"${cos.app_id}":     cast.ToString(params["app_id"]),
+		"${cos.bucket}":     cast.ToString(params["bucket"]),
+		"${cos.region}":     cast.ToString(params["region"]),
+		"${cos.domain}":     cast.ToString(params["domain"]),
+		"${cos.path}":       cast.ToString(params["path"]),
 	})
 
 	// 正则匹配出所有的 ${?} 字符串
@@ -1394,11 +1441,11 @@ func (this *Toml) putStorageKODO(ctx *gin.Context) {
 
 	temp := facade.TempStorage
 	temp = utils.Replace(temp, map[string]any{
-		"${kodo.access_key}":  cast.ToString(params["access_key"]),
-		"${kodo.secret_key}":  cast.ToString(params["secret_key"]),
-		"${kodo.bucket}": 	   cast.ToString(params["bucket"]),
-		"${kodo.region}": 	   cast.ToString(params["region"]),
-		"${kodo.domain}": 	   cast.ToString(params["domain"]),
+		"${kodo.access_key}": cast.ToString(params["access_key"]),
+		"${kodo.secret_key}": cast.ToString(params["secret_key"]),
+		"${kodo.bucket}":     cast.ToString(params["bucket"]),
+		"${kodo.region}":     cast.ToString(params["region"]),
+		"${kodo.domain}":     cast.ToString(params["domain"]),
 	})
 
 	// 正则匹配出所有的 ${?} 字符串

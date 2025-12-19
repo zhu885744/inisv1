@@ -1,0 +1,1209 @@
+basePath: /api/
+host: localhost:8000
+info:
+  contact:
+    email: 97783391@qq.com
+    name: 兔子 or racns
+    url: https://github.com/racns/inis
+  description: 基于Gin框架和Gorm二次封装的Go语言Web开发框架
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: inis CMS API
+  version: "1.0"
+paths:
+  /api/comm:
+    get:
+      consumes:
+      - application/json
+      description: 通用控制器首页接口
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 通用首页
+      tags:
+      - Common
+  /api/comm/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 根据不同方法删除通用相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - logout
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除通用数据
+      tags:
+      - Common
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取通用相关数据
+      parameters:
+      - description: 方法名
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      - description: 是否使用缓存
+        in: query
+        name: cache
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取通用数据
+      tags:
+      - Common
+    post:
+      consumes:
+      - application/json
+      description: 根据不同方法提交通用相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - login
+        - register
+        - social-login
+        - check-token
+        - reset-password
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      - description: 账号
+        in: formData
+        name: account
+        type: string
+      - description: 密码
+        in: formData
+        name: password
+        type: string
+      - description: 邮箱
+        in: formData
+        name: email
+        type: string
+      - description: 手机号
+        in: formData
+        name: phone
+        type: string
+      - description: 社交账号（邮箱或手机号）
+        in: formData
+        name: social
+        type: string
+      - description: 验证码
+        in: formData
+        name: code
+        type: string
+      - description: 昵称
+        in: formData
+        name: nickname
+        type: string
+      - description: 头像
+        in: formData
+        name: avatar
+        type: string
+      - description: 描述
+        in: formData
+        name: description
+        type: string
+      - description: 来源
+        in: formData
+        name: source
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 提交通用数据
+      tags:
+      - Common
+    put:
+      consumes:
+      - application/json
+      description: 根据不同方法更新通用相关数据
+      parameters:
+      - description: 方法名
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新通用数据
+      tags:
+      - Common
+  /api/exp/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 根据不同方法删除或清空EXP相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - remove
+        - delete
+        - clear
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID列表（逗号分隔）
+        in: body
+        name: ids
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 无权限
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除EXP数据
+      tags:
+      - EXP
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取EXP相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - one
+        - all
+        - sum
+        - min
+        - max
+        - rand
+        - count
+        - column
+        - active
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      - description: 是否使用缓存
+        in: query
+        name: cache
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取EXP数据
+      tags:
+      - EXP
+    post:
+      consumes:
+      - application/json
+      description: 根据不同方法创建或保存EXP相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - save
+        - create
+        - like
+        - share
+        - collect
+        - check-in
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID（更新时需要）
+        in: body
+        name: id
+        schema:
+          type: integer
+      - description: 值
+        in: body
+        name: value
+        schema:
+          type: string
+      - description: 类型
+        in: body
+        name: type
+        schema:
+          type: string
+      - description: 描述
+        in: body
+        name: description
+        schema:
+          type: string
+      - description: JSON数据
+        in: body
+        name: json
+        schema:
+          type: string
+      - description: 文本数据
+        in: body
+        name: text
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 未登录
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建/保存EXP数据
+      tags:
+      - EXP
+    put:
+      consumes:
+      - application/json
+      description: 根据不同方法更新EXP相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - update
+        - restore
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: body
+        name: id
+        required: true
+        schema:
+          type: integer
+      - description: 值
+        in: body
+        name: value
+        schema:
+          type: string
+      - description: 类型
+        in: body
+        name: type
+        schema:
+          type: string
+      - description: 描述
+        in: body
+        name: description
+        schema:
+          type: string
+      - description: JSON数据
+        in: body
+        name: json
+        schema:
+          type: string
+      - description: 文本数据
+        in: body
+        name: text
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 无权限
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新EXP数据
+      tags:
+      - EXP
+  /api/file:
+    get:
+      consumes:
+      - application/json
+      description: 文件管理控制器首页（没什么用）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 文件管理首页
+      tags:
+      - File
+  /api/file/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除文件（当前暂不支持）
+      parameters:
+      - description: 方法名
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除文件
+      tags:
+      - File
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取文件相关数据（随机图、转base64等）
+      parameters:
+      - description: 方法名
+        enum:
+        - rand
+        - to-base64
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取文件相关信息
+      tags:
+      - File
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传文件到服务器（支持图片、文档、压缩包、音视频等多种类型）
+      parameters:
+      - description: 方法名
+        enum:
+        - upload
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: 要上传的文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应，包含文件路径
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 上传文件
+      tags:
+      - File
+    put:
+      consumes:
+      - application/json
+      description: 更新文件相关数据（当前暂不支持）
+      parameters:
+      - description: 方法名
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新文件信息
+      tags:
+      - File
+  /api/tags/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 软删除、真实删除标签或清空回收站
+      parameters:
+      - description: 方法名
+        enum:
+        - remove
+        - delete
+        - clear
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: 标签ID列表（逗号分隔）
+        in: formData
+        name: ids
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除标签
+      tags:
+      - Tags
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取标签相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - one
+        - all
+        - sum
+        - min
+        - max
+        - rand
+        - count
+        - column
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: 标签ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 排序方式
+        in: query
+        name: order
+        type: string
+      - description: 字段过滤
+        in: query
+        name: field
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取标签数据
+      tags:
+      - Tags
+    post:
+      consumes:
+      - application/json
+      description: 创建新标签或保存标签数据（包含创建和更新）
+      parameters:
+      - description: 方法名
+        enum:
+        - save
+        - create
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: 标签名称
+        in: formData
+        name: name
+        required: true
+        type: string
+      - description: 标签描述
+        in: formData
+        name: description
+        type: string
+      - description: 标签头像
+        in: formData
+        name: avatar
+        type: string
+      - description: JSON数据
+        in: formData
+        name: json
+        type: string
+      - description: 文本数据
+        in: formData
+        name: text
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应，包含标签ID
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建/保存标签
+      tags:
+      - Tags
+    put:
+      consumes:
+      - application/json
+      description: 更新标签数据或恢复已删除的标签
+      parameters:
+      - description: 方法名
+        enum:
+        - update
+        - restore
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: 标签ID
+        in: formData
+        name: id
+        required: true
+        type: integer
+      - description: 标签名称
+        in: formData
+        name: name
+        type: string
+      - description: 标签描述
+        in: formData
+        name: description
+        type: string
+      - description: 标签头像
+        in: formData
+        name: avatar
+        type: string
+      - description: JSON数据
+        in: formData
+        name: json
+        type: string
+      - description: 文本数据
+        in: formData
+        name: text
+        type: string
+      - description: 标签ID列表（用于恢复）
+        in: formData
+        name: ids
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新/恢复标签
+      tags:
+      - Tags
+  /api/tags/index:
+    get:
+      consumes:
+      - application/json
+      description: 标签模块的索引接口（无实际功能）
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 响应信息
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 标签索引接口
+      tags:
+      - Tags
+  /api/test:
+    get:
+      consumes:
+      - application/json
+      description: 测试控制器首页接口
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 测试首页
+      tags:
+      - Test
+  /api/test/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 根据不同方法删除测试相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - request
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除测试数据
+      tags:
+      - Test
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取测试相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - request
+        - alipay
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      - description: 是否使用缓存
+        in: query
+        name: cache
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取测试数据
+      tags:
+      - Test
+    post:
+      consumes:
+      - application/json
+      description: 根据不同方法提交测试相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - return-url
+        - notify-url
+        - request
+        - upload
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      - description: 上传文件
+        in: formData
+        name: file
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 提交测试数据
+      tags:
+      - Test
+    put:
+      consumes:
+      - application/json
+      description: 根据不同方法更新测试相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - request
+        in: path
+        name: method
+        required: true
+        type: string
+      - description: ID
+        in: query
+        name: id
+        type: integer
+      - description: 查询条件
+        in: query
+        name: where
+        type: string
+      - description: 或条件
+        in: query
+        name: or
+        type: string
+      - description: 模糊查询
+        in: query
+        name: like
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新测试数据
+      tags:
+      - Test
+  /api/toml:
+    get:
+      consumes:
+      - application/json
+      description: 配置管理控制器首页（没什么用）
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 配置管理首页
+      tags:
+      - Config
+  /api/toml/{method}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除系统配置相关数据（当前暂不支持）
+      parameters:
+      - description: 方法名
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除配置信息
+      tags:
+      - Config
+    get:
+      consumes:
+      - application/json
+      description: 根据不同方法获取系统配置相关数据
+      parameters:
+      - description: 方法名
+        enum:
+        - log
+        - sms
+        - cache
+        - crypt
+        - storage
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取配置信息
+      tags:
+      - Config
+    post:
+      consumes:
+      - multipart/form-data
+      description: 测试系统配置相关服务（短信、Redis、存储等）
+      parameters:
+      - description: 方法名
+        enum:
+        - test-sms-email
+        - test-sms-aliyun
+        - test-sms-tencent
+        - test-redis
+        - test-oss
+        - test-cos
+        - test-kodo
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 测试配置服务
+      tags:
+      - Config
+    put:
+      consumes:
+      - multipart/form-data
+      description: 更新系统配置相关数据（短信、加密、缓存、存储等）
+      parameters:
+      - description: 方法名
+        enum:
+        - sms
+        - sms-email
+        - sms-aliyun
+        - sms-tencent
+        - sms-drive
+        - crypt-jwt
+        - cache-default
+        - cache-redis
+        - cache-file
+        - cache-ram
+        - storage-default
+        - storage-local
+        - storage-oss
+        - storage-cos
+        - storage-kodo
+        in: path
+        name: method
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "405":
+          description: 方法调用错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新配置信息
+      tags:
+      - Config
+schemes:
+- http
+- https
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
