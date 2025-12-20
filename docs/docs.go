@@ -11,9 +11,9 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
-            "name": "兔子 or racns",
-            "url": "https://github.com/racns/inis",
-            "email": "97783391@qq.com"
+            "name": "不语",
+            "url": "https://github.com/zhu885744/inisv1/",
+            "email": "2776686748@qq.com"
         },
         "license": {
             "name": "Apache 2.0",
@@ -1764,10 +1764,10 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8000",
+	Host:             "",
 	BasePath:         "/api/",
 	Schemes:          []string{"http", "https"},
-	Title:            "inis CMS API",
+	Title:            "inis API",
 	Description:      "基于Gin框架和Gorm二次封装的Go语言Web开发框架",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

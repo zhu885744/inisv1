@@ -1,16 +1,16 @@
 basePath: /api/
-host: localhost:8000
+host: 
 info:
   contact:
-    email: 97783391@qq.com
-    name: 兔子 or racns
-    url: https://github.com/racns/inis
+    email: 2776686748@qq.com
+    name: 不语
+    url: https://github.com/zhu885744/inisv1/
   description: 基于Gin框架和Gorm二次封装的Go语言Web开发框架
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
   termsOfService: http://swagger.io/terms/
-  title: inis CMS API
+  title: inis API
   version: "1.0"
 paths:
   /api/comm:

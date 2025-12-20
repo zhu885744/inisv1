@@ -6,12 +6,12 @@
     "swagger": "2.0",
     "info": {
         "description": "基于Gin框架和Gorm二次封装的Go语言Web开发框架",
-        "title": "inis CMS API",
+        "title": "inis API",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
-            "name": "兔子 or racns",
-            "url": "https://github.com/racns/inis",
-            "email": "97783391@qq.com"
+            "name": "不语",
+            "url": "https://github.com/zhu885744/inisv1/",
+            "email": "2776686748@qq.com"
         },
         "license": {
             "name": "Apache 2.0",
@@ -19,7 +19,7 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8000",
+    "host": "",
     "basePath": "/api/",
     "paths": {
         "/api/comm": {

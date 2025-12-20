@@ -17,19 +17,19 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-// @title inis CMS API
+// @title inis API
 // @version 1.0
 // @description 基于Gin框架和Gorm二次封装的Go语言Web开发框架
 // @termsOfService http://swagger.io/terms/
 
-// @contact.name 兔子 or racns
-// @contact.url https://github.com/racns/inis
-// @contact.email 97783391@qq.com
+// @contact.name 不语
+// @contact.url https://github.com/zhu885744/inisv1
+// @contact.email 2776686748@qq.com
 
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 
-// @host localhost:8000
+// @host 
 // @BasePath /api/
 // @schemes http https
 
