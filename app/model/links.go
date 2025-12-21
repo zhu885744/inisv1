@@ -101,10 +101,10 @@ func initLinksData() {
 
 	array := []Links{
 		{
-			Nickname:    "兔子",
-			Description: "许一人，以偏爱，尽此生，之慷慨！",
-			Url:         "https://inis.cn",
-			Avatar:      "https://q.qlogo.cn/g?b=qq&nk=97783391&s=640",
+			Nickname:    "朱某的生活印记",
+			Description: "没有销声匿迹，我在热爱生活",
+			Url:         "https://zhuxu.asia/",
+			Avatar:      "https://q1.qlogo.cn/g?b=qq&nk=2776686748&s=100",
 			Remark:      "如果可以，请不要删除我！开发不易，感谢支持！",
 		},
 	}
