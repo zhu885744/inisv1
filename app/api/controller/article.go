@@ -311,13 +311,13 @@ func (this *Article) create(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Article{Uid: uid, CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-	allow := []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text"}
+	allow := []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time"}
 
 	// 越权 - 增加可选字段
 	if this.meta.root(ctx) {
 		allow = append(allow, "top", "audit")
 	}
-
+    
 	// 是否开启了审核
 	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
 	// 更新审核状态
@@ -338,6 +338,13 @@ func (this *Article) create(ctx *gin.Context) {
 			utils.Struct.Set(&table, key, val)
 		}
 	}
+
+	// 处理 publish_time，若未传则默认使用当前时间
+	if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
+        utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
+    } else {
+        utils.Struct.Set(&table, "PublishTime", time.Now().Unix()) // 默认当前时间
+    }
 
 	// 添加数据
 	tx := facade.DB.Model(&table).Create(&table)
@@ -372,7 +379,7 @@ func (this *Article) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Article{}
-	allow := []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text"}
+	allow := []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time"}
 	async := utils.Async[map[string]any]()
 
 	root := this.meta.root(ctx)
@@ -401,6 +408,10 @@ func (this *Article) update(ctx *gin.Context) {
 			async.Set(key, val)
 		}
 	}
+
+    if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
+        async.Set("publish_time", cast.ToInt64(publishTime))
+    }
 
 	// 更新时间
 	async.Set("last_update", time.Now().Unix())

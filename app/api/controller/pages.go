@@ -80,23 +80,18 @@ func (this *Pages) IGET(ctx *gin.Context) {
 // @Failure 405 {object} map[string]interface{} "方法调用错误"
 // @Router /api/pages/{method} [post]
 func (this *Pages) IPOST(ctx *gin.Context) {
-
-	// 转小写
-	method := strings.ToLower(ctx.Param("method"))
-
-	allow := map[string]any{
-		"save":   this.save,
-		"create": this.create,
-	}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
-
-	// 删除缓存
-	go this.delCache()
+    method := strings.ToLower(ctx.Param("method"))
+    allow := map[string]any{
+        "save":   this.save,
+        "create": this.create,
+        "update": this.update,
+    }
+    err := this.call(allow, method, ctx)
+    if err != nil {
+        this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
+        return
+    }
+    go this.delCache() // 新增删除缓存方法
 }
 
 // IPUT - 更新/恢复页面数据
@@ -170,14 +165,6 @@ func (this *Pages) IDEL(ctx *gin.Context) {
 	go this.delCache()
 }
 
-// INDEX - 首页请求
-// @Summary 首页请求
-// @Description 首页默认请求处理
-// @Tags Pages
-// @Accept json
-// @Produce json
-// @Success 202 {object} map[string]interface{} "成功响应"
-// @Router /api/pages [get]
 func (this *Pages) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
@@ -399,9 +386,23 @@ func (this *Pages) create(ctx *gin.Context) {
 		return
 	}
 
-	// 表数据结构体
-	table := model.Pages{Uid: uid, CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix(), LastUpdate: time.Now().Unix()}
-	allow := []any{"key", "title", "content", "remark", "tags", "editor", "json", "text"}
+	// 处理发布时间：优先使用传入的publish_time，否则使用当前时间
+	publishTime := time.Now().Unix()
+	if pt, ok := params["publish_time"]; ok && cast.ToInt64(pt) > 0 {
+		publishTime = cast.ToInt64(pt)
+	}
+
+	// 表数据结构体（新增PublishTime字段）
+	table := model.Pages{
+		Uid:         uid,
+		CreateTime:  time.Now().Unix(),
+		UpdateTime:  time.Now().Unix(),
+		LastUpdate:  time.Now().Unix(),
+		PublishTime: publishTime, // 赋值发布时间
+	}
+	
+	// 允许的字段添加publish_time
+	allow := []any{"key", "title", "content", "remark", "tags", "editor", "json", "text", "publish_time"}
 
 	// 越权 - 增加可选字段
 	if this.meta.root(ctx) {
@@ -447,9 +448,9 @@ func (this *Pages) update(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
-		return
-	}
+        this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
+        return
+    }
 
 	// 验证器
 	err := validator.NewValid("pages", params)
@@ -462,8 +463,14 @@ func (this *Pages) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Pages{}
-	allow := []any{"key", "title", "content", "remark", "tags", "editor", "json", "text"}
+	// 允许更新的字段添加publish_time
+	allow := []any{"key", "title", "content", "remark", "tags", "editor", "json", "text", "publish_time"}
 	async := utils.Async[map[string]any]()
+
+	// 处理发布时间（如果有传入则更新）
+	if pt, ok := params["publish_time"]; ok && cast.ToInt64(pt) > 0 {
+		async.Set("publish_time", cast.ToInt64(pt))
+	}
 
 	// 越权 - 增加可选字段
 	if this.meta.root(ctx) {
@@ -494,7 +501,7 @@ func (this *Pages) update(ctx *gin.Context) {
 	// 更新时间
 	async.Set("last_update", time.Now().Unix())
 
-	// 更新数据 - Scan() 方法用于将数据扫描到结构体中，使用的位置很重要
+	// 更新数据
 	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
 	if tx.Error != nil {

@@ -25,6 +25,7 @@ type Pages struct {
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
 	Result     any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	PublishTime int64                `gorm:"comment:发布时间; default:0;" json:"publish_time"`
 	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
