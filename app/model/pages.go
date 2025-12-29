@@ -16,7 +16,7 @@ type Pages struct {
 	Key        string 				 `gorm:"size:256; comment:唯一键; default:Null;" json:"key"`
 	Title      string 				 `gorm:"size:256; comment:标题; default:Null;" json:"title"`
 	Content    string 				 `gorm:"type:longtext; comment:内容; default:Null;" json:"content"`
-	Editor     string 				 `gorm:"comment:编辑器; default:'tinymce';" json:"editor"`
+	Editor     string 				 `gorm:"comment:编辑器; default:'vditor';" json:"editor"`
 	Tags 	   string  				 `gorm:"comment:标签; default:Null;" json:"tags"`
 	Remark     string 				 `gorm:"comment:备注; default:Null;" json:"remark"`
 	Audit	   int    				 `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`

@@ -891,7 +891,7 @@ func (this *EXP) checkIn(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"value": 30}, facade.Lang(ctx, "签到成功！"), 200)
+	this.json(ctx, gin.H{"value": 10}, facade.Lang(ctx, "签到成功！"), 200)
 }
 
 // share 分享

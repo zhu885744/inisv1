@@ -22,7 +22,6 @@ func (this *OAuth) IGET(ctx *gin.Context) {
 	allow := map[string]any{
 		"qq":     this.qq,
 		"github": this.github,
-		"google": this.google,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -194,11 +193,4 @@ func (this *OAuth) github(ctx *gin.Context) {
 			this.json(ctx, user.Json, "登录成功！", 200)
 		}
 	}
-}
-
-// google - google登录 - 未完成
-func (this *OAuth) google(ctx *gin.Context) {
-	clientId := "239457649289-1meff8lsn920gv5i3kug0gef8olgbitg.apps.googleusercontent.com"
-	clientKey := "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"
-	fmt.Println(clientId, clientKey)
 }

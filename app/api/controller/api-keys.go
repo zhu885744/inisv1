@@ -717,7 +717,7 @@ func (this *ApiKeys) remove(ctx *gin.Context) {
 			})
 			if res.Error == nil {
 				go facade.Cache.DelTags("SYSTEM_API_KEY")
-				this.json(ctx, nil, facade.Lang(ctx, "删除成功！<br>同时检测到您开启了API_KEY，但无密钥可用。<br>兔子已为您自动关闭API_KEY功能！"), 200)
+				this.json(ctx, nil, facade.Lang(ctx, "删除成功！<br>同时检测到您开启了API_KEY，但无密钥可用。<br>系统已为您自动关闭API_KEY功能！"), 200)
 				return
 			}
 		}
