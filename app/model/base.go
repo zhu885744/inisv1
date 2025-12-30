@@ -2,10 +2,11 @@ package model
 
 import (
 	"fmt"
+	"inis/app/facade"
+
 	"github.com/jasonlvhit/gocron"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"inis/app/facade"
 )
 
 func task() {
@@ -45,6 +46,8 @@ func InitTable() {
 		InitEXP,
 		InitQpsWarn,
 		InitIpBlack,
+		InitAlbum,
+		InitAlbumGroup,
 	}
 
 	for _, fn := range allow {

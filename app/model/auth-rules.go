@@ -103,6 +103,32 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
+		// 相册模块规则
+		"album": {
+			"GET": {
+				"path=one&type=common",
+				"path=all&type=common",
+				"path=sum&type=common",
+				"path=min&type=common",
+				"path=max&type=common",
+				"path=rand&type=common",
+				"path=count&type=common",
+				"path=column&type=common",
+			},
+			"PUT": {
+				"update",
+				"restore",
+			},
+			"POST": {
+				"save",
+				"create",
+			},
+			"DELETE": {
+				"remove",
+				"delete",
+				"clear",
+			},
+		},
 		"toml": {
 			"GET": {
 				"path=sms&name=获取SMS服务配置",
@@ -421,6 +447,7 @@ func createAuthRules() (result []AuthRules) {
 		"placard":       "【公告 API】",
 		"config":        "【配置 API】",
 		"upgrade":       "【升级 API】",
+		"album":         "【相册 API】",
 		"toml":          "【服务配置 API】",
 		"ip-black":	     "【IP黑名单 API】",
 		"qps-warn":   	 "【QPS预警 API】",
