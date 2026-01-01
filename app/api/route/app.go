@@ -49,8 +49,6 @@ func Route(Gin *gin.Engine) {
 		"auth-rules":    &controller.AuthRules{},
 		"links-group":   &controller.LinksGroup{},
 		"article-group": &controller.ArticleGroup{},
-		"album":         &controller.Album{},
-		"album-group":   &controller.AlbumGroup{},
 	}
 
 	// 动态配置路由
