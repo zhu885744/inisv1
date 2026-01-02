@@ -710,6 +710,12 @@ func (this *Users) remove(ctx *gin.Context) {
 		return
 	}
 
+	// 检查是否为系统管理员
+	if utils.In.Array(1, ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员账户！"), 403)
+		return
+	}
+
 	if utils.In.Array(this.meta.user(ctx).Id, ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能删除自己！"), 400)
 		return
@@ -753,6 +759,12 @@ func (this *Users) delete(ctx *gin.Context) {
 		return
 	}
 
+	// 检查是否为系统管理员
+	if utils.In.Array(1, ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员账户！"), 403)
+		return
+	}
+
 	if utils.In.Array(this.meta.user(ctx).Id, ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能删除自己！"), 400)
 		return
@@ -786,7 +798,14 @@ func (this *Users) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Users{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
+
+	// 检查回收站中是否包含系统管理员的账户
+	hasAdmin := item.Where("id", 1).Exist()
+	if hasAdmin {
+		this.json(ctx, nil, facade.Lang(ctx, "回收站中包含系统管理员账户，禁止清空！"), 403)
+		return
+	}
 
 	ids := utils.Unity.Ids(item.Column("id"))
 
@@ -1005,6 +1024,12 @@ func (this *Users) destroy(ctx *gin.Context) {
 	// 即便中间件已经校验过登录了，这里还进行二次校验是未了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
 	if user.Id == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	// 禁止系统管理员账号注销账户
+	if user.Id == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止注销系统管理员账户！"), 403)
 		return
 	}
 
