@@ -46,8 +46,6 @@ func InitTable() {
 		InitEXP,
 		InitQpsWarn,
 		InitIpBlack,
-		InitAlbum,
-		InitAlbumGroup,
 	}
 
 	for _, fn := range allow {

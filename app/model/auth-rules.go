@@ -72,7 +72,7 @@ func createAuthRules() (result []AuthRules) {
 	batch := map[string]map[string][]string{
 		"test": {
 			"GET":    {
-				"path=&name=兔子专用&type=common",
+				"path=&name=测试专用&type=common",
 				"path=request&name=测试GET请求&type=common",
 			},
 			"PUT":    {"path=request&name=测试GET请求&type=common"},
@@ -102,32 +102,6 @@ func createAuthRules() (result []AuthRules) {
 				"path=reset-password&name=重置密码&type=common",
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
-		},
-		// 相册模块规则
-		"album": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT": {
-				"update",
-				"restore",
-			},
-			"POST": {
-				"save",
-				"create",
-			},
-			"DELETE": {
-				"remove",
-				"delete",
-				"clear",
-			},
 		},
 		"toml": {
 			"GET": {
@@ -195,6 +169,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=update&type=login",
 				"path=email&type=login&name=修改邮箱",
 				"path=phone&type=login&name=修改手机号",
+				"path=status&type=login&name=修改用户状态",
 			},
 			"POST":   {
 				"create", "save",
@@ -447,7 +422,6 @@ func createAuthRules() (result []AuthRules) {
 		"placard":       "【公告 API】",
 		"config":        "【配置 API】",
 		"upgrade":       "【升级 API】",
-		"album":         "【相册 API】",
 		"toml":          "【服务配置 API】",
 		"ip-black":	     "【IP黑名单 API】",
 		"qps-warn":   	 "【QPS预警 API】",
@@ -524,22 +498,7 @@ func createAuthRules() (result []AuthRules) {
 			}
 		}
 	}
-
-	// 社区接口
-	inis := []AuthRules{
-		{ Method: "POST", Route: "/inis/device/bind", Name: "【社区 API】设备绑定", Type: "default" },
-		{ Method: "DELETE", Route: "/inis/device/bind", Name: "【社区 API】设备解绑", Type: "default" },
-		{ Method: "GET", Route: "/inis/device/user", Name: "【社区 API】绑定的用户信息", Type: "common" },
-		{ Method: "GET", Route: "/inis/theme-version/next", Name: "【社区 API】获取主题下个版本", Type: "common" },
-		{ Method: "GET", Route: "/inis/theme-version/download", Name: "【社区 API】获取主题下载地址", Type: "default" },
-		{ Method: "GET", Route: "/inis/system-version/next", Name: "【社区 API】获取系统下个版本", Type: "common" },
-		{ Method: "GET", Route: "/inis/system-version/download", Name: "【社区 API】获取系统下载地址", Type: "default" },
-		{ Method: "GET", Route: "/inis/order/theme", Name: "【社区 API】查询已购的指定主题", Type: "common" },
-		{ Method: "GET", Route: "/inis/order/themes", Name: "【社区 API】查询已购的全部主题", Type: "common" },
-		{ Method: "GET", Route: "/inis/users/access-token", Name: "【社区 API】获取访问令牌", Type: "default" },
-	}
-
-	return append(result, inis...)
+	return
 }
 
 // saveAuthRules 保存权限规则

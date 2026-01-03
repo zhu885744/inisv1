@@ -24,14 +24,14 @@ func (this *Users) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":    this.one,
-		"all":    this.all,
-		"sum":    this.sum,
-		"min":    this.min,
-		"max":    this.max,
-		"rand":   this.rand,
-		"count":  this.count,
-		"column": this.column,
+		"one":         this.one,
+		"all":         this.all,
+		"sum":         this.sum,
+		"min":         this.min,
+		"max":         this.max,
+		"rand":        this.rand,
+		"count":       this.count,
+		"column":      this.column,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -72,6 +72,7 @@ func (this *Users) IPUT(ctx *gin.Context) {
 		"restore": this.restore,
 		"email":   this.email,
 		"phone":   this.phone,
+		"status":  this.status, // 新增：状态修改接口
 	}
 	err := this.call(allow, method, ctx)
 
@@ -121,7 +122,7 @@ func (this *Users) delCache() {
 func (this *Users) one(ctx *gin.Context) {
 
 	code := 204
-	msg  := []string{"无数据！", ""}
+	msg := []string{"无数据！", ""}
 	var data any
 
 	// 获取请求参数
@@ -326,7 +327,7 @@ func (this *Users) create(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Users{CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-	allow := []any{"account", "password", "nickname", "email", "phone", "avatar", "description", "source", "remark", "title", "gender", "json", "text"}
+	allow := []any{"account", "password", "nickname", "email", "phone", "avatar", "description", "source", "remark", "title", "gender", "json", "text", "status"}
 
 	if utils.Is.Empty(params["email"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "邮箱不能为空！"), 400)
@@ -386,7 +387,7 @@ func (this *Users) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Users{}
-	allow := []any{"id", "account", "password", "nickname", "avatar", "description", "gender", "json", "text"}
+	allow := []any{"id", "account", "password", "nickname", "avatar", "description", "gender", "json", "text", "status"}
 	async := utils.Async[map[string]any]()
 
 	root := this.meta.root(ctx)
@@ -437,6 +438,61 @@ func (this *Users) update(ctx *gin.Context) {
 	facade.Cache.Del(fmt.Sprintf("user[%v]", params["id"]))
 
 	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+}
+
+// status 修改用户状态
+func (this *Users) status(ctx *gin.Context) {
+	// 获取请求参数
+	params := this.params(ctx)
+
+	// 验证ID和状态参数
+	if utils.Is.Empty(params["id"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
+		return
+	}
+	if utils.Is.Empty(params["status"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "status"), 400)
+		return
+	}
+
+	// 验证权限 - 只有管理员可以修改状态
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限修改用户状态！"), 403)
+		return
+	}
+
+	// 禁止修改系统管理员状态
+	userId := cast.ToInt(params["id"])
+	if userId == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止修改系统管理员状态！"), 403)
+		return
+	}
+
+	// 验证状态值是否合法
+	status := cast.ToInt(params["status"])
+	if status != 0 && status != 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "状态值必须为0或1！"), 400)
+		return
+	}
+
+	// 更新状态
+	table := model.Users{}
+	tx := facade.DB.Model(&table).Where("id", userId).UpdateColumn("status", status)
+	if tx.Error != nil {
+		this.json(ctx, nil, tx.Error.Error(), 400)
+		return
+	}
+
+	// 检查是否有数据被更新
+	if tx.RowsAffected == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "未找到用户或状态未变更！"), 204)
+		return
+	}
+
+	// 删除缓存
+	facade.Cache.Del(fmt.Sprintf("user[%v]", userId))
+
+	this.json(ctx, gin.H{"id": userId, "status": status}, facade.Lang(ctx, "状态更新成功！"), 200)
 }
 
 // count 统计数据
@@ -710,6 +766,12 @@ func (this *Users) remove(ctx *gin.Context) {
 		return
 	}
 
+	// 检查是否为系统管理员
+	if utils.In.Array(1, ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员账户！"), 403)
+		return
+	}
+
 	if utils.In.Array(this.meta.user(ctx).Id, ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能删除自己！"), 400)
 		return
@@ -753,6 +815,12 @@ func (this *Users) delete(ctx *gin.Context) {
 		return
 	}
 
+	// 检查是否为系统管理员
+	if utils.In.Array(1, ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员账户！"), 403)
+		return
+	}
+
 	if utils.In.Array(this.meta.user(ctx).Id, ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能删除自己！"), 400)
 		return
@@ -786,7 +854,14 @@ func (this *Users) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Users{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
+
+	// 检查回收站中是否包含系统管理员的账户
+	hasAdmin := item.Where("id", 1).Exist()
+	if hasAdmin {
+		this.json(ctx, nil, facade.Lang(ctx, "回收站中包含系统管理员账户，禁止清空！"), 403)
+		return
+	}
 
 	ids := utils.Unity.Ids(item.Column("id"))
 
@@ -891,7 +966,7 @@ func (this *Users) email(ctx *gin.Context) {
 		}
 
 		// 缓存验证码 - 5分钟
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5 * time.Minute)
+		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 
 		msg := fmt.Sprintf("验证码发送至您的邮箱：%s，请注意查收！", params["email"])
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
@@ -948,7 +1023,7 @@ func (this *Users) phone(ctx *gin.Context) {
 	// 从数据库里面找一下这个手机号是否已经存在
 	exist := facade.DB.Model(&model.Users{}).Where("phone", params["phone"]).Where("id", "!=", user.Id).Exist()
 	if exist {
-		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已绑定其它账号！"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "该手机号已绑定其它账号！"), 400)
 		return
 	}
 
@@ -965,7 +1040,7 @@ func (this *Users) phone(ctx *gin.Context) {
 		}
 
 		// 缓存验证码 - 5分钟
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5 * time.Minute)
+		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 
 		msg := fmt.Sprintf("验证码发送至您的手机：%s，请注意查收！", params["phone"])
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
@@ -1008,6 +1083,12 @@ func (this *Users) destroy(ctx *gin.Context) {
 		return
 	}
 
+	// 禁止系统管理员账号注销账户
+	if user.Id == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止注销系统管理员账户！"), 403)
+		return
+	}
+
 	var social string
 	social = utils.Ternary(utils.Is.Email(user.Email), "email", social)
 	social = utils.Ternary(utils.Is.Phone(user.Phone), "phone", social)
@@ -1036,7 +1117,7 @@ func (this *Users) destroy(ctx *gin.Context) {
 			return
 		}
 		// 缓存验证码 - 5分钟
-		facade.Cache.Set(cacheName, sms.VerifyCode, 5 * time.Minute)
+		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
 		return
 	}

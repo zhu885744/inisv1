@@ -174,6 +174,12 @@ func (this *Comm) login(ctx *gin.Context) {
 		return
 	}
 
+	// 检查账号是否被冻结（使用 status 字段，0为正常，1为冻结）
+	if table.Status == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "当前账号已被冻结，请联系管理员！"), 403)
+		return
+	}
+
 	if utils.Is.Empty(table.Password) {
 		this.json(ctx, nil, facade.Lang(ctx, "该帐号未设置密码，请切换登录方式！"), 400)
 		return

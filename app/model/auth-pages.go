@@ -3,13 +3,14 @@ package model
 import (
 	"errors"
 	"fmt"
+	"inis/app/facade"
+	"strings"
+	"sync"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
-	"strings"
-	"sync"
 )
 
 type AuthPages struct {
@@ -69,6 +70,7 @@ func InitAuthPages() {
 		{Name: "公告管理", Icon: "bell", Path: "/admin/placard"},
 		{Name: "轮播管理", Icon: "banner", Path: "/admin/banner"},
 		{Name: "标签管理", Icon: "tag", Path: "/admin/tags"},
+		{Name: "等级管理", Icon: "level", Path: "/admin/level"},
 		{Name: "友链管理", Icon: "link", Path: "/admin/links"},
 		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "15px"},
 		{Name: "页面列表", Icon: "open", Path: "/admin/pages", Size: "17px"},

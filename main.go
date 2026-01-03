@@ -5,7 +5,6 @@ import (
 	api "inis/app/api/route"
 	dev "inis/app/dev/route"
 	index "inis/app/index/route"
-	inis "inis/app/inis/route"
 	"inis/app/middleware"
 	socket "inis/app/socket/route"
 	"inis/app/timer"
@@ -58,7 +57,7 @@ func run() {
 	app.Gin.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// 注册路由
-	app.Use(api.Route, dev.Route, index.Route, inis.Route, socket.Route)
+	app.Use(api.Route, dev.Route, index.Route, socket.Route)
 	// 运行服务
 	app.Run(func() {
 		timer.Run()
