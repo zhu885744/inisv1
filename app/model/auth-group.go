@@ -46,13 +46,13 @@ func InitAuthGroup() {
 	}
 	facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
 		Id: 	 1,
-		Name:    "超级管理员",
+		Name:    "系统管理员",
 		Uids:    "|1|",
 		Rules:   "all",
 		Pages:   "all",
 		Root: 	 1,
 		Default: 1,
-		Remark:  "超级管理员，拥有所有权限！",
+		Remark:  "系统管理员，拥有所有权限！",
 	})
 }
 

@@ -169,6 +169,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=update&type=login",
 				"path=email&type=login&name=修改邮箱",
 				"path=phone&type=login&name=修改手机号",
+				"path=status&type=login&name=修改用户状态",
 			},
 			"POST":   {
 				"create", "save",
