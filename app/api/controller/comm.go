@@ -2,15 +2,16 @@ package controller
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Comm struct {
@@ -39,10 +40,10 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"login":         this.login,
-		"register":      this.register,
-		"social-login":  this.socialLogin,
-		"check-token":   this.checkToken,
+		"login":          this.login,
+		"register":       this.register,
+		"social-login":   this.socialLogin,
+		"check-token":    this.checkToken,
 		"reset-password": this.resetPassword,
 	}
 	err := this.call(allow, method, ctx)
@@ -158,7 +159,7 @@ func (this *Comm) login(ctx *gin.Context) {
 		}
 
 		// 赋值
-		params["account"]  = text["account"]
+		params["account"] = text["account"]
 		params["password"] = text["password"]
 	}
 
@@ -192,8 +193,8 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
+		"uid":           table.Id,
+		"hash":          utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除 item 中的密码
@@ -350,8 +351,8 @@ func (this *Comm) register(ctx *gin.Context) {
 	go facade.Cache.Del(cacheName)
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
+		"uid":           table.Id,
+		"hash":          utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除密码
@@ -417,9 +418,9 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 		}
 
 		user := &model.Users{
-			Account:  cast.ToString(params["email"]),
-			Nickname: "会员" + utils.Rand.String(4, "0123456789"),
-			Source:   cast.ToString(params["source"]),
+			Account:   cast.ToString(params["email"]),
+			Nickname:  "会员" + utils.Rand.String(4, "0123456789"),
+			Source:    cast.ToString(params["source"]),
 			LoginTime: time.Now().Unix(),
 		}
 
@@ -447,7 +448,7 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 			return
 		}
 		// 缓存验证码 - 5分钟
-		facade.Cache.Set(cacheName, sms.VerifyCode, 5 * time.Minute)
+		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
 		return
 	}
@@ -467,8 +468,8 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 	item := facade.DB.Model(&table).Where(social, params["social"]).Find()
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
+		"uid":           table.Id,
+		"hash":          utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除密码

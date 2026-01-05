@@ -96,7 +96,7 @@ func (this *EXP) Add(table EXP) (err error) {
 		case "check-in":
 			return errors.New("今天已经签到过了！")
 		default:
-			return errors.New(fmt.Sprintf("本日%s奖励经验值次数已经用完了！", limit[table.Type][0]))
+			return fmt.Errorf("本日%s奖励经验值次数已经用完了！", limit[table.Type][0])
 		}
 	}
 

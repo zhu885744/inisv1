@@ -190,7 +190,7 @@ func (this *Test) upload(ctx *gin.Context) {
 
 	item := facade.Storage.Upload(facade.Storage.Path()+suffix, bytes)
 	if item.Error != nil {
-		this.json(ctx, nil, err.Error(), 400)
+		this.json(ctx, nil, item.Error.Error(), 400)
 		return
 	}
 

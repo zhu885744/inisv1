@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"fmt"
 	"inis/app/facade"
 	"strings"
@@ -45,7 +44,7 @@ func (this *AuthPages) BeforeCreate(tx *gorm.DB) (err error) {
 
 	// 检查 hash 是否存在
 	if exist := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
-		return errors.New(fmt.Sprintf("hash: %s 已存在", this.Hash))
+		return fmt.Errorf("hash: %s 已存在", this.Hash)
 	}
 
 	return
@@ -62,23 +61,23 @@ func InitAuthPages() {
 
 	// 页面列表
 	pages := []AuthPages{
-		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write"},
-		{Name: "文章列表", Icon: "article", Path: "/admin/article"},
+		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write", Size: "14px"},
+		{Name: "文章列表", Icon: "article", Path: "/admin/article", Size: "14px"},
 		{Name: "文章分组", Icon: "group", Path: "/admin/article/group", Size: "14px"},
-		{Name: "用户管理", Icon: "user", Path: "/admin/users"},
-		{Name: "评论管理", Icon: "comment", Path: "/admin/comment"},
-		{Name: "公告管理", Icon: "bell", Path: "/admin/placard"},
-		{Name: "轮播管理", Icon: "banner", Path: "/admin/banner"},
-		{Name: "标签管理", Icon: "tag", Path: "/admin/tags"},
-		{Name: "等级管理", Icon: "level", Path: "/admin/level"},
-		{Name: "友链管理", Icon: "link", Path: "/admin/links"},
-		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "15px"},
-		{Name: "页面列表", Icon: "open", Path: "/admin/pages", Size: "17px"},
-		{Name: "撰写页面", Icon: "article", Path: "/admin/pages/write"},
+		{Name: "用户管理", Icon: "user", Path: "/admin/users", Size: "14px"},
+		{Name: "评论管理", Icon: "comment", Path: "/admin/comment", Size: "14px"},
+		{Name: "公告管理", Icon: "bell", Path: "/admin/placard", Size: "14px"},
+		{Name: "轮播管理", Icon: "banner", Path: "/admin/banner", Size: "14px"},
+		{Name: "标签管理", Icon: "tag", Path: "/admin/tags", Size: "14px"},
+		{Name: "等级管理", Icon: "level", Path: "/admin/level", Size: "14px"},
+		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
+		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},
+		{Name: "页面列表", Icon: "open", Path: "/admin/pages", Size: "14px"},
+		{Name: "撰写页面", Icon: "article", Path: "/admin/pages/write", Size: "14px"},
 		{Name: "友链分组", Icon: "group", Path: "/admin/links/group", Size: "14px"},
-		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "17px"},
+		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "14px"},
 		{Name: "权限分组", Icon: "group", Path: "/admin/auth/group", Size: "14px"},
-		{Name: "页面权限", Icon: "open", Path: "/admin/auth/pages", Size: "17px"},
+		{Name: "管理页面", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 		{Name: "接口密钥", Icon: "key", Path: "/admin/api/keys", Size: "14px"},
 		{Name: "IP黑名单", Icon: "qps", Path: "/admin/ip/black", Size: "14px"},
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
