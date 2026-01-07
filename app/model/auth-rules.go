@@ -1,26 +1,26 @@
 package model
 
 import (
-	"errors"
 	"fmt"
+	"inis/app/facade"
+	"net/url"
+	"strings"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
-	"net/url"
-	"strings"
 )
 
 type AuthRules struct {
-	Id         int    				 `gorm:"type:int(32); comment:主键;" json:"id"`
-	Name       string 				 `gorm:"comment:规则名称;" json:"name"`
-	Method     string 				 `gorm:"comment:请求类型; default:'GET';" json:"method"`
-	Route      string 				 `gorm:"comment:路由;" json:"route"`
-	Type       string 				 `gorm:"default:'default'; comment:规则类型;" json:"type"`
-	Hash       string 				 `gorm:"comment:哈希值;" json:"hash"`
-	Cost       int    				 `gorm:"type:int(32); comment:费用; default:1;" json:"cost"`
-	Remark     string 				 `gorm:"comment:备注; default:Null;" json:"remark"`
+	Id     int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Name   string `gorm:"comment:规则名称;" json:"name"`
+	Method string `gorm:"comment:请求类型; default:'GET';" json:"method"`
+	Route  string `gorm:"comment:路由;" json:"route"`
+	Type   string `gorm:"default:'default'; comment:规则类型;" json:"type"`
+	Hash   string `gorm:"comment:哈希值;" json:"hash"`
+	Cost   int    `gorm:"type:int(32); comment:费用; default:1;" json:"cost"`
+	Remark string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -44,7 +44,7 @@ func (this *AuthRules) BeforeCreate(tx *gorm.DB) (err error) {
 
 	// 检查 hash 是否存在
 	if exist := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
-		return errors.New(fmt.Sprintf("hash: %s 已存在", this.Hash))
+		return fmt.Errorf("hash: %s 已存在", this.Hash)
 	}
 
 	return
@@ -71,7 +71,7 @@ func createAuthRules() (result []AuthRules) {
 
 	batch := map[string]map[string][]string{
 		"test": {
-			"GET":    {
+			"GET": {
 				"path=&name=测试专用&type=common",
 				"path=request&name=测试GET请求&type=common",
 			},
@@ -115,6 +115,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=sms&name=修改SMS服务配置",
 				"path=sms-email&name=修改邮件服务配置",
 				"path=sms-aliyun&name=修改阿里云短信服务配置",
+				"path=sms-aliyun-number-verify&name=修改阿里云号码验证配置",
 				"path=sms-tencent&name=修改腾讯云短信服务配置",
 				"path=crypt-jwt&name=修改JWT配置",
 				"path=cache-redis&name=修改Redis缓存配置",
@@ -131,6 +132,7 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",
 				"path=test-sms-aliyun&name=发送阿里云测试短信",
+				"path=test-sms-aliyun-number-verify&name=发送阿里云号码验证服务测试短信",
 				"path=test-sms-tencent&name=发送腾讯云测试短信",
 				"path=test-redis&name=测试Redis连接",
 				"path=test-oss&name=测试OSS连接",
@@ -139,7 +141,7 @@ func createAuthRules() (result []AuthRules) {
 			},
 		},
 		"tags": {
-			"GET":    {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -149,12 +151,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"users":{
-			"GET":    {
+		"users": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -164,20 +166,20 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {
+			"PUT": {
 				"restore",
 				"path=update&type=login",
 				"path=email&type=login&name=修改邮箱",
 				"path=phone&type=login&name=修改手机号",
 				"path=status&type=login&name=修改用户状态",
 			},
-			"POST":   {
+			"POST": {
 				"create", "save",
 			},
 			"DELETE": {"remove", "delete", "clear", "path=destroy&type=login&name=注销账户"},
 		},
-		"links":{
-			"GET":    {
+		"links": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -187,8 +189,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"path=update&type=login","path=restore&type=login"},
-			"POST":   {
+			"PUT": {"path=update&type=login", "path=restore&type=login"},
+			"POST": {
 				"path=save&type=login",
 				"path=create&type=login",
 			},
@@ -198,8 +200,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=login",
 			},
 		},
-		"pages":{
-			"GET":    {
+		"pages": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -209,12 +211,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"level":{
-			"GET":    {
+		"level": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -224,12 +226,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"banner":{
-			"GET":    {
+		"banner": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -239,38 +241,23 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"config":{
-			"GET":    {
+		"config": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"article":{
-			"GET":    {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update","restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"placard":{
-			"GET":    {
+		"article": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -280,12 +267,27 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"comment":{
-			"GET":    {
+		"placard": {
+			"GET": {
+				"path=one&type=common",
+				"path=all&type=common",
+				"path=sum&type=common",
+				"path=min&type=common",
+				"path=max&type=common",
+				"path=rand&type=common",
+				"path=count&type=common",
+				"path=column&type=common",
+			},
+			"PUT":    {"update", "restore"},
+			"POST":   {"save", "create"},
+			"DELETE": {"remove", "delete", "clear"},
+		},
+		"comment": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -296,30 +298,30 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common",
 				"path=flat&type=common&name=扁平化",
 			},
-			"PUT":    {"path=update&type=login","path=restore&type=login"},
+			"PUT":    {"path=update&type=login", "path=restore&type=login"},
 			"POST":   {"path=save&type=login", "path=create&type=login"},
 			"DELETE": {"path=remove&type=login", "path=delete&type=login", "path=clear&type=login"},
 		},
 		"api-keys": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"auth-group":{
+		"auth-group": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
 			"PUT":    {"update", "restore", "path=uids&name=更改用户权限"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"auth-rules":{
+		"auth-rules": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"auth-pages":{
-			"GET":    {
+		"auth-pages": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -329,12 +331,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"links-group":{
-			"GET":    {
+		"links-group": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -344,12 +346,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"article-group":{
-			"GET":    {
+		"article-group": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -360,12 +362,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common",
 				"path=tree&type=common&name=树形结构",
 			},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
-		"exp":{
-			"GET":    {
+		"exp": {
+			"GET": {
 				"path=one&type=common",
 				"path=all&type=common",
 				"path=sum&type=common",
@@ -376,8 +378,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common",
 				"path=active&type=common&name=活跃度排行",
 			},
-			"PUT":    {"update","restore"},
-			"POST":   {
+			"PUT": {"update", "restore"},
+			"POST": {
 				"save",
 				"create",
 				"path=check-in&type=login&name=每日签到",
@@ -389,24 +391,24 @@ func createAuthRules() (result []AuthRules) {
 		},
 		"qps-warn": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
 		"ip-black": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update","restore"},
+			"PUT":    {"update", "restore"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
 		"upgrade": {
-			"POST":   {"path=theme&name=主题升级","path=system&name=系统升级"},
+			"POST": {"path=theme&name=主题升级", "path=system&name=系统升级"},
 		},
 	}
 
 	// 接口名称
 	names := map[string]string{
-		"exp":    		 "【经验值 API】",
+		"exp":           "【经验值 API】",
 		"test":          "【测试 API】",
 		"proxy":         "【代理 API】",
 		"file":          "【文件 API】",
@@ -423,8 +425,8 @@ func createAuthRules() (result []AuthRules) {
 		"config":        "【配置 API】",
 		"upgrade":       "【升级 API】",
 		"toml":          "【服务配置 API】",
-		"ip-black":	     "【IP黑名单 API】",
-		"qps-warn":   	 "【QPS预警 API】",
+		"ip-black":      "【IP黑名单 API】",
+		"qps-warn":      "【QPS预警 API】",
 		"api-keys":      "【接口密钥 API】",
 		"auth-group":    "【权限分组 API】",
 		"auth-pages":    "【页面权限 API】",
@@ -446,17 +448,17 @@ func createAuthRules() (result []AuthRules) {
 			"column": "列查询",
 		},
 		"POST": {
-			"save": "保存数据（推荐）",
+			"save":   "保存数据（推荐）",
 			"create": "添加数据",
 		},
 		"PUT": {
-			"update": "更新数据",
+			"update":  "更新数据",
 			"restore": "恢复数据",
 		},
 		"DELETE": {
 			"remove": "软删除（回收站）",
 			"delete": "彻底删除",
-			"clear": "清空回收站",
+			"clear":  "清空回收站",
 		},
 	}
 
@@ -489,10 +491,10 @@ func createAuthRules() (result []AuthRules) {
 				}
 
 				result = append(result, AuthRules{
-					Type  : param["type"],
+					Type:   param["type"],
 					Method: strings.ToUpper(method),
-					Route : "/api/" + key + utils.Ternary[string](utils.Is.Empty(param["path"]), "", "/" + param["path"]),
-					Name  : names[key] + utils.Default(param["name"], methods[method][param["path"]]),
+					Route:  "/api/" + key + utils.Ternary[string](utils.Is.Empty(param["path"]), "", "/"+param["path"]),
+					Name:   names[key] + utils.Default(param["name"], methods[method][param["path"]]),
 					Remark: param["remark"],
 				})
 			}
@@ -505,7 +507,7 @@ func createAuthRules() (result []AuthRules) {
 func saveAuthRules(item AuthRules) {
 
 	method := strings.ToUpper(cast.ToString(item.Method))
-	hash   := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, item.Route))
+	hash := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, item.Route))
 
 	table := AuthRules{
 		Hash:   hash,

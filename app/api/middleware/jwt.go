@@ -2,12 +2,13 @@ package middleware
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 // 定义用户状态常量，提高代码可读性和可维护性
@@ -20,10 +21,10 @@ const (
 func Jwt() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-		
+
 		// 统一获取 token 的逻辑
 		token := getTokenFromHeaderOrCookie(ctx, tokenName)
-		
+
 		// 无 token 直接放行（由后续中间件或接口处理权限）
 		if utils.Is.Empty(token) {
 			ctx.Next()

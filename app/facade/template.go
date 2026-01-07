@@ -145,15 +145,28 @@ sign_name = "${email.sign_name}"
 # 阿里云短信服务配置
 [aliyun]
 # 阿里云AccessKey ID
-access_key_id 	  = "${aliyun.access_key_id}"
+access_key_id     = "${aliyun.access_key_id}"
 # 阿里云AccessKey Secret
 access_key_secret = "${aliyun.access_key_secret}"
 # 阿里云短信服务endpoint
-endpoint		  = "${aliyun.endpoint}"
+endpoint          = "${aliyun.endpoint}"
 # 短信签名
 sign_name         = "${aliyun.sign_name}"
 # 验证码模板
 verify_code       = "${aliyun.verify_code}"
+
+# 阿里云号码认证服务配置
+[aliyun_number_verify]
+# 阿里云AccessKey ID
+access_key_id 	  = "${aliyun_number_verify.access_key_id}"
+# 阿里云AccessKey Secret
+access_key_secret = "${aliyun_number_verify.access_key_secret}"
+# 阿里云号码认证服务endpoint
+endpoint		  = "${aliyun_number_verify.endpoint}"
+# 号码认证签名
+sign_name         = "${aliyun_number_verify.sign_name}"
+# 号码验证专用模板Code
+template_code     = "${aliyun_number_verify.template_code}"
 
 
 # 腾讯云短信服务配置
@@ -237,7 +250,7 @@ region            = "${kodo.region}"
 domain            = "${kodo.domain}"
 `
 
-const TempCrypt   = `# ======== 加密配置 ========
+const TempCrypt = `# ======== 加密配置 ========
 
 # JWT配置
 [jwt]

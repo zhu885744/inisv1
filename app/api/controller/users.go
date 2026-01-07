@@ -2,15 +2,16 @@ package controller
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Users struct {
@@ -24,14 +25,14 @@ func (this *Users) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":         this.one,
-		"all":         this.all,
-		"sum":         this.sum,
-		"min":         this.min,
-		"max":         this.max,
-		"rand":        this.rand,
-		"count":       this.count,
-		"column":      this.column,
+		"one":    this.one,
+		"all":    this.all,
+		"sum":    this.sum,
+		"min":    this.min,
+		"max":    this.max,
+		"rand":   this.rand,
+		"count":  this.count,
+		"column": this.column,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -68,11 +69,11 @@ func (this *Users) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"update":  this.update,
-		"restore": this.restore,
-		"email":   this.email,
-		"phone":   this.phone,
-		"status":  this.status, // 新增：状态修改接口
+		"update":     this.update,
+		"restore":    this.restore,
+		"email":      this.email,
+		"phone":      this.phone,
+		"status":     this.status,    // 新增：状态修改接口
 	}
 	err := this.call(allow, method, ctx)
 
@@ -362,7 +363,7 @@ func (this *Users) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -437,7 +438,7 @@ func (this *Users) update(ctx *gin.Context) {
 	// 删除缓存
 	facade.Cache.Del(fmt.Sprintf("user[%v]", params["id"]))
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // status 修改用户状态
@@ -796,7 +797,7 @@ func (this *Users) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -845,7 +846,7 @@ func (this *Users) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -879,7 +880,7 @@ func (this *Users) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -917,7 +918,7 @@ func (this *Users) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // email 修改邮箱
@@ -991,7 +992,7 @@ func (this *Users) email(ctx *gin.Context) {
 	// 删除验证码
 	go facade.Cache.Del(cacheName)
 
-	this.json(ctx, gin.H{ "id": user.Id }, facade.Lang(ctx, "修改成功！"), 200)
+	this.json(ctx, gin.H{"id": user.Id}, facade.Lang(ctx, "修改成功！"), 200)
 }
 
 // phone 修改手机号
@@ -1065,7 +1066,7 @@ func (this *Users) phone(ctx *gin.Context) {
 	// 删除验证码
 	go facade.Cache.Del(cacheName)
 
-	this.json(ctx, gin.H{ "id": user.Id }, facade.Lang(ctx, "修改成功！"), 200)
+	this.json(ctx, gin.H{"id": user.Id}, facade.Lang(ctx, "修改成功！"), 200)
 }
 
 // 注销 - 邮箱、手机号
