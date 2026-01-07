@@ -115,6 +115,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=sms&name=修改SMS服务配置",
 				"path=sms-email&name=修改邮件服务配置",
 				"path=sms-aliyun&name=修改阿里云短信服务配置",
+				"path=sms-aliyun-number-verify&name=修改阿里云号码验证配置",
 				"path=sms-tencent&name=修改腾讯云短信服务配置",
 				"path=crypt-jwt&name=修改JWT配置",
 				"path=cache-redis&name=修改Redis缓存配置",
@@ -131,6 +132,7 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",
 				"path=test-sms-aliyun&name=发送阿里云测试短信",
+				"path=test-sms-aliyun-number-verify&name=发送阿里云号码验证服务测试短信",
 				"path=test-sms-tencent&name=发送腾讯云测试短信",
 				"path=test-redis&name=测试Redis连接",
 				"path=test-oss&name=测试OSS连接",

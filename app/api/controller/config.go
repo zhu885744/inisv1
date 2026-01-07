@@ -591,7 +591,7 @@ func (this *Config) watch() {
 			UUID = strings.Replace(UUID, "-", "", -1)
 			ApiKeys.Create(&model.ApiKeys{
 				Value: strings.ToUpper(UUID),
-				Remark: "检测到您开启了API_KEY功能，但无可用密钥，兔子贴心的为您创建了一个密钥！不用谢，已为您自动生成五星好评！",
+				Remark: "检测到您开启了API_KEY功能，但无可用密钥，系统贴心的为您创建了一个密钥！",
 			})
 		}
 	}

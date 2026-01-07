@@ -40,13 +40,6 @@ type Toml struct {
 // IGET - 获取配置信息
 // @Summary 获取配置信息
 // @Description 根据不同方法获取系统配置相关数据
-// @Tags Config
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(log, sms, cache, crypt, storage)
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/toml/{method} [get]
 func (this *Toml) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -69,26 +62,20 @@ func (this *Toml) IGET(ctx *gin.Context) {
 // IPOST - 测试配置服务
 // @Summary 测试配置服务
 // @Description 测试系统配置相关服务（短信、Redis、存储等）
-// @Tags Config
-// @Accept multipart/form-data
-// @Produce json
-// @Param method path string true "方法名" Enums(test-sms-email, test-sms-aliyun, test-sms-tencent, test-redis, test-oss, test-cos, test-kodo)
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/toml/{method} [post]
 func (this *Toml) IPOST(ctx *gin.Context) {
 
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"test-sms-email":   this.testSMSEmail,
-		"test-sms-aliyun":  this.testSMSAliyun,
-		"test-sms-tencent": this.testSMSTencent,
-		"test-redis":       this.testRedis,
-		"test-oss":         this.testOSS,
-		"test-cos":         this.testCOS,
-		"test-kodo":        this.testKODO,
+		"test-sms-email":                this.testSMSEmail,
+		"test-sms-aliyun":               this.testSMSAliyun,
+		"test-sms-aliyun-number-verify": this.testSMSAliYunNumberVerify,
+		"test-sms-tencent":              this.testSMSTencent,
+		"test-redis":                    this.testRedis,
+		"test-oss":                      this.testOSS,
+		"test-cos":                      this.testCOS,
+		"test-kodo":                     this.testKODO,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -101,13 +88,6 @@ func (this *Toml) IPOST(ctx *gin.Context) {
 // IPUT - 更新配置信息
 // @Summary 更新配置信息
 // @Description 更新系统配置相关数据（短信、加密、缓存、存储等）
-// @Tags Config
-// @Accept multipart/form-data
-// @Produce json
-// @Param method path string true "方法名" Enums(sms, sms-email, sms-aliyun, sms-tencent, sms-drive, crypt-jwt, cache-default, cache-redis, cache-file, cache-ram, storage-default, storage-local, storage-oss, storage-cos, storage-kodo)
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/toml/{method} [put]
 func (this *Toml) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -140,13 +120,6 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 // IDEL - 删除配置信息
 // @Summary 删除配置信息
 // @Description 删除系统配置相关数据（当前暂不支持）
-// @Tags Config
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/toml/{method} [delete]
 func (this *Toml) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -163,11 +136,6 @@ func (this *Toml) IDEL(ctx *gin.Context) {
 // INDEX - 配置管理首页
 // @Summary 配置管理首页
 // @Description 配置管理控制器首页（没什么用）
-// @Tags Config
-// @Accept json
-// @Produce json
-// @Success 202 {object} map[string]interface{} "成功响应"
-// @Router /api/toml [get]
 func (this *Toml) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
@@ -178,8 +146,8 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	// 允许的查询范围
-	field := []any{"email", "aliyun", "tencent"}
+	// 允许的查询范围 - 新增 aliyun_number_verify
+	field := []any{"email", "aliyun", "aliyun_number_verify", "tencent"}
 
 	item := facade.SMSToml
 	if item.Error != nil {
@@ -216,8 +184,8 @@ func (this *Toml) putSMS(ctx *gin.Context) {
 		return
 	}
 
-	// 允许的修改范围
-	field := []any{"default", "email", "aliyun", "tencent"}
+	// 允许的修改范围 - 新增 aliyun_number_verify
+	field := []any{"default", "email", "aliyun", "aliyun_number_verify", "tencent"}
 
 	if !utils.In.Array(params["name"], field) {
 		this.json(ctx, nil, facade.Lang(ctx, "不允许的修改范围！"), 400)
@@ -231,6 +199,8 @@ func (this *Toml) putSMS(ctx *gin.Context) {
 		this.putSMSEmail(ctx)
 	case "aliyun":
 		this.putSMSAliyun(ctx)
+	case "aliyun_number_verify": // 新增分支
+		this.putSMSAliYunNumberVerify(ctx)
 	case "tencent":
 		this.putSMSTencent(ctx)
 	default:
@@ -526,6 +496,67 @@ func (this *Toml) putSMSAliyun(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
 }
 
+// putSMSAliYunNumberVerify - 修改阿里云号码验证配置
+func (this *Toml) putSMSAliYunNumberVerify(ctx *gin.Context) {
+
+	// 请求参数
+	params := this.params(ctx)
+
+	// 必传参数校验
+	if utils.Is.Empty(params["access_key_id"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["access_key_secret"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_secret"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["endpoint"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "endpoint"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["sign_name"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "sign_name"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["template_code"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "template_code"), 400)
+		return
+	}
+
+	// 替换配置模板中的变量
+	temp := facade.TempSMS
+	temp = utils.Replace(temp, map[string]any{
+		"${aliyun_number_verify.access_key_id}":     params["access_key_id"],
+		"${aliyun_number_verify.access_key_secret}": params["access_key_secret"],
+		"${aliyun_number_verify.endpoint}":          params["endpoint"],
+		"${aliyun_number_verify.sign_name}":         params["sign_name"],
+		"${aliyun_number_verify.template_code}":     params["template_code"],
+	})
+
+	// 正则匹配出所有的 ${?} 字符串，替换为现有配置值
+	reg := regexp.MustCompile(`\${(.+?)}`)
+	matches := reg.FindAllStringSubmatch(temp, -1)
+
+	for _, match := range matches {
+		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
+	}
+
+	// 保存配置文件
+	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
+
+	if item.Error != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
+		return
+	}
+
+	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+}
+
 // putSMSTencent - 修改腾讯云短信服务配置
 func (this *Toml) putSMSTencent(ctx *gin.Context) {
 
@@ -758,6 +789,108 @@ func (this *Toml) testSMSAliyun(ctx *gin.Context) {
 	}
 
 	this.json(ctx, nil, facade.Lang(ctx, "测试短信发送成功！"), 200)
+}
+
+// testSMSAliYunNumberVerify - 测试阿里云号码验证服务
+func (this *Toml) testSMSAliYunNumberVerify(ctx *gin.Context) {
+
+	// 请求参数
+	params := this.params(ctx)
+
+	// 必传参数校验
+	if utils.Is.Empty(params["access_key_id"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["access_key_secret"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_secret"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["endpoint"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "endpoint"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["sign_name"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "sign_name"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["template_code"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "template_code"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["phone"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "phone"), 400)
+		return
+	}
+
+	if !utils.Is.Phone(params["phone"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 格式不正确！", "phone"), 400)
+		return
+	}
+
+	// 创建阿里云客户端
+	client, err := AliYunClient.NewClient(&AliYunClient.Config{
+		Endpoint:        tea.String(cast.ToString(params["endpoint"])),
+		AccessKeyId:     tea.String(cast.ToString(params["access_key_id"])),
+		AccessKeySecret: tea.String(cast.ToString(params["access_key_secret"])),
+	})
+
+	if err != nil {
+		this.json(ctx, err.Error(), facade.Lang(ctx, "测试号码验证失败！"), 400)
+		return
+	}
+
+	// 组装发送验证码请求参数
+	reqParams := map[string]any{
+		"SchemeName":        tea.String("测试方案"),
+		"CountryCode":       tea.String("86"),
+		"PhoneNumber":       tea.String(cast.ToString(params["phone"])),
+		"SignName":          tea.String(cast.ToString(params["sign_name"])),
+		"TemplateCode":      tea.String(cast.ToString(params["template_code"])),
+		"TemplateParam":     tea.String(`{"code":"##code##","min":"5"}`),
+		"CodeLength":        tea.Int64(6),
+		"ValidTime":         tea.Int64(300),
+		"ReturnVerifyCode":  tea.Bool(true), // 返回验证码便于测试
+	}
+
+	// 发送请求
+	runtime := &AliYunUtilV2.RuntimeOptions{}
+	request := &AliYunClient.OpenApiRequest{
+		Query: AliYunUtil.Query(reqParams),
+	}
+
+	// 调用SendSmsVerifyCode接口
+	result, err := client.CallApi((&facade.AliYunNumberVerify{}).SendSmsVerifyCodeApiInfo(), request, runtime)
+	if err != nil {
+		this.json(ctx, err.Error(), facade.Lang(ctx, "测试号码验证失败！"), 400)
+		return
+	}
+
+	// 处理响应结果
+	body := cast.ToStringMap(result["body"])
+	if body["Code"] != "OK" || !cast.ToBool(body["Success"]) {
+		errMsg := cast.ToString(body["Message"])
+		if utils.Is.Empty(errMsg) {
+			errMsg = "发送验证码失败"
+		}
+		this.json(ctx, errMsg, facade.Lang(ctx, "测试号码验证失败！"), 400)
+		return
+	}
+
+	// 解析返回的验证码（便于测试）
+	model := cast.ToStringMap(body["Model"])
+	verifyCode := cast.ToString(model["VerifyCode"])
+
+	// 返回成功结果，包含验证码便于测试核验功能
+	this.json(ctx, gin.H{
+		"verify_code": verifyCode,
+		"message":     "测试验证码发送成功",
+	}, facade.Lang(ctx, "测试号码验证成功！"), 200)
 }
 
 // testSMSTencent - 发送腾讯云测试短信
