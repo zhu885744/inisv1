@@ -415,7 +415,7 @@ func createAuthRules() (result []AuthRules) {
 		"comm":          "【公共 API】",
 		"tags":          "【标签 API】",
 		"level":         "【等级 API】",
-		"pages":         "【页面 API】",
+		"pages":         "【独立页面 API】",
 		"users":         "【用户 API】",
 		"links":         "【友链 API】",
 		"banner":        "【轮播 API】",

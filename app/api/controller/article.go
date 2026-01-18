@@ -1,15 +1,18 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
+	"crypto/md5"
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Article struct {
@@ -110,7 +113,7 @@ func (this *Article) INDEX(ctx *gin.Context) {
 // 删除缓存
 func (this *Article) delCache() {
 	// 删除缓存
-	facade.Cache.DelTags([]any{"[GET]","article"})
+	facade.Cache.DelTags([]any{"[GET]", "article"})
 }
 
 // one 获取指定数据
@@ -166,7 +169,7 @@ func (this *Article) one(ctx *gin.Context) {
 	// 更新用户经验
 	go this.updateExp(ctx, cast.ToStringMap(data))
 	// 更新文章浏览量
-	go this.updateViews(cast.ToStringMap(data))
+	go this.updateViews(ctx, cast.ToStringMap(data))
 
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
@@ -180,8 +183,8 @@ func (this *Article) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"order":       "create_time desc",
+		"page":  1,
+		"order": "create_time desc",
 	})
 
 	// 表数据结构体
@@ -244,7 +247,7 @@ func (this *Article) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -317,7 +320,7 @@ func (this *Article) create(ctx *gin.Context) {
 	if this.meta.root(ctx) {
 		allow = append(allow, "top", "audit")
 	}
-    
+
 	// 是否开启了审核
 	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
 	// 更新审核状态
@@ -341,10 +344,10 @@ func (this *Article) create(ctx *gin.Context) {
 
 	// 处理 publish_time，若未传则默认使用当前时间
 	if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-        utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
-    } else {
-        utils.Struct.Set(&table, "PublishTime", time.Now().Unix()) // 默认当前时间
-    }
+		utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
+	} else {
+		utils.Struct.Set(&table, "PublishTime", time.Now().Unix()) // 默认当前时间
+	}
 
 	// 添加数据
 	tx := facade.DB.Model(&table).Create(&table)
@@ -354,7 +357,7 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -409,9 +412,9 @@ func (this *Article) update(ctx *gin.Context) {
 		}
 	}
 
-    if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-        async.Set("publish_time", cast.ToInt64(publishTime))
-    }
+	if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
+		async.Set("publish_time", cast.ToInt64(publishTime))
+	}
 
 	// 更新时间
 	async.Set("last_update", time.Now().Unix())
@@ -432,7 +435,7 @@ func (this *Article) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -723,7 +726,7 @@ func (this *Article) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -766,7 +769,7 @@ func (this *Article) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -775,7 +778,7 @@ func (this *Article) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Article{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
@@ -798,7 +801,7 @@ func (this *Article) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -841,7 +844,7 @@ func (this *Article) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // 更新用户经验值
@@ -853,16 +856,39 @@ func (this *Article) updateExp(ctx *gin.Context, data map[string]any) {
 		return
 	}
 	_ = (&model.EXP{}).Add(model.EXP{
-		Uid:  user.Id,
-		Type: "visit",
-		BindId: cast.ToInt(data["id"]),
+		Uid:      user.Id,
+		Type:     "visit",
+		BindId:   cast.ToInt(data["id"]),
 		BindType: "article",
 	})
 }
 
 // 更新文章浏览量
-func (this *Article) updateViews(data map[string]any) {
+func (this *Article) updateViews(ctx *gin.Context, data map[string]any) {
+	if utils.Is.Empty(data["id"]) {
+		return
+	}
+
+	// 获取用户设备信息
+	ip := ctx.ClientIP()
+	userAgent := ctx.Request.UserAgent()
+	articleID := cast.ToString(data["id"])
+
+	// 创建唯一缓存键（文章ID + 设备标识）
+	deviceKey := ip + userAgent
+	md5Hash := md5.Sum([]byte(deviceKey))
+	cacheKey := "article_views_cd:" + articleID + ":" + fmt.Sprintf("%x", md5Hash)
+
+	// 检查是否在冷却期内
+	if facade.Cache.Has(cacheKey) {
+		return
+	}
+
+	// 更新浏览量
 	facade.DB.Model(&model.Article{}).Where("id", data["id"]).Inc("views", 1)
+
+	// 设置冷却期（24小时）
+	facade.Cache.Set(cacheKey, true, 86400)
 }
 
 // 获取配置
