@@ -93,21 +93,22 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"sms":             this.putSMS,
-		"sms-email":       this.putSMSEmail,
-		"sms-aliyun":      this.putSMSAliyun,
-		"sms-tencent":     this.putSMSTencent,
-		"sms-drive":       this.putSMSDrive,
-		"crypt-jwt":       this.putCryptJWT,
-		"cache-default":   this.putCacheDefault,
-		"cache-redis":     this.putCacheRedis,
-		"cache-file":      this.putCacheFile,
-		"cache-ram":       this.putCacheRam,
-		"storage-default": this.putStorageDefault,
-		"storage-local":   this.putStorageLocal,
-		"storage-oss":     this.putStorageOSS,
-		"storage-cos":     this.putStorageCOS,
-		"storage-kodo":    this.putStorageKODO,
+		"sms":                      this.putSMS,
+		"sms-email":                this.putSMSEmail,
+		"sms-aliyun":               this.putSMSAliyun,
+		"sms-aliyun-number-verify": this.putSMSAliYunNumberVerify,
+		"sms-tencent":              this.putSMSTencent,
+		"sms-drive":                this.putSMSDrive,
+		"crypt-jwt":                this.putCryptJWT,
+		"cache-default":            this.putCacheDefault,
+		"cache-redis":              this.putCacheRedis,
+		"cache-file":               this.putCacheFile,
+		"cache-ram":                this.putCacheRam,
+		"storage-default":          this.putStorageDefault,
+		"storage-local":            this.putStorageLocal,
+		"storage-oss":              this.putStorageOSS,
+		"storage-cos":              this.putStorageCOS,
+		"storage-kodo":             this.putStorageKODO,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -847,15 +848,15 @@ func (this *Toml) testSMSAliYunNumberVerify(ctx *gin.Context) {
 
 	// 组装发送验证码请求参数
 	reqParams := map[string]any{
-		"SchemeName":        tea.String("测试方案"),
-		"CountryCode":       tea.String("86"),
-		"PhoneNumber":       tea.String(cast.ToString(params["phone"])),
-		"SignName":          tea.String(cast.ToString(params["sign_name"])),
-		"TemplateCode":      tea.String(cast.ToString(params["template_code"])),
-		"TemplateParam":     tea.String(`{"code":"##code##","min":"5"}`),
-		"CodeLength":        tea.Int64(6),
-		"ValidTime":         tea.Int64(300),
-		"ReturnVerifyCode":  tea.Bool(true), // 返回验证码便于测试
+		"SchemeName":       tea.String("测试方案"),
+		"CountryCode":      tea.String("86"),
+		"PhoneNumber":      tea.String(cast.ToString(params["phone"])),
+		"SignName":         tea.String(cast.ToString(params["sign_name"])),
+		"TemplateCode":     tea.String(cast.ToString(params["template_code"])),
+		"TemplateParam":    tea.String(`{"code":"##code##","min":"5"}`),
+		"CodeLength":       tea.Int64(6),
+		"ValidTime":        tea.Int64(300),
+		"ReturnVerifyCode": tea.Bool(true), // 返回验证码便于测试
 	}
 
 	// 发送请求

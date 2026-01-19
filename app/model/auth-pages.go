@@ -59,7 +59,7 @@ func InitAuthPages() {
 		return
 	}
 
-	// 页面列表
+	// 后台管理页面列表
 	pages := []AuthPages{
 		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write", Size: "14px"},
 		{Name: "文章列表", Icon: "article", Path: "/admin/article", Size: "14px"},
@@ -72,7 +72,7 @@ func InitAuthPages() {
 		{Name: "等级管理", Icon: "level", Path: "/admin/level", Size: "14px"},
 		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},
-		{Name: "页面列表", Icon: "open", Path: "/admin/pages", Size: "14px"},
+		{Name: "独立页面", Icon: "open", Path: "/admin/pages", Size: "14px"},
 		{Name: "撰写页面", Icon: "article", Path: "/admin/pages/write", Size: "14px"},
 		{Name: "友链分组", Icon: "group", Path: "/admin/links/group", Size: "14px"},
 		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "14px"},

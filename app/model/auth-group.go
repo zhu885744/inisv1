@@ -44,16 +44,18 @@ func InitAuthGroup() {
 	if count != 0 {
 		return
 	}
-	facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
-		Id: 	 1,
-		Name:    "系统管理员",
-		Uids:    "|1|",
-		Rules:   "all",
-		Pages:   "all",
-		Root: 	 1,
-		Default: 1,
-		Remark:  "系统管理员，拥有所有权限！",
-	})
+	// 创建系统管理员分组
+    facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
+	    Id:      1,          // 分组唯一标识ID，指定为1（系统管理员固定ID）
+	    Name:    "系统管理员", // 分组名称（可视化展示用，如后台管理界面显示）
+	    Key:     "admin",    // 分组唯一标识键（代码逻辑中使用，如权限判断、接口鉴权）
+	    Uids:    "|1|",      // 该分组关联的用户ID集合，竖线分隔（|为分隔符，1代表默认管理员用户ID）
+	    Rules:   "all",      // 该分组拥有的接口权限规则ID集合，"all"代表拥有所有接口权限（非all时为逗号分隔的规则ID）
+	    Pages:   "all",      // 该分组拥有的页面权限ID集合，"all"代表拥有所有页面权限（非all时为逗号分隔的页面ID）
+	    Root:    1,          // 是否为超级管理员分组（1=是，0=否），拥有最高权限豁免权
+	    Default: 0,          // 是否为默认分组（1=是，0=否），新用户注册时默认加入的分组
+	    Remark:  "系统管理员，拥有所有权限！", // 分组备注说明（用于后台管理界面的备注展示）
+    })
 }
 
 // AfterSave - 保存后的Hook（包括 create update）
