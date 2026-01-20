@@ -58,7 +58,6 @@ func (this *MySqlStruct) init() {
 
 	if err != nil {
 		panic(fmt.Sprintf("MySQL数据库连接失败: %v", err.Error()))
-		return
 	}
 
 	sqlDB, _ := conn.DB()

@@ -413,7 +413,7 @@ type BigCacheStruct struct {
 
 // init 初始化 内存缓存
 func (this *BigCacheStruct) init() {
-	this.Client = NewBigCache(utils.Calc(CacheToml.Get("file.expire", 7200)))
+    this.Client = NewBigCache(utils.Calc(CacheToml.Get("file.expire", 7200)))
 }
 
 func (this *BigCacheStruct) Has(key any) (ok bool) {

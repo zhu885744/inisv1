@@ -27,8 +27,8 @@ func initCryptToml() {
 		Content: utils.Replace(TempCrypt, map[string]any{
 			"${jwt.key}": 		secret,
 			"${jwt.expire}":    "7 * 24 * 60 * 60",
-			"${jwt.issuer}" :   "inis.cn",
-			"${jwt.subject}":   "inis",
+			"${jwt.issuer}" :   "chuying",
+			"${jwt.subject}":   "chuying",
 		}),
 	}).Read()
 
@@ -103,7 +103,7 @@ func Jwt(request ...JwtRequest) *JwtStruct {
 
 	// 颁发者签名
 	if utils.Is.Empty(request[0].Issuer) {
-		request[0].Issuer = cast.ToString(CryptToml.Get("jwt.issuer", "inis.cn"))
+		request[0].Issuer = cast.ToString(CryptToml.Get("jwt.issuer", "zhuxu"))
 	}
 
 	// 主题

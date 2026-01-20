@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 
 	// JWT "github.com/dgrijalva/jwt-go"
@@ -10,9 +9,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-pay/gopay"
-	"github.com/go-pay/gopay/alipay"
-	"github.com/google/uuid"
 )
 
 // Test - 测试控制器
@@ -45,7 +41,6 @@ func (this *Test) IGET(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"request": this.request,
-		"alipay":  this.alipay,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -199,30 +194,6 @@ func (this *Test) upload(ctx *gin.Context) {
 	fmt.Println("url: ", item.Domain+item.Path)
 
 	this.json(ctx, params, facade.Lang(ctx, "好的！"), 200)
-}
-
-func (this *Test) alipay(ctx *gin.Context) {
-
-	// 初始化 BodyMap
-	body := make(gopay.BodyMap)
-	body.Set("subject", "统一收单下单并支付页面接口")
-	body.Set("out_trade_no", uuid.New().String())
-	body.Set("total_amount", "0.01")
-	body.Set("product_code", "FAST_INSTANT_TRADE_PAY")
-
-	payUrl, err := facade.Alipay().TradePagePay(context.Background(), body)
-	if err != nil {
-		if bizErr, ok := alipay.IsBizError(err); ok {
-			fmt.Println(bizErr)
-			return
-		}
-		fmt.Println(err)
-		return
-	}
-
-	fmt.Println(payUrl)
-
-	this.json(ctx, payUrl, "数据请求成功！", 200)
 }
 
 func (this *Test) returnUrl(ctx *gin.Context) {

@@ -11,7 +11,6 @@ const (
 	TomlDb      = "db"
 	TomlSMS     = "sms"
 	TomlStorage = "storage"
-	TomlPay     = "pay"
 	TomlLog     = "log"
 	TomlApp     = "app"
 	TomlCrypt   = "crypt"
@@ -35,8 +34,6 @@ func NewToml(mode any) *utils.ViperResponse {
 		return SMSToml
 	case TomlStorage:
 		return StorageToml
-	case TomlPay:
-		return PayToml
 	case TomlLog:
 		return LogToml
 	case TomlCrypt:
