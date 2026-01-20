@@ -113,7 +113,7 @@ go mod tidy > nul 2>&1
 echo [成功] 依赖下载完成
 echo.
 
-:: ======================== 核心编译（无复杂参数） ========================
+:: ======================== 核心编译（修复无效参数） ========================
 echo [3/3] 开始编译...
 set "goos=!p%sel%_goos!"
 set "goarch=!p%sel%_goarch!"
@@ -123,7 +123,8 @@ set "output_file=!OUTPUT_DIR!\!out!"
 
 echo 编译目标：!desc!
 set CGO_ENABLED=0
-go build -ldflags "-s -w" -trimpath -o "!output_file!" main.go
+:: 移除无效的 asmflags 和 gcflags 非法参数，保留安全的优化参数
+go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
 
 if errorlevel 1 (
     echo [失败] 编译失败！
@@ -161,7 +162,7 @@ if "!COMPRESS_ENABLE!"=="true" (
         if not "!goos!"=="darwin" (
             echo.
             echo [开始] UPX压缩（等级：!COMPRESS_LEVEL!）...
-            upx -!COMPRESS_LEVEL! --best --lzma "!output_file!" > nul 2>&1
+            upx -!COMPRESS_LEVEL! --best --lzma --strip-relocs=0 --compress-exports=0 --compress-icons=0 "!output_file!" > nul 2>&1
             if errorlevel 1 (
                 echo [警告] 压缩失败！
             ) else (

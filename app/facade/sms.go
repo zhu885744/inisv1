@@ -284,11 +284,11 @@ func (this *AliYunSMS) init() {
 	endpoint := cast.ToString(SMSToml.Get("aliyun.endpoint", "dysmsapi.aliyuncs.com"))
 
 	// 空值校验
-	if utils.Is.Empty(accessKeyId) || utils.Is.Empty(accessKeySecret) {
-		fmt.Printf("阿里云短信配置缺失：access_key_id/access_key_secret不能为空 | 位置: %s:%d\n",
-			utils.Caller().FileName, utils.Caller().Line)
-		return
-	}
+	//if utils.Is.Empty(accessKeyId) || utils.Is.Empty(accessKeySecret) {
+	//	fmt.Printf("阿里云短信配置缺失：access_key_id/access_key_secret不能为空 | 位置: %s:%d\n",
+	//		utils.Caller().FileName, utils.Caller().Line)
+	//	return
+	//}
 
 	client, err := AliYunClient.NewClient(&AliYunClient.Config{
 		Endpoint:        tea.String(endpoint),
@@ -658,11 +658,11 @@ func (this *TencentSMS) init() {
 	secretKey := cast.ToString(SMSToml.Get("tencent.secret_key"))
 
 	// 空值校验
-	if utils.Is.Empty(secretId) || utils.Is.Empty(secretKey) {
-		fmt.Printf("腾讯云短信配置缺失：secret_id/secret_key不能为空 | 位置: %s:%d\n",
-			utils.Caller().FileName, utils.Caller().Line)
-		return
-	}
+	//if utils.Is.Empty(secretId) || utils.Is.Empty(secretKey) {
+	//	fmt.Printf("腾讯云短信配置缺失：secret_id/secret_key不能为空 | 位置: %s:%d\n",
+	//		utils.Caller().FileName, utils.Caller().Line)
+	//	return
+	//}
 
 	credential := common.NewCredential(secretId, secretKey)
 	clientProfile := profile.NewClientProfile()

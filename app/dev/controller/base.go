@@ -79,7 +79,8 @@ func (this base) params(ctx *gin.Context, def ...map[string]any) (result map[str
 
 	params, ok := ctx.Get("params")
 
-	result = utils.Ternary[map[string]any](ok, cast.ToStringMap(params), make(map[string]any))
+	// 移除冗余的类型参数 [map[string]any]，编译器可自动推导
+	result = utils.Ternary(ok, cast.ToStringMap(params), make(map[string]any))
 
 	// 合并默认参数
 	if empty := utils.Is.Empty(def); !empty {

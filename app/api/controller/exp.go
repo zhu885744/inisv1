@@ -20,20 +20,6 @@ type EXP struct {
 }
 
 // @Summary 获取EXP数据
-// @Description 根据不同方法获取EXP相关数据
-// @Tags EXP
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(one, all, sum, min, max, rand, count, column, active)
-// @Param id query int false "ID"
-// @Param where query string false "查询条件"
-// @Param or query string false "或条件"
-// @Param like query string false "模糊查询"
-// @Param cache query string false "是否使用缓存"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/exp/{method} [get]
-// IGET - GET请求本体
 func (this *EXP) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -58,23 +44,6 @@ func (this *EXP) IGET(ctx *gin.Context) {
 }
 
 // @Summary 创建/保存EXP数据
-// @Description 根据不同方法创建或保存EXP相关数据
-// @Tags EXP
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(save, create, like, share, collect, check-in)
-// @Param id body int false "ID（更新时需要）"
-// @Param value body string false "值"
-// @Param type body string false "类型"
-// @Param description body string false "描述"
-// @Param json body string false "JSON数据"
-// @Param text body string false "文本数据"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Failure 400 {object} map[string]interface{} "参数错误"
-// @Failure 401 {object} map[string]interface{} "未登录"
-// @Router /api/exp/{method} [post]
-// IPOST - POST请求本体
 func (this *EXP) IPOST(ctx *gin.Context) {
 
 	// 转小写
@@ -100,23 +69,6 @@ func (this *EXP) IPOST(ctx *gin.Context) {
 }
 
 // @Summary 更新EXP数据
-// @Description 根据不同方法更新EXP相关数据
-// @Tags EXP
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(update, restore)
-// @Param id body int true "ID"
-// @Param value body string false "值"
-// @Param type body string false "类型"
-// @Param description body string false "描述"
-// @Param json body string false "JSON数据"
-// @Param text body string false "文本数据"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Failure 400 {object} map[string]interface{} "参数错误"
-// @Failure 403 {object} map[string]interface{} "无权限"
-// @Router /api/exp/{method} [put]
-// IPUT - PUT请求本体
 func (this *EXP) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -137,18 +89,6 @@ func (this *EXP) IPUT(ctx *gin.Context) {
 }
 
 // @Summary 删除EXP数据
-// @Description 根据不同方法删除或清空EXP相关数据
-// @Tags EXP
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(remove, delete, clear)
-// @Param ids body string true "ID列表（逗号分隔）"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Failure 400 {object} map[string]interface{} "参数错误"
-// @Failure 403 {object} map[string]interface{} "无权限"
-// @Router /api/exp/{method} [delete]
-// IDEL - DELETE请求本体
 func (this *EXP) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))

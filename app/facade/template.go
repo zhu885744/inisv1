@@ -92,27 +92,6 @@ age		   = ${age}
 backups	   = ${backups}
 `
 
-// TempPay - 支付配置模板
-const TempPay = `# ======== 支付配置 ========
-
-# 支付宝支付
-[alipay]
-# 支付宝支付的商户ID
-app_id                 = ${alipay.app_id}
-# 证书根目录
-root_cert_path         = "${alipay.root_cert_path}"
-# 应用私钥
-app_private_key_path   = "${alipay.app_private_key_path}"
-# 支付宝公钥
-alipay_public_key_path = "${alipay.alipay_public_key_path}"
-# 异步通知地址
-notify_url = "${alipay.notify_url}"
-# 同步通知地址
-return_url = "${alipay.return_url}"
-# 时区
-time_zone  = "${alipay.time_zone}"
-`
-
 // TempSMS - 短信配置模板
 const TempSMS = `# ======== SMS 配置 ========
 
