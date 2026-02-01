@@ -14,30 +14,12 @@ import (
 )
 
 // Pages - 页面管理控制器
-// @Summary 页面管理API
-// @Description 提供页面相关的CRUD操作及数据统计功能
-// @Tags Pages
 type Pages struct {
 	// 继承
 	base
 }
 
 // IGET - 获取页面数据
-// @Summary 获取页面数据
-// @Description 根据不同方法获取页面相关数据
-// @Tags Pages
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(one, all, sum, min, max, rand, count, column)
-// @Param id query int false "页面ID"
-// @Param key query string false "页面标识"
-// @Param where query string false "查询条件"
-// @Param order query string false "排序方式"
-// @Param field query string false "字段过滤"
-// @Param page query int false "页码"
-// @Success 200 {object} map[string]interface{} "成功响应"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/pages/{method} [get]
 func (this *Pages) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -61,24 +43,6 @@ func (this *Pages) IGET(ctx *gin.Context) {
 }
 
 // IPOST - 创建/保存页面
-// @Summary 创建/保存页面
-// @Description 创建新页面或保存页面数据（包含创建和更新）
-// @Tags Pages
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(save, create)
-// @Param key formData string true "页面标识"
-// @Param title formData string true "页面标题"
-// @Param content formData string true "页面内容"
-// @Param remark formData string false "页面备注"
-// @Param tags formData string false "页面标签"
-// @Param editor formData string false "编辑器类型"
-// @Param json formData string false "JSON数据"
-// @Param text formData string false "文本数据"
-// @Success 200 {object} map[string]interface{} "成功响应，包含页面ID"
-// @Failure 401 {object} map[string]interface{} "未登录"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/pages/{method} [post]
 func (this *Pages) IPOST(ctx *gin.Context) {
     method := strings.ToLower(ctx.Param("method"))
     allow := map[string]any{
@@ -95,25 +59,6 @@ func (this *Pages) IPOST(ctx *gin.Context) {
 }
 
 // IPUT - 更新/恢复页面数据
-// @Summary 更新/恢复页面数据
-// @Description 根据不同方法更新或恢复页面相关数据
-// @Tags Pages
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(update, restore)
-// @Param id formData int true "页面ID"
-// @Param key formData string false "页面标识"
-// @Param title formData string false "页面标题"
-// @Param content formData string false "页面内容"
-// @Param remark formData string false "页面备注"
-// @Param tags formData string false "页面标签"
-// @Param editor formData string false "编辑器类型"
-// @Param json formData string false "JSON数据"
-// @Param text formData string false "文本数据"
-// @Success 200 {object} map[string]interface{} "成功响应，包含页面ID"
-// @Failure 401 {object} map[string]interface{} "未登录"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/pages/{method} [put]
 func (this *Pages) IPUT(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
@@ -134,17 +79,6 @@ func (this *Pages) IPUT(ctx *gin.Context) {
 }
 
 // IDEL - 删除页面数据
-// @Summary 删除页面数据
-// @Description 根据不同方法删除页面数据（支持软删除、硬删除和清空回收站）
-// @Tags Pages
-// @Accept json
-// @Produce json
-// @Param method path string true "方法名" Enums(remove, delete, clear)
-// @Param ids formData string true "页面ID列表，逗号分隔"
-// @Success 200 {object} map[string]interface{} "成功响应，包含删除的ID列表"
-// @Failure 401 {object} map[string]interface{} "未登录"
-// @Failure 405 {object} map[string]interface{} "方法调用错误"
-// @Router /api/pages/{method} [delete]
 func (this *Pages) IDEL(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))

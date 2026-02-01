@@ -77,10 +77,10 @@ func InitAuthPages() {
 		{Name: "友链分组", Icon: "group", Path: "/admin/links/group", Size: "14px"},
 		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "14px"},
 		{Name: "权限分组", Icon: "group", Path: "/admin/auth/group", Size: "14px"},
-		{Name: "管理页面", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 		{Name: "接口密钥", Icon: "key", Path: "/admin/api/keys", Size: "14px"},
 		{Name: "IP黑名单", Icon: "qps", Path: "/admin/ip/black", Size: "14px"},
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
+		{Name: "管理后台页面", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 	}
 
 	wg := sync.WaitGroup{}

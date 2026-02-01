@@ -60,6 +60,21 @@ func InitAuthGroup() {
 
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
+    // 保护系统管理员分组核心字段
+    if this.Id == 1 {
+        // 强制重置核心字段为初始值（防止被篡改）
+        resetFields := map[string]any{
+            "Root":   1,
+            "Rules":  "all",
+            "Pages":  "all",
+            "Key":    "admin",
+            "Name":   "系统管理员",
+            "Default": 0,
+        }
+        if err := tx.Model(this).Updates(resetFields).Error; err != nil {
+            return fmt.Errorf("重置系统管理员分组字段失败：%v", err)
+        }
+    }
 
 	// key 唯一处理
 	if !utils.Is.Empty(this.Key) {
@@ -73,7 +88,6 @@ func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
 
 // AfterFind - 查询Hook
 func (this *AuthGroup) AfterFind(tx *gorm.DB) (err error) {
-
 	this.Result = this.result()
 	this.Text   = cast.ToString(this.Text)
 	this.Json   = utils.Json.Decode(this.Json)
@@ -82,15 +96,11 @@ func (this *AuthGroup) AfterFind(tx *gorm.DB) (err error) {
 
 // result - 返回结果
 func (this *AuthGroup) result() (result map[string]any) {
-
 	var users any
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-
 	go this.users(&wg, &users)
-
 	wg.Wait()
-
 	return map[string]any{
 		"users"   : users,
 	}
@@ -98,9 +108,7 @@ func (this *AuthGroup) result() (result map[string]any) {
 
 // tags - 标签
 func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
-
 	defer wg.Done()
-
 	// 标签信息
 	tags  := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Uids, "|")))
 	*result = facade.DB.Model(&[]Users{}).WhereIn("id", tags).Column("id", "nickname", "avatar", "account")
@@ -108,8 +116,12 @@ func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
 
 // Auth 应用权限
 func (this *AuthGroup) Auth(uid any, group any, isRemove bool) {
-
 	for _, id := range utils.Unity.Ids(group) {
+		// 禁止修改系统管理员分组（ID=1）的用户关联
+		if id == 1 {
+			facade.Log.Warn(map[string]any{"msg": "系统管理员分组禁止修改用户关联", "groupId": id, "uid": uid})
+			continue
+		}
 
 		item := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", id).Find()
 		if utils.Is.Empty(item) {
@@ -145,4 +157,14 @@ func (this *AuthGroup) Auth(uid any, group any, isRemove bool) {
 			"uids": result,
 		})
 	}
+}
+
+// BeforeDelete - 删除前Hook（软删除/物理删除都会触发）
+func (this *AuthGroup) BeforeDelete(tx *gorm.DB) (err error) {
+    // 禁止删除系统管理员分组（ID=1）
+    if this.Id == 1 {
+        facade.Log.Warn(map[string]any{"msg": "尝试删除系统管理员分组被拦截", "groupId": this.Id})
+        return errors.New("禁止删除系统管理员分组！")
+    }
+    return
 }

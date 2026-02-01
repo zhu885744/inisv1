@@ -70,7 +70,7 @@ func (this *AuthGroup) IPUT(ctx *gin.Context) {
 	allow := map[string]any{
 		"update":  this.update,
 		"restore": this.restore,
-		"uids":	   this.uids,
+		"uids":    this.uids,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -112,7 +112,7 @@ func (this *AuthGroup) INDEX(ctx *gin.Context) {
 // 删除缓存
 func (this *AuthGroup) delCache() {
 	// 删除缓存
-	facade.Cache.DelTags([]any{"[GET]","auth-group"})
+	facade.Cache.DelTags([]any{"[GET]", "auth-group"})
 }
 
 // one 获取指定数据
@@ -177,8 +177,8 @@ func (this *AuthGroup) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"order":       "create_time desc",
+		"page":  1,
+		"order": "create_time desc",
 	})
 
 	// 表数据结构体
@@ -241,7 +241,7 @@ func (this *AuthGroup) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -328,7 +328,7 @@ func (this *AuthGroup) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -380,7 +380,7 @@ func (this *AuthGroup) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -631,6 +631,27 @@ func (this *AuthGroup) column(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
+// 判断是否为系统管理员分组
+func (this *AuthGroup) isSystemAdminGroup(ids []int) (bool, []int) {
+	// 定义系统管理员分组的标识
+	systemGroupIds := facade.DB.Model(&model.AuthGroup{}).
+    Where("id", "=", 1). // 直接锁定系统管理员分组ID（唯一）
+    WhereIn("id", ids).
+    Column("id")
+
+	// 核心修复1：将 []any 转换为 []int
+	systemIdsAny := utils.Unity.Ids(systemGroupIds)
+	systemIds := make([]int, 0, len(systemIdsAny))
+	for _, id := range systemIdsAny {
+		systemIds = append(systemIds, cast.ToInt(id))
+	}
+
+	if len(systemIds) > 0 {
+		return true, systemIds
+	}
+	return false, nil
+}
+
 // remove 软删除
 func (this *AuthGroup) remove(ctx *gin.Context) {
 
@@ -640,33 +661,49 @@ func (this *AuthGroup) remove(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// id 数组 - 参数归一化
-	ids := utils.Unity.Ids(params["ids"])
-
-	if utils.Is.Empty(ids) {
+	idsAny := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(idsAny) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	// 核心修复2：将 []any 转换为 []int
+	ids := make([]int, 0, len(idsAny))
+	for _, id := range idsAny {
+		ids = append(ids, cast.ToInt(id))
+	}
+
+	// 检查是否包含系统管理员分组
+	isSys, sysIds := this.isSystemAdminGroup(ids)
+	if isSys {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员分组！", sysIds), 403)
 		return
 	}
 
 	item := facade.DB.Model(&table).Where("default", "!=", 1)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	allowIdsAny := utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	allowIds := make([]int, 0, len(allowIdsAny))
+	for _, id := range allowIdsAny {
+		allowIds = append(allowIds, cast.ToInt(id))
+	}
 
 	// 无可操作数据
-	if utils.Is.Empty(ids) {
+	if utils.Is.Empty(allowIds) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
 	// 软删除
-	tx := item.Delete(ids)
+	tx := item.Delete(allowIds)
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": allowIds}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -678,33 +715,48 @@ func (this *AuthGroup) delete(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// id 数组 - 参数归一化
-	ids := utils.Unity.Ids(params["ids"])
-
-	if utils.Is.Empty(ids) {
+	idsAny := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(idsAny) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	ids := make([]int, 0, len(idsAny))
+	for _, id := range idsAny {
+		ids = append(ids, cast.ToInt(id))
+	}
+
+	// 检查是否包含系统管理员分组
+	isSys, sysIds := this.isSystemAdminGroup(ids)
+	if isSys {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止删除系统管理员分组！", sysIds), 403)
 		return
 	}
 
 	item := facade.DB.Model(&table).WithTrashed().Where("default", "!=", 1)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	allowIdsAny := utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	allowIds := make([]int, 0, len(allowIdsAny))
+	for _, id := range allowIdsAny {
+		allowIds = append(allowIds, cast.ToInt(id))
+	}
 
 	// 无可操作数据
-	if utils.Is.Empty(ids) {
+	if utils.Is.Empty(allowIds) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
 	// 真实删除
-	tx := item.Force().Delete(ids)
+	tx := item.Force().Delete(allowIds)
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": allowIds}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -713,9 +765,23 @@ func (this *AuthGroup) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.AuthGroup{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
-	ids := utils.Unity.Ids(item.Column("id"))
+	// 获取回收站中所有ID
+	idsAny := utils.Unity.Ids(item.Column("id"))
+	
+	// 核心修复4：将 []any 转换为 []int
+	ids := make([]int, 0, len(idsAny))
+	for _, id := range idsAny {
+		ids = append(ids, cast.ToInt(id))
+	}
+
+	// 检查是否包含系统管理员分组
+	isSys, sysIds := this.isSystemAdminGroup(ids)
+	if isSys {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止清空系统管理员分组 %v ！", sysIds), 403)
+		return
+	}
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -724,14 +790,14 @@ func (this *AuthGroup) clear(ctx *gin.Context) {
 	}
 
 	// 找到所有软删除的数据
-	tx := item.Force().Delete()
+	tx := item.WhereIn("id", ids).Force().Delete() // 限定ID范围
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -743,33 +809,42 @@ func (this *AuthGroup) restore(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// id 数组 - 参数归一化
-	ids := utils.Unity.Ids(params["ids"])
-
-	if utils.Is.Empty(ids) {
+	idsAny := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(idsAny) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
 		return
+	}
+
+	// 转换为 []int
+	ids := make([]int, 0, len(idsAny))
+	for _, id := range idsAny {
+		ids = append(ids, cast.ToInt(id))
 	}
 
 	item := facade.DB.Model(&table).OnlyTrashed().WhereIn("id", ids)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.Column("id"))
+	allowIdsAny := utils.Unity.Ids(item.Column("id"))
+	allowIds := make([]int, 0, len(allowIdsAny))
+	for _, id := range allowIdsAny {
+		allowIds = append(allowIds, cast.ToInt(id))
+	}
 
 	// 无可操作数据
-	if utils.Is.Empty(ids) {
+	if utils.Is.Empty(allowIds) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
 	// 还原数据
-	tx :=  facade.DB.Model(&table).OnlyTrashed().Restore(ids)
+	tx := facade.DB.Model(&table).OnlyTrashed().Restore(allowIds)
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": allowIds}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // uids 更新用户组成员
@@ -780,6 +855,7 @@ func (this *AuthGroup) uids(ctx *gin.Context) {
 	// 获取请求参数
 	params := this.params(ctx)
 
+	// 基础参数校验
 	if utils.Is.Empty(params["uid"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid"), 400)
 		return

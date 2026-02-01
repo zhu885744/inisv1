@@ -18,7 +18,7 @@ import (
 
 // @title inis API
 // @version 1.0
-// @description 基于Gin框架和Gorm二次封装的Go语言Web开发框架
+// @description 基于 Go 语言开发的高性能内容管理系统
 // @termsOfService http://swagger.io/terms/
 
 // @contact.name 不语
