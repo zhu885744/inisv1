@@ -1,15 +1,16 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Comment struct {
@@ -60,7 +61,14 @@ func (this *Comment) IPOST(ctx *gin.Context) {
 	}
 
 	// 删除缓存
-	go this.delCache()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "删除缓存协程发生错误")
+			}
+		}()
+		this.delCache()
+	}()
 }
 
 // IPUT - PUT请求本体
@@ -80,7 +88,14 @@ func (this *Comment) IPUT(ctx *gin.Context) {
 	}
 
 	// 删除缓存
-	go this.delCache()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "删除缓存协程发生错误")
+			}
+		}()
+		this.delCache()
+	}()
 }
 
 // IDEL - DELETE请求本体
@@ -101,7 +116,14 @@ func (this *Comment) IDEL(ctx *gin.Context) {
 	}
 
 	// 删除缓存
-	go this.delCache()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "删除缓存协程发生错误")
+			}
+		}()
+		this.delCache()
+	}()
 }
 
 // INDEX - GET请求本体
@@ -112,7 +134,7 @@ func (this *Comment) INDEX(ctx *gin.Context) {
 // 删除缓存
 func (this *Comment) delCache() {
 	// 删除缓存
-	facade.Cache.DelTags([]any{"[GET]","comment"})
+	facade.Cache.DelTags([]any{"[GET]", "comment"})
 }
 
 // one 获取指定数据
@@ -177,14 +199,14 @@ func (this *Comment) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"order":       "create_time desc",
+		"page":  1,
+		"order": "create_time desc",
 	})
 
 	// 表数据结构体
 	table := model.Comment{}
 	// 允许查询的字段
-	var allow []any
+	allow := []any{"pid", "bind_id", "bind_type", "editor"}
 	// 动态给结构体赋值
 	for key, val := range params {
 		// 防止恶意传入字段
@@ -241,7 +263,7 @@ func (this *Comment) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -249,21 +271,18 @@ func (this *Comment) rand(ctx *gin.Context) {
 	onlyTrashed := cast.ToBool(params["onlyTrashed"])
 	withTrashed := cast.ToBool(params["withTrashed"])
 
-	item := facade.DB.Model(&model.Comment{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	// 直接使用数据库的随机查询功能，提高性能
+	mold := facade.DB.Model(&[]model.Comment{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	if !utils.Is.Empty(except) {
-		item = item.Where("id", "NOT IN", except)
+		mold.Where("id", "NOT IN", except)
 	}
+	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
-	// 从全部的 id 中随机选取指定数量的 id
-	ids := utils.Rand.Slice(utils.Unity.Ids(item.Column("id")), limit)
+	// 使用 ORDER BY RAND() 进行随机查询
+	item := mold.Order("RAND()").Limit(limit).Select()
 
-	// 查询条件
-	mold := facade.DB.Model(&[]model.Comment{}).Where("id", "IN", ids)
-	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed).IWhere(params["where"]).IOr(params["or"])
-	mold.ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// 查询并打乱顺序
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	// 排除字段
+	data := utils.ArrayMapWithField(item, params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -333,6 +352,9 @@ func (this *Comment) create(ctx *gin.Context) {
 			return
 		}
 		comment = cast.ToStringMap(cast.ToStringMap(page["json"])["comment"])
+	default:
+		// 对于其他类型，使用全局评论配置
+		comment = this.config("comment")
 	}
 
 	// 允许评论选项继承了父级配置
@@ -347,10 +369,14 @@ func (this *Comment) create(ctx *gin.Context) {
 	}
 
 	// 表数据结构体
+	agent := this.header(ctx, "User-Agent")
+	if len(agent) > 511 {
+		agent = agent[:511] // 截断到511字符，防止超出数据库字段长度
+	}
 	table := model.Comment{
-		Uid: user.Id,
-		Agent: this.header(ctx, "User-Agent"),
-		Ip: cast.ToString(this.get(ctx, "ip")),
+		Uid:        user.Id,
+		Agent:      agent,
+		Ip:         ctx.ClientIP(), // 使用真实的客户端IP，防止伪造
 		CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix(),
 	}
 	allow := []any{"pid", "content", "bind_id", "bind_type", "editor", "json", "text"}
@@ -381,15 +407,20 @@ func (this *Comment) create(ctx *gin.Context) {
 
 	// 更新用户经验
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "更新用户经验协程发生错误")
+			}
+		}()
 		_ = (&model.EXP{}).Add(model.EXP{
-			Uid:  user.Id,
-			Type: "comment",
-			BindId: table.BindId,
+			Uid:      user.Id,
+			Type:     "comment",
+			BindId:   table.BindId,
 			BindType: table.BindType,
 		})
 	}()
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -456,7 +487,7 @@ func (this *Comment) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -747,7 +778,7 @@ func (this *Comment) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -790,7 +821,7 @@ func (this *Comment) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -799,7 +830,7 @@ func (this *Comment) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Comment{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
@@ -822,7 +853,7 @@ func (this *Comment) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -865,7 +896,7 @@ func (this *Comment) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 // replies 递归获取子评论的 id 列表
@@ -896,9 +927,9 @@ func (this *Comment) flat(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":        1,
-		"bind_type":   "article",
-		"order":       "create_time desc",
+		"page":      1,
+		"bind_type": "article",
+		"order":     "create_time desc",
 	})
 
 	if utils.Is.Empty(params["bind_id"]) {

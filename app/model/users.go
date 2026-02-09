@@ -33,7 +33,7 @@ type Users struct {
 	Text         any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
 	Result       any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
 	LoginTime    int64                 `gorm:"size:32; comment:登录时间; default:Null;" json:"login_time"`
-	Status       int                   `gorm:"tinyint;default:0;comment:'状态（0正常 1冻结）'" json:"status"`
+	Status       int                   `gorm:"tinyint;default:0;comment:状态（0正常 1冻结）" json:"status"`
 	CreateTime   int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 	UpdateTime   int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime   soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`

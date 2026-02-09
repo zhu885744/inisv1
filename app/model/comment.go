@@ -1,24 +1,25 @@
 package model
 
 import (
+	"inis/app/facade"
+	"sync"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
-	"sync"
 )
 
 type Comment struct {
-	Id         int     				 `gorm:"type:int(32); comment:主键;" json:"id"`
-	Pid		   int     				 `gorm:"type:int(32); comment:父级ID; default:0;" json:"pid"`
-	Uid		   int     				 `gorm:"type:int(32); comment:用户ID; default:0;" json:"uid"`
-	Content    string  				 `gorm:"type:varchar(1024); comment:内容; default:Null;" json:"content"`
-	Ip         string  				 `gorm:"comment:IP; default:Null;" json:"ip"`
-	Agent      string  				 `gorm:"type:varchar(512); comment:浏览器信息; default:Null;" json:"agent"`
-	BindId 	   int     				 `gorm:"type:int(32); comment:绑定ID; default:0;" json:"bind_id"`
-	BindType   string  				 `gorm:"comment:绑定类型; default:'article';" json:"bind_type"`
-	Editor     string 				 `gorm:"comment:编辑器; default:'text';" json:"editor"`
+	Id       int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Pid      int    `gorm:"type:int(32); comment:父级ID; default:0;" json:"pid"`
+	Uid      int    `gorm:"type:int(32); comment:用户ID; default:0;" json:"uid"`
+	Content  string `gorm:"type:varchar(1024); comment:内容; default:Null;" json:"content"`
+	Ip       string `gorm:"comment:IP; default:Null;" json:"ip"`
+	Agent    string `gorm:"type:varchar(512); comment:浏览器信息; default:Null;" json:"agent"`
+	BindId   int    `gorm:"type:int(32); comment:绑定ID; default:0;" json:"bind_id"`
+	BindType string `gorm:"comment:绑定类型; default:'article';" json:"bind_type"`
+	Editor   string `gorm:"comment:编辑器; default:'text';" json:"editor"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -41,48 +42,39 @@ func InitComment() {
 // AfterFind - 查询Hook
 func (this *Comment) AfterFind(tx *gorm.DB) (err error) {
 
-	this.Result = this.result()
-	this.Text   = cast.ToString(this.Text)
-	this.Json   = utils.Json.Decode(this.Json)
+	// 同步获取结果，避免在批量查询时创建大量协程
+	this.Result = this.syncResult()
+	this.Text = cast.ToString(this.Text)
+	this.Json = utils.Json.Decode(this.Json)
 	return
 }
 
-// result - 返回结果
-func (this *Comment) result() (result map[string]any) {
+// syncResult - 同步返回结果
+func (this *Comment) syncResult() (result map[string]any) {
 
 	var page, author, article any
 
-	wg := sync.WaitGroup{}
-	wg.Add(3)
-
-	go this.page(&wg, &page)
-	go this.author(&wg, &author)
-	go this.article(&wg, &article)
-
-	wg.Wait()
+	// 同步调用，避免协程开销
+	this.pageSync(&page)
+	this.authorSync(&author)
+	this.articleSync(&article)
 
 	return map[string]any{
-		"page":   page,
-		"author": author,
+		"page":    page,
+		"author":  author,
 		"article": article,
 	}
 }
 
-// author - 解析作者信息
-func (this *Comment) author(wg *sync.WaitGroup, result *any) {
-
-	defer wg.Done()
-
+// authorSync - 同步解析作者信息
+func (this *Comment) authorSync(result *any) {
 	// 作者信息
 	user := facade.DB.Model(&Users{}).Find(this.Uid)
 	*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "result"})
 }
 
-// article - 解析文章信息
-func (this *Comment) article(wg *sync.WaitGroup, result *any) {
-
-	defer wg.Done()
-
+// articleSync - 同步解析文章信息
+func (this *Comment) articleSync(result *any) {
 	if this.BindType != "article" {
 		return
 	}
@@ -90,14 +82,29 @@ func (this *Comment) article(wg *sync.WaitGroup, result *any) {
 	*result = utils.Map.WithField(facade.DB.Model(&Article{}).Find(this.BindId), []string{"id", "title"})
 }
 
-// page - 解析页面信息
-func (this *Comment) page(wg *sync.WaitGroup, result *any) {
-
-	defer wg.Done()
-
+// pageSync - 同步解析页面信息
+func (this *Comment) pageSync(result *any) {
 	if this.BindType != "page" {
 		return
 	}
 
 	*result = utils.Map.WithField(facade.DB.Model(&Pages{}).Find(this.BindId), []string{"id", "key", "title"})
+}
+
+// author - 解析作者信息（保留原有方法，兼容可能的其他调用）
+func (this *Comment) author(wg *sync.WaitGroup, result *any) {
+	defer wg.Done()
+	this.authorSync(result)
+}
+
+// article - 解析文章信息（保留原有方法，兼容可能的其他调用）
+func (this *Comment) article(wg *sync.WaitGroup, result *any) {
+	defer wg.Done()
+	this.articleSync(result)
+}
+
+// page - 解析页面信息（保留原有方法，兼容可能的其他调用）
+func (this *Comment) page(wg *sync.WaitGroup, result *any) {
+	defer wg.Done()
+	this.pageSync(result)
 }

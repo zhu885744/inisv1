@@ -159,8 +159,17 @@ func (this *ModelStruct) IWhere(where any) *ModelStruct {
 	}
 
 	if utils.Is.String(where) {
-
-		this.Where(where)
+		// 尝试解析为JSON对象
+		jsonData := utils.Json.Decode(where)
+		if jsonData != nil {
+			// 如果解析成功，按Map处理
+			for key, val := range cast.ToStringMap(jsonData) {
+				this.Where(key, val)
+			}
+		} else {
+			// 解析失败，按原字符串处理
+			this.Where(where)
+		}
 
 	} else if utils.Is.Slice(where) {
 
@@ -175,8 +184,8 @@ func (this *ModelStruct) IWhere(where any) *ModelStruct {
 
 	} else if utils.Is.MapAny(where) {
 
-		for _, val := range cast.ToStringMap(where) {
-			this.Where(val)
+		for key, val := range cast.ToStringMap(where) {
+			this.Where(key, val)
 		}
 	}
 
@@ -429,12 +438,32 @@ func (this *ModelStruct) Like(args ...any) *ModelStruct {
 			}
 		} else {
 
-			// 情况三：字符串 - 必须空格分隔且长度为3 - 否则不处理
+			// 情况三：字符串 - 支持空格或管道分隔
 			if reflect.TypeOf(args[0]).Kind() == reflect.String {
-				str := strings.Split(cast.ToString(args[0]), " ")
-				if len(str) == 2 {
-					query := fmt.Sprintf("`%v` LIKE ?", str[0])
-					this.model.Where(query, str[1])
+				str := cast.ToString(args[0])
+				var field, value string
+
+				// 检查是否包含管道分隔符
+				if strings.Contains(str, "|") {
+					// 管道分隔格式："字段名|搜索值"
+					parts := strings.SplitN(str, "|", 2)
+					if len(parts) == 2 {
+						field = strings.TrimSpace(parts[0])
+						value = strings.TrimSpace(parts[1])
+					}
+				} else {
+					// 空格分隔格式："字段名 搜索值"
+					parts := strings.SplitN(str, " ", 2)
+					if len(parts) == 2 {
+						field = strings.TrimSpace(parts[0])
+						value = strings.TrimSpace(parts[1])
+					}
+				}
+
+				// 如果成功解析出字段名和搜索值
+				if field != "" && value != "" {
+					query := fmt.Sprintf("`%v` LIKE ?", field)
+					this.model.Where(query, value)
 				}
 			}
 		}
