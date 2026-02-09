@@ -13,10 +13,13 @@ func Cors() gin.HandlerFunc {
 		// 设置跨域相关响应头
 		// 预检请求的缓存时间（1800秒=30分钟），减少OPTIONS请求次数
 		ctx.Header("Access-Control-Max-Age", "1800")
-		// 允许所有源访问（生产环境不建议用*，建议动态匹配前端域名）
-		ctx.Header("Access-Control-Allow-Origin", "*")
-		// 注释掉了允许携带凭证（如Cookie），如果开启，Allow-Origin不能为*
-		// ctx.Header("Access-Control-Allow-Credentials", "true")
+		// 根据请求的Origin动态设置Access-Control-Allow-Origin
+		origin := ctx.Request.Header.Get("Origin")
+		if origin != "" {
+			ctx.Header("Access-Control-Allow-Origin", origin)
+		}
+		// 允许携带凭证（如Cookie）
+		ctx.Header("Access-Control-Allow-Credentials", "true")
 		// 设置响应内容类型为JSON，编码UTF-8
 		ctx.Header("Content-Type", "application/json; charset=utf-8")
 		// 允许的HTTP请求方法
