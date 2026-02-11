@@ -1,42 +1,78 @@
 package middleware
 
 import (
-	"github.com/gin-gonic/gin"   // 引入Gin核心包
-	"net/http"                   // 引入HTTP标准库
-	"strings"                    // 引入字符串处理库
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/unti-io/go-utils/utils"
+
+	"inis/app/facade"
 )
 
-// Cors 跨域中间件
+// Cors 跨域中间件（从配置文件和环境变量读取配置）
 func Cors() gin.HandlerFunc {
-	// 返回一个符合Gin中间件规范的函数
 	return func(ctx *gin.Context) {
-		// 设置跨域相关响应头
-		// 预检请求的缓存时间（1800秒=30分钟），减少OPTIONS请求次数
-		ctx.Header("Access-Control-Max-Age", "1800")
-		// 根据请求的Origin动态设置Access-Control-Allow-Origin
+		// 核心：直接操作Writer.Header，确保CORS头不被后续逻辑覆盖
+		header := ctx.Writer.Header()
+
+		// 从配置文件和环境变量读取CORS配置
+		// 环境变量优先于配置文件
+		enabled := utils.Env().Get("system.cors.enabled", facade.AppToml.Get("system.cors.enabled", true)).(bool)
+		if !enabled {
+			ctx.Next()
+			return
+		}
+
+		// 读取允许的源列表
+		allowedOriginsStr := utils.Env().Get("system.cors.allowed_origins", facade.AppToml.Get("system.cors.allowed_origins", "https://zhuxu.asia,http://localhost:3000,http://127.0.0.1:3000")).(string)
+		allowedOrigins := make(map[string]bool)
+		for _, origin := range strings.Split(allowedOriginsStr, ",") {
+			origin = strings.TrimSpace(origin)
+			if origin != "" {
+				allowedOrigins[origin] = true
+			}
+		}
+
+		// 读取其他CORS配置
+		maxAge := int(utils.Env().Get("system.cors.max_age", facade.AppToml.Get("system.cors.max_age", 1800)).(int64))
+		allowCredentials := utils.Env().Get("system.cors.allow_credentials", facade.AppToml.Get("system.cors.allow_credentials", true)).(bool)
+		allowedMethods := utils.Env().Get("system.cors.allowed_methods", facade.AppToml.Get("system.cors.allowed_methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")).(string)
+		allowedHeaders := utils.Env().Get("system.cors.allowed_headers", facade.AppToml.Get("system.cors.allowed_headers", "X-Khronos, X-Gorgon, X-Argus, X-Ss-Stub, Token, Authorization, i-api-key, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-CSRF-TOKEN, X-Requested-With")).(string)
+		exposedHeaders := utils.Env().Get("system.cors.exposed_headers", facade.AppToml.Get("system.cors.exposed_headers", "Content-Type, Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers")).(string)
+		defaultOrigin := utils.Env().Get("system.cors.default_origin", facade.AppToml.Get("system.cors.default_origin", "https://cs.zhuxu.asia")).(string)
+
+		// 1. 基础CORS配置（适配前后端跨域核心需求）
+		header.Set("Access-Control-Max-Age", strconv.Itoa(maxAge))
+		header.Set("Access-Control-Allow-Credentials", strconv.FormatBool(allowCredentials))
+		header.Set("Content-Type", "application/json; charset=utf-8")
+		header.Set("Access-Control-Allow-Methods", strings.TrimSpace(allowedMethods))
+		header.Set("Access-Control-Allow-Headers", strings.TrimSpace(allowedHeaders))
+		header.Set("Access-Control-Expose-Headers", strings.TrimSpace(exposedHeaders))
+
+		// 2. 精准匹配Origin（仅允许配置的源）
 		origin := ctx.Request.Header.Get("Origin")
 		if origin != "" {
-			ctx.Header("Access-Control-Allow-Origin", origin)
+			if allowedOrigins[origin] {
+				// 允许的Origin：直接返回请求的Origin
+				header.Set("Access-Control-Allow-Origin", origin)
+			} else {
+				// 非法Origin：返回默认域名（阻断跨域，保证安全）
+				header.Set("Access-Control-Allow-Origin", defaultOrigin)
+			}
+		} else {
+			// 无Origin：返回默认域名
+			header.Set("Access-Control-Allow-Origin", defaultOrigin)
 		}
-		// 允许携带凭证（如Cookie）
-		ctx.Header("Access-Control-Allow-Credentials", "true")
-		// 设置响应内容类型为JSON，编码UTF-8
-		ctx.Header("Content-Type", "application/json; charset=utf-8")
-		// 允许的HTTP请求方法
-		ctx.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS, PATCH")
-		// 允许前端携带的自定义请求头（如Token、Authorization等）
-		ctx.Header("Access-Control-Allow-Headers", "X-Khronos, X-Gorgon, X-Argus, X-Ss-Stub, Token, Authorization, i-api-key, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-CSRF-TOKEN, X-Requested-With")
-		// 允许前端访问的响应头（扩展默认可访问的响应头）
-		ctx.Header("Access-Control-Expose-Headers", "Content-Type, Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers")
 
-		// 处理OPTIONS预检请求
-		// 判断当前请求方法是否为OPTIONS（前端跨域复杂请求会先发送OPTIONS预检）
+		// 3. 处理OPTIONS预检请求（前端复杂请求必过的环节）
 		if strings.ToUpper(ctx.Request.Method) == "OPTIONS" {
-			// 直接返回204 No Content，终止后续中间件执行
 			ctx.AbortWithStatus(http.StatusNoContent)
+			return // 明确终止，避免执行后续逻辑
 		}
 
-		// 放行正常请求，执行后续中间件/处理器
+		// 放行正常请求
 		ctx.Next()
 	}
 }

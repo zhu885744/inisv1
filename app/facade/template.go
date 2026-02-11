@@ -11,6 +11,25 @@ port        = 8642
 debug       = false
 # 登录token名称（别乱改，别作死）
 token_name  = "INIS_LOGIN_TOKEN"
+
+# CORS配置
+[system.cors]
+# 是否启用CORS
+enabled = true
+# 允许的源列表（多个源用逗号分隔）
+allowed_origins = "https://zhuxu.asia,http://localhost:3000,http://127.0.0.1:3000"
+# 允许的HTTP方法
+allowed_methods = "GET, POST, PATCH, PUT, DELETE, OPTIONS"
+# 允许的HTTP头
+allowed_headers = "X-Khronos, X-Gorgon, X-Argus, X-Ss-Stub, Token, Authorization, i-api-key, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-CSRF-TOKEN, X-Requested-With"
+# 暴露的HTTP头
+exposed_headers = "Content-Type, Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers"
+# 是否允许携带凭证
+allow_credentials = true
+# 预检请求的缓存时间（秒）
+max_age = 1800
+# 默认的源（当请求源不在白名单中时使用）
+default_origin = "https://cs.zhuxu.asia"
 `
 
 // TempDatabase - 数据库配置模板
