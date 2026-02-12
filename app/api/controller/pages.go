@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/md5"
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
@@ -44,18 +46,18 @@ func (this *Pages) IGET(ctx *gin.Context) {
 
 // IPOST - 创建/保存页面
 func (this *Pages) IPOST(ctx *gin.Context) {
-    method := strings.ToLower(ctx.Param("method"))
-    allow := map[string]any{
-        "save":   this.save,
-        "create": this.create,
-        "update": this.update,
-    }
-    err := this.call(allow, method, ctx)
-    if err != nil {
-        this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-        return
-    }
-    go this.delCache() // 新增删除缓存方法
+	method := strings.ToLower(ctx.Param("method"))
+	allow := map[string]any{
+		"save":   this.save,
+		"create": this.create,
+		"update": this.update,
+	}
+	err := this.call(allow, method, ctx)
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
+		return
+	}
+	go this.delCache() // 新增删除缓存方法
 }
 
 // IPUT - 更新/恢复页面数据
@@ -157,6 +159,8 @@ func (this *Pages) one(ctx *gin.Context) {
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
+		// 更新页面浏览量
+		go this.updateViews(ctx, cast.ToStringMap(data))
 	}
 
 	// 更新用户经验
@@ -334,7 +338,7 @@ func (this *Pages) create(ctx *gin.Context) {
 		LastUpdate:  time.Now().Unix(),
 		PublishTime: publishTime, // 赋值发布时间
 	}
-	
+
 	// 允许的字段添加publish_time
 	allow := []any{"key", "title", "content", "remark", "tags", "editor", "json", "text", "publish_time"}
 
@@ -382,9 +386,9 @@ func (this *Pages) update(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
-        this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
-        return
-    }
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
+		return
+	}
 
 	// 验证器
 	err := validator.NewValid("pages", params)
@@ -852,4 +856,32 @@ func (this *Pages) config(ctx *gin.Context) (result map[string]any) {
 	go facade.Cache.Set(cacheName, result)
 
 	return result
+}
+
+// 更新页面浏览量
+func (this *Pages) updateViews(ctx *gin.Context, data map[string]any) {
+	if utils.Is.Empty(data["id"]) {
+		return
+	}
+
+	// 获取用户设备信息
+	ip := ctx.ClientIP()
+	userAgent := ctx.Request.UserAgent()
+	pageID := cast.ToString(data["id"])
+
+	// 创建唯一缓存键（页面ID + 设备标识）
+	deviceKey := ip + userAgent
+	md5Hash := md5.Sum([]byte(deviceKey))
+	cacheKey := "page_views_cd:" + pageID + ":" + fmt.Sprintf("%x", md5Hash)
+
+	// 检查是否在冷却期内
+	if facade.Cache.Has(cacheKey) {
+		return
+	}
+
+	// 更新浏览量
+	facade.DB.Model(&model.Pages{}).Where("id", data["id"]).Inc("views", 1)
+
+	// 设置冷却期（24小时）
+	facade.Cache.Set(cacheKey, true, 86400)
 }
