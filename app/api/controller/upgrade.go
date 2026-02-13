@@ -28,6 +28,15 @@ func (this *Upgrade) IGET(ctx *gin.Context) {
 		"list":   this.list,
 		"detail": this.detail,
 	}
+
+	// 调试信息
+	facade.Log.Info(map[string]any{
+		"allow":       allow,
+		"method":      method,
+		"allow_empty": utils.Is.Empty(allow),
+		"url_path":    ctx.Request.URL.Path,
+	}, "Upgrade IGET debug")
+
 	err := this.call(allow, method, ctx)
 
 	if err != nil {
