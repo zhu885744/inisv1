@@ -402,8 +402,18 @@ func createAuthRules() (result []AuthRules) {
 			"DELETE": {"remove", "delete", "clear"},
 		},
 		"upgrade": {
-			"POST": {"path=theme&name=主题升级", "path=system&name=系统升级"},
-		},
+            "GET": {
+                "path=list&type=default&name=获取版本列表",
+                "path=detail&type=default&name=获取版本详情",
+            },
+            "POST": {
+                "path=theme&type=default&name=主题升级",
+                "path=system&type=default&name=系统升级",
+                "path=create&type=default&name=创建版本",
+                "path=update&type=default&name=更新版本",
+                "path=delete&type=default&name=删除版本",
+            },
+        },
 		"search": {
 			"GET": {
 				"path=article&type=common&name=文章搜索",
