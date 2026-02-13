@@ -404,6 +404,14 @@ func createAuthRules() (result []AuthRules) {
 		"upgrade": {
 			"POST": {"path=theme&name=主题升级", "path=system&name=系统升级"},
 		},
+		"search": {
+			"GET": {
+				"path=article&type=common&name=文章搜索",
+				"path=pages&type=common&name=独立页面搜索",
+				"path=tags&type=common&name=标签搜索",
+				"path=all&type=common&name=全局搜索",
+			},
+		},
 	}
 
 	// 接口名称
@@ -433,6 +441,7 @@ func createAuthRules() (result []AuthRules) {
 		"auth-rules":    "【权限规则 API】",
 		"links-group":   "【友链分组 API】",
 		"article-group": "【文章分组 API】",
+		"search":        "【搜索 API】",
 	}
 
 	// 基础方法

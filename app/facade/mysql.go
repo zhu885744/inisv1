@@ -419,9 +419,16 @@ func (this *ModelStruct) IOr(where any) *ModelStruct {
 func (this *ModelStruct) Like(args ...any) *ModelStruct {
 
 	if len(args) >= 2 {
-
-		query := fmt.Sprintf("`%v` LIKE ?", args[0])
-		this.model.Where(query, args[1])
+		field := cast.ToString(args[0])
+		value := cast.ToString(args[1])
+		
+		// 自动添加通配符
+		if !strings.Contains(value, "%") {
+			value = "%" + value + "%"
+		}
+		
+		query := fmt.Sprintf("`%v` LIKE ?", field)
+		this.model.Where(query, value)
 
 	} else if len(args) == 1 {
 
@@ -462,8 +469,16 @@ func (this *ModelStruct) Like(args ...any) *ModelStruct {
 
 				// 如果成功解析出字段名和搜索值
 				if field != "" && value != "" {
+					// 自动添加通配符
+					if !strings.Contains(value, "%") {
+						value = "%" + value + "%"
+					}
 					query := fmt.Sprintf("`%v` LIKE ?", field)
 					this.model.Where(query, value)
+				} else {
+					// 单关键词搜索：默认搜索标题、内容、摘要
+					keyword := "%" + str + "%"
+					this.model.Where("`title` LIKE ? OR `content` LIKE ? OR `abstract` LIKE ?", keyword, keyword, keyword)
 				}
 			}
 		}
@@ -496,7 +511,12 @@ func (this *ModelStruct) ILike(where any) *ModelStruct {
 		var sql string
 		for _, val := range cast.ToStringMap(where) {
 			item := cast.ToSlice(val)
-			sql += fmt.Sprintf("`%v` LIKE '%v' OR ", item[0], item[1])
+			value := cast.ToString(item[1])
+			// 自动添加通配符
+			if !strings.Contains(value, "%") {
+				value = "%" + value + "%"
+			}
+			sql += fmt.Sprintf("`%v` LIKE '%v' OR ", item[0], value)
 		}
 		this.model.Where(strings.TrimRight(sql, "OR "))
 	}
