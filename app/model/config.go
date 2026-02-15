@@ -48,8 +48,15 @@ func InitConfig() {
 				"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 			}), Remark: "页面配置"},
 			{Key: "ARTICLE", Json: utils.Json.Encode(facade.H{
-				"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
-			}), Remark: "主题配置"},
+			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
+		}), Remark: "主题配置"},
+		{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
+			"rate_limit": facade.H{"enabled": 1, "max_count": 5, "time_window": 60}, // 速率限制：每分钟最多5条评论
+			"max_length": 500, // 最大字数限制
+			"require_chinese": 1, // 必须包含中文
+			"sensitive_filter": 1, // 敏感词过滤
+			"sensitive_words": []string{"色情", "广告", "开户"}, // 自定义敏感词
+		}), Remark: "评论配置"},
 		}
 
 		for _, item := range configs {

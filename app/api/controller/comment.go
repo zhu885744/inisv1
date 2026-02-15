@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -366,6 +368,70 @@ func (this *Comment) create(ctx *gin.Context) {
 	if cast.ToInt(comment["allow"]) == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "评论功能已关闭！"), 400)
 		return
+	}
+
+	// 获取评论配置
+	commentConfig := this.config("comment")
+
+	// 1. 评论速率限制
+	rateLimit := cast.ToStringMap(commentConfig["rate_limit"])
+	if cast.ToInt(rateLimit["enabled"]) == 1 {
+		maxCount := cast.ToInt(rateLimit["max_count"])
+		timeWindow := cast.ToInt(rateLimit["time_window"])
+
+		// 缓存键：用户ID + IP + 当前时间窗口
+		now := time.Now().Unix()
+		timeWindowKey := now / int64(timeWindow)
+		cacheKey := fmt.Sprintf("comment:rate_limit:%d:%s:%d", user.Id, ctx.ClientIP(), timeWindowKey)
+
+		// 获取当前评论次数
+		currentCount := 0
+		if facade.Cache.Has(cacheKey) {
+			currentCount = cast.ToInt(facade.Cache.Get(cacheKey))
+		}
+
+		if currentCount >= maxCount {
+			this.json(ctx, nil, facade.Lang(ctx, "评论过于频繁，请稍后再试！"), 429)
+			return
+		}
+
+		// 增加评论次数并设置缓存
+		facade.Cache.Set(cacheKey, currentCount+1, time.Duration(timeWindow)*time.Second)
+	}
+
+	// 2. 最大字数限制
+	maxLength := cast.ToInt(commentConfig["max_length"])
+	if maxLength > 0 && len(cast.ToString(params["content"])) > maxLength {
+		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
+		return
+	}
+
+	// 3. 评论必须包含中文
+	if cast.ToInt(commentConfig["require_chinese"]) == 1 {
+		hasChinese := false
+		for _, r := range cast.ToString(params["content"]) {
+			if unicode.Is(unicode.Scripts["Han"], r) {
+				hasChinese = true
+				break
+			}
+		}
+		if !hasChinese {
+			this.json(ctx, nil, facade.Lang(ctx, "评论内容必须包含中文！"), 400)
+			return
+		}
+	}
+
+	// 4. 敏感词过滤
+	if cast.ToInt(commentConfig["sensitive_filter"]) == 1 {
+		sensitiveWords := cast.ToStringSlice(commentConfig["sensitive_words"])
+		content := cast.ToString(params["content"])
+
+		for _, word := range sensitiveWords {
+			if strings.Contains(content, word) {
+				this.json(ctx, nil, facade.Lang(ctx, "评论内容包含敏感词，请修改后重试！"), 400)
+				return
+			}
+		}
 	}
 
 	// 表数据结构体
@@ -1008,9 +1074,15 @@ func (this *Comment) flat(ctx *gin.Context) {
 func (this *Comment) config(key ...any) (json map[string]any) {
 
 	var config map[string]any
+	configKey := "ARTICLE"
+
+	// 如果请求的是评论配置，使用 COMMENT 配置
+	if len(key) > 0 && cast.ToString(key[0]) == "comment" {
+		configKey = "COMMENT"
+	}
 
 	// 缓存名称
-	cacheName := "config[ARTICLE]"
+	cacheName := "config[" + configKey + "]"
 	// 是否开启了缓存
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
@@ -1021,7 +1093,7 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 
 	} else {
 
-		config = facade.DB.Model(&model.Config{}).Where("key", "ARTICLE").Find()
+		config = facade.DB.Model(&model.Config{}).Where("key", configKey).Find()
 		// 存储到缓存中
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)

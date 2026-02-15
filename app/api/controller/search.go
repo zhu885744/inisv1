@@ -227,7 +227,7 @@ func (this *Search) searchArticle(keyword string, page, limit int) map[string]in
 	}
 }
 
-// searchPages - 搜索页面
+// searchPages - 搜索独立页面
 func (this *Search) searchPages(keyword string, page, limit int) map[string]interface{} {
 	// 构建搜索条件
 	searchTerm := "%" + keyword + "%"
@@ -253,6 +253,7 @@ func (this *Search) searchPages(keyword string, page, limit int) map[string]inte
 	for _, page := range pages {
 		item := map[string]any{
 			"id":          page.Id,
+			"key":         page.Key,
 			"title":       page.Title,
 			"create_time": page.CreateTime,
 			"views":       page.Views,
@@ -341,7 +342,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 		articleData = append(articleData, item)
 	}
 
-	// 搜索页面
+	// 搜索独立页面
 	var pages []model.Pages
 	pagesQuery := db.Model(&pages).Where("(title LIKE ? OR content LIKE ? OR abstract LIKE ?)", searchTerm, searchTerm, searchTerm)
 	var pagesCount int64
@@ -353,6 +354,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	for _, page := range pages {
 		item := map[string]any{
 			"id":          page.Id,
+			"key":         page.Key,
 			"title":       page.Title,
 			"create_time": page.CreateTime,
 			"views":       page.Views,
