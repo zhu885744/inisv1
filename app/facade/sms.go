@@ -34,13 +34,13 @@ const (
 // SMSResponse - 短信响应
 type SMSResponse struct {
 	// 错误信息
-	Error       error
+	Error error
 	// 结果
-	Result      any
+	Result any
 	// 文本
-	Text        string
+	Text string
 	// 验证码
-	VerifyCode  string
+	VerifyCode string
 }
 
 // SMSInterface - 短信接口
@@ -85,11 +85,11 @@ var SMSToml *utils.ViperResponse
 
 // 全局实例变量
 var (
-	SMS                     SMSInterface
-	GoMail                  *GoMailRequest
-	SMSAliYun               *AliYunSMS
-	SMSAliYunNumberVerify   *AliYunNumberVerify // 阿里云号码验证实例
-	SMSTencent              *TencentSMS
+	SMS                   SMSInterface
+	GoMail                *GoMailRequest
+	SMSAliYun             *AliYunSMS
+	SMSAliYunNumberVerify *AliYunNumberVerify // 阿里云号码验证实例
+	SMSTencent            *TencentSMS
 )
 
 // ========== 初始化函数 ==========
@@ -171,7 +171,7 @@ func initSMSToml() {
 
 	if item.Error != nil {
 		// 替换Log为fmt.Println（避免Log未定义错误）
-		fmt.Printf("SMS配置初始化错误: %v | 位置: %s:%d\n", 
+		fmt.Printf("SMS配置初始化错误: %v | 位置: %s:%d\n",
 			item.Error, utils.Caller().FileName, utils.Caller().Line)
 		return
 	}
@@ -335,9 +335,9 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 
 	// 组装请求参数
 	params := map[string]any{
-		"PhoneNumbers":  tea.String(cast.ToString(phone)),
-		"SignName":      tea.String(cast.ToString(SMSToml.Get("aliyun.sign_name"))),
-		"TemplateCode":  tea.String(templateCode),
+		"PhoneNumbers": tea.String(cast.ToString(phone)),
+		"SignName":     tea.String(cast.ToString(SMSToml.Get("aliyun.sign_name"))),
+		"TemplateCode": tea.String(templateCode),
 		"TemplateParam": tea.String(utils.Json.Encode(map[string]any{
 			"code": code[0],
 			"min":  min,
@@ -451,21 +451,21 @@ func (this *AliYunNumberVerify) SendSmsVerifyCode(phone any, params ...map[strin
 
 	// 初始化默认参数
 	reqParams := map[string]any{
-		"SchemeName":      tea.String("默认方案"),
-		"CountryCode":     tea.String("86"),
-		"PhoneNumber":     tea.String(phoneStr),
-		"SignName":        tea.String(this.SignName),
-		"TemplateCode":    tea.String(this.TemplateCode),
-		"TemplateParam":   tea.String(`{"code":"##code##","min":"5"}`), // 默认系统生成验证码
-		"SmsUpExtendCode": tea.String(""),
-		"OutId":           tea.String(""),
-		"CodeLength":      tea.Int64(6),
-		"ValidTime":       tea.Int64(300),
-		"DuplicatePolicy": tea.Int64(1),
-		"Interval":        tea.Int64(60),
-		"CodeType":        tea.Int64(1),
+		"SchemeName":       tea.String("默认方案"),
+		"CountryCode":      tea.String("86"),
+		"PhoneNumber":      tea.String(phoneStr),
+		"SignName":         tea.String(this.SignName),
+		"TemplateCode":     tea.String(this.TemplateCode),
+		"TemplateParam":    tea.String(`{"code":"##code##","min":"5"}`), // 默认系统生成验证码
+		"SmsUpExtendCode":  tea.String(""),
+		"OutId":            tea.String(""),
+		"CodeLength":       tea.Int64(6),
+		"ValidTime":        tea.Int64(300),
+		"DuplicatePolicy":  tea.Int64(1),
+		"Interval":         tea.Int64(60),
+		"CodeType":         tea.Int64(1),
 		"ReturnVerifyCode": tea.Bool(true),
-		"AutoRetry":       tea.Int64(1),
+		"AutoRetry":        tea.Int64(1),
 	}
 
 	// 覆盖自定义参数
@@ -482,10 +482,16 @@ func (this *AliYunNumberVerify) SendSmsVerifyCode(phone any, params ...map[strin
 				reqParams["CodeLength"] = tea.Int64(cast.ToInt64(v))
 			case "ValidTime":
 				reqParams["ValidTime"] = tea.Int64(cast.ToInt64(v))
+			case "DuplicatePolicy":
+				reqParams["DuplicatePolicy"] = tea.Int64(cast.ToInt64(v))
+			case "Interval":
+				reqParams["Interval"] = tea.Int64(cast.ToInt64(v))
 			case "CodeType":
 				reqParams["CodeType"] = tea.Int64(cast.ToInt64(v))
 			case "ReturnVerifyCode":
 				reqParams["ReturnVerifyCode"] = tea.Bool(cast.ToBool(v))
+			case "AutoRetry":
+				reqParams["AutoRetry"] = tea.Int64(cast.ToInt64(v))
 			}
 		}
 	}

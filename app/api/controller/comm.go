@@ -193,8 +193,8 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":           table.Id,
-		"hash":          utils.Hash.Sum32(table.Password),
+		"uid":  table.Id,
+		"hash": utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除 item 中的密码
@@ -298,13 +298,42 @@ func (this *Comm) register(ctx *gin.Context) {
 			return
 		}
 
+		// 本地频控检查
+		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["social"])
+		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["social"])
+
+		// 检查发送间隔（60秒）
+		lastSendTime := facade.Cache.Get(frequencyCacheName)
+		if !utils.Is.Empty(lastSendTime) {
+			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 检查每日发送限制（10次）
+		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+		if dailyCount >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
 		sms := facade.NewSMS(drives[drive]).VerifyCode(params["social"])
 		if sms.Error != nil {
+			// 处理阿里云频控错误
+			if drive == "sms" && (strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL")) {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+				return
+			}
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
 		// 缓存验证码 - 5分钟
 		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 缓存发送时间 - 60秒
+		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+		// 缓存每日发送次数 - 24小时
+		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
 		return
 	}
@@ -351,8 +380,8 @@ func (this *Comm) register(ctx *gin.Context) {
 	go facade.Cache.Del(cacheName)
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":           table.Id,
-		"hash":          utils.Hash.Sum32(table.Password),
+		"uid":  table.Id,
+		"hash": utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除密码
@@ -442,13 +471,43 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 	if utils.Is.Empty(params["code"]) {
 
 		drive := utils.Ternary(social == "email", "email", "sms")
+
+		// 本地频控检查
+		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["social"])
+		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["social"])
+
+		// 检查发送间隔（60秒）
+		lastSendTime := facade.Cache.Get(frequencyCacheName)
+		if !utils.Is.Empty(lastSendTime) {
+			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 检查每日发送限制（10次）
+		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+		if dailyCount >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
 		sms := facade.NewSMS(drive).VerifyCode(params["social"])
 		if sms.Error != nil {
+			// 处理阿里云频控错误
+			if drive == "sms" && (strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL")) {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+				return
+			}
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
 		// 缓存验证码 - 5分钟
 		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 缓存发送时间 - 60秒
+		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+		// 缓存每日发送次数 - 24小时
+		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
 		return
 	}
@@ -468,8 +527,8 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 	item := facade.DB.Model(&table).Where(social, params["social"]).Find()
 
 	jwt := facade.Jwt().Create(facade.H{
-		"uid":           table.Id,
-		"hash":          utils.Hash.Sum32(table.Password),
+		"uid":  table.Id,
+		"hash": utils.Hash.Sum32(table.Password),
 	})
 
 	// 删除密码

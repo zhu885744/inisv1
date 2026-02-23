@@ -69,11 +69,11 @@ func (this *Users) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"update":     this.update,
-		"restore":    this.restore,
-		"email":      this.email,
-		"phone":      this.phone,
-		"status":     this.status,    // 新增：状态修改接口
+		"update":  this.update,
+		"restore": this.restore,
+		"email":   this.email,
+		"phone":   this.phone,
+		"status":  this.status, // 新增：状态修改接口
 	}
 	err := this.call(allow, method, ctx)
 
@@ -959,6 +959,25 @@ func (this *Users) email(ctx *gin.Context) {
 
 	// 验证码为空，发送验证码
 	if utils.Is.Empty(params["code"]) {
+		// 本地频控检查
+		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["email"])
+		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["email"])
+
+		// 检查发送间隔（60秒）
+		lastSendTime := facade.Cache.Get(frequencyCacheName)
+		if !utils.Is.Empty(lastSendTime) {
+			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 检查每日发送限制（10次）
+		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+		if dailyCount >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
 
 		sms := facade.NewSMS(drive).VerifyCode(params["email"])
 		if sms.Error != nil {
@@ -968,6 +987,10 @@ func (this *Users) email(ctx *gin.Context) {
 
 		// 缓存验证码 - 5分钟
 		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 缓存发送时间 - 60秒
+		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+		// 缓存每日发送次数 - 24小时
+		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 
 		msg := fmt.Sprintf("验证码发送至您的邮箱：%s，请注意查收！", params["email"])
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
@@ -1033,15 +1056,43 @@ func (this *Users) phone(ctx *gin.Context) {
 
 	// 验证码为空，发送验证码
 	if utils.Is.Empty(params["code"]) {
+		// 本地频控检查
+		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["phone"])
+		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["phone"])
+
+		// 检查发送间隔（60秒）
+		lastSendTime := facade.Cache.Get(frequencyCacheName)
+		if !utils.Is.Empty(lastSendTime) {
+			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 检查每日发送限制（10次）
+		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+		if dailyCount >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
 
 		sms := facade.NewSMS(drive).VerifyCode(params["phone"])
 		if sms.Error != nil {
+			// 处理阿里云频控错误
+			if strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL") {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+				return
+			}
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
 
 		// 缓存验证码 - 5分钟
 		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 缓存发送时间 - 60秒
+		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+		// 缓存每日发送次数 - 24小时
+		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 
 		msg := fmt.Sprintf("验证码发送至您的手机：%s，请注意查收！", params["phone"])
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
