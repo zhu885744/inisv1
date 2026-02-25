@@ -486,6 +486,186 @@ func (this *Comment) create(ctx *gin.Context) {
 		})
 	}()
 
+	// 发送评论邮件通知
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "发送评论邮件通知协程发生错误")
+			}
+		}()
+
+		// 获取评论配置
+		commentConfig := this.config("comment")
+		facade.Log.Info(map[string]any{"config": commentConfig}, "加载评论配置")
+
+		emailNotify := cast.ToStringMap(commentConfig["email_notify"])
+		facade.Log.Info(map[string]any{"email_notify": emailNotify}, "加载邮件通知配置")
+
+		// 检查邮件通知是否开启
+		if cast.ToInt(emailNotify["enabled"]) == 1 {
+			facade.Log.Info(nil, "邮件通知功能已开启")
+
+			// 重试机制参数
+			retryCount := cast.ToInt(emailNotify["retry_count"])
+			retryInterval := cast.ToInt(emailNotify["retry_interval"])
+			facade.Log.Info(map[string]any{"retry_count": retryCount, "retry_interval": retryInterval}, "邮件发送重试配置")
+
+			// 获取用户信息
+			userInfo := facade.DB.Model(&model.Users{}).Where("id", user.Id).Find()
+			userEmail := cast.ToString(cast.ToStringMap(userInfo)["email"])
+			facade.Log.Info(map[string]any{"user_id": user.Id, "user_email": userEmail, "user_name": cast.ToString(cast.ToStringMap(userInfo)["name"])}, "获取评论用户信息")
+
+			// 获取文章或页面标题
+			title := ""
+			switch table.BindType {
+			case "article":
+				article := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(article) {
+					title = cast.ToString(cast.ToStringMap(article)["title"])
+				}
+			case "page":
+				page := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(page) {
+					title = cast.ToString(cast.ToStringMap(page)["title"])
+				}
+			}
+
+			// 获取服务器本地时区的当前时间
+			createdAt := time.Now().Format("2006-01-02 15:04:05")
+			facade.Log.Info(map[string]any{"local_time": createdAt}, "获取服务器本地时间")
+
+			// 评论信息
+			commentInfo := map[string]any{
+				"content":      table.Content,
+				"created_at":   createdAt,
+				"author_name":  cast.ToString(cast.ToStringMap(userInfo)["nickname"]),
+				"author_email": userEmail,
+				"ip":           table.Ip,
+				"bind_type":    table.BindType,
+				"bind_id":      table.BindId,
+				"title":        title,
+			}
+			facade.Log.Info(map[string]any{"comment_id": table.Id, "bind_type": table.BindType, "bind_id": table.BindId}, "准备发送邮件通知")
+
+			// 发送邮件通知给管理员（使用邮件配置中的账户作为收件人）
+			adminEmail := cast.ToString(facade.SMSToml.Get("email.account"))
+			facade.Log.Info(map[string]any{"admin_email": adminEmail}, "获取管理员邮箱")
+
+			if utils.Is.Email(adminEmail) {
+				facade.Log.Info(map[string]any{"recipient": adminEmail}, "开始发送邮件给管理员")
+				for i := 0; i <= retryCount; i++ {
+					sms := facade.NewSMS("email")
+					response := sms.SendCommentNotify(adminEmail, commentInfo)
+					if response.Error == nil {
+						facade.Log.Info(map[string]any{"recipient": adminEmail}, "邮件发送给管理员成功")
+						break
+					}
+					if i < retryCount {
+						facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给管理员失败，准备重试")
+						time.Sleep(time.Duration(retryInterval) * time.Second)
+					} else {
+						facade.Log.Error(map[string]any{"error": response.Error, "recipient": adminEmail}, "发送评论邮件通知失败")
+					}
+				}
+			} else {
+				facade.Log.Warn(map[string]any{"admin_email": adminEmail}, "管理员邮箱无效，跳过发送")
+			}
+
+			// 发送邮件通知给文章作者
+			var authorEmail string
+			switch table.BindType {
+			case "article":
+				// 获取文章信息
+				article := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(article) {
+					authorId := cast.ToInt(cast.ToStringMap(article)["uid"])
+					// 获取作者信息
+					author := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+					facade.Log.Info(map[string]any{"article_id": table.BindId, "author_id": authorId, "author_email": authorEmail}, "获取文章作者信息")
+				} else {
+					facade.Log.Warn(map[string]any{"article_id": table.BindId}, "文章不存在，跳过发送给作者")
+				}
+			case "page":
+				// 获取页面信息
+				page := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(page) {
+					authorId := cast.ToInt(cast.ToStringMap(page)["uid"])
+					// 获取作者信息
+					author := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+					facade.Log.Info(map[string]any{"page_id": table.BindId, "author_id": authorId, "author_email": authorEmail}, "获取页面作者信息")
+				} else {
+					facade.Log.Warn(map[string]any{"page_id": table.BindId}, "页面不存在，跳过发送给作者")
+				}
+			default:
+				facade.Log.Warn(map[string]any{"bind_type": table.BindType}, "未知绑定类型，跳过发送给作者")
+			}
+
+			// 发送通知给文章作者，避免重复通知
+			if utils.Is.Email(authorEmail) && authorEmail != userEmail && authorEmail != adminEmail {
+				facade.Log.Info(map[string]any{"recipient": authorEmail}, "开始发送邮件给作者")
+				for i := 0; i <= retryCount; i++ {
+					sms := facade.NewSMS("email")
+					response := sms.SendCommentNotify(authorEmail, commentInfo)
+					if response.Error == nil {
+						facade.Log.Info(map[string]any{"recipient": authorEmail}, "邮件发送给作者成功")
+						break
+					}
+					if i < retryCount {
+						facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给作者失败，准备重试")
+						time.Sleep(time.Duration(retryInterval) * time.Second)
+					} else {
+						facade.Log.Error(map[string]any{"error": response.Error, "recipient": authorEmail}, "发送文章作者邮件通知失败")
+					}
+				}
+			} else {
+				facade.Log.Warn(map[string]any{"author_email": authorEmail, "user_email": userEmail, "admin_email": adminEmail}, "作者邮箱无效或重复，跳过发送")
+			}
+
+			// 如果是回复评论，还需要通知被回复的用户
+			if table.Pid > 0 {
+				facade.Log.Info(map[string]any{"pid": table.Pid}, "检测到回复评论，准备通知被回复用户")
+				// 获取父评论信息
+				parentComment := facade.DB.Model(&model.Comment{}).Where("id", table.Pid).Find()
+				if !utils.Is.Empty(parentComment) {
+					parentUid := cast.ToInt(cast.ToStringMap(parentComment)["uid"])
+					// 获取被回复用户信息
+					parentUser := facade.DB.Model(&model.Users{}).Where("id", parentUid).Find()
+					parentEmail := cast.ToString(cast.ToStringMap(parentUser)["email"])
+					facade.Log.Info(map[string]any{"parent_comment_id": table.Pid, "parent_user_id": parentUid, "parent_email": parentEmail}, "获取被回复用户信息")
+
+					if utils.Is.Email(parentEmail) && parentUid != user.Id {
+						facade.Log.Info(map[string]any{"recipient": parentEmail}, "开始发送邮件给被回复用户")
+						// 发送回复通知
+						for i := 0; i <= retryCount; i++ {
+							sms := facade.NewSMS("email")
+							response := sms.SendReplyNotify(parentEmail, commentInfo)
+							if response.Error == nil {
+								facade.Log.Info(map[string]any{"recipient": parentEmail}, "邮件发送给被回复用户成功")
+								break
+							}
+							if i < retryCount {
+								facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给被回复用户失败，准备重试")
+								time.Sleep(time.Duration(retryInterval) * time.Second)
+							} else {
+								facade.Log.Error(map[string]any{"error": response.Error, "recipient": parentEmail}, "发送评论回复邮件通知失败")
+							}
+						}
+					} else {
+						facade.Log.Warn(map[string]any{"parent_email": parentEmail, "parent_uid": parentUid, "user_id": user.Id}, "被回复用户邮箱无效或为评论者本人，跳过发送")
+					}
+				} else {
+					facade.Log.Warn(map[string]any{"pid": table.Pid}, "父评论不存在，跳过发送给被回复用户")
+				}
+			} else {
+				facade.Log.Info(map[string]any{"pid": table.Pid}, "不是回复评论，跳过发送给被回复用户")
+			}
+		} else {
+			facade.Log.Info(nil, "邮件通知功能未开启")
+		}
+	}()
+
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
@@ -1077,8 +1257,10 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 	configKey := "ARTICLE"
 
 	// 如果请求的是评论配置，使用 COMMENT 配置
+	isCommentConfig := false
 	if len(key) > 0 && cast.ToString(key[0]) == "comment" {
 		configKey = "COMMENT"
+		isCommentConfig = true
 	}
 
 	// 缓存名称
@@ -1100,6 +1282,12 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 		}
 	}
 
+	// 如果是评论配置，直接返回整个 json 配置
+	if isCommentConfig {
+		return cast.ToStringMap(config["json"])
+	}
+
+	// 其他配置，返回指定键的值
 	if len(key) > 0 {
 		return cast.ToStringMap(cast.ToStringMap(config["json"])[cast.ToString(key[0])])
 	}

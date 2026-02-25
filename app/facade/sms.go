@@ -53,6 +53,22 @@ type SMSInterface interface {
 	 * @return *SMSResponse
 	 */
 	VerifyCode(phone any, code ...any) (response *SMSResponse)
+	// SendCommentNotify
+	/**
+	 * @name 发送评论通知
+	 * @param recipient 收件人邮箱
+	 * @param commentInfo 评论信息
+	 * @return *SMSResponse
+	 */
+	SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse)
+	// SendReplyNotify
+	/**
+	 * @name 发送评论回复通知
+	 * @param recipient 收件人邮箱
+	 * @param commentInfo 评论信息
+	 * @return *SMSResponse
+	 */
+	SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse)
 }
 
 // GoMailRequest - GoMail邮件服务
@@ -272,6 +288,190 @@ func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResp
 	return response
 }
 
+// SendCommentNotify - 发送评论通知邮件
+func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if !utils.Is.Email(recipient) {
+		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		return
+	}
+
+	template := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta charset="UTF-8">
+	<title>新评论通知</title>
+	<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { line-height: 1.7; color: #444; background-color: #f8f9fa; padding: 20px 0; }
+	.container { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); overflow: hidden; }
+	.mail-header { background: #165DFF; padding: 24px 30px; color: #fff; }
+	.brand { display: flex; align-items: center; gap: 12px; }
+	.brand-name { font-size: 18px; font-weight: 600; }
+	.mail-content { padding: 30px; }
+	.mail-title { font-size: 22px; color: #222; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #f0f0f0; }
+	.subtitle { color: #666; margin-bottom: 24px; font-size: 15px; }
+	.comment-card { background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0 30px; border-left: 4px solid #165DFF; font-size: 15px; }
+	.comment-content { line-height: 1.8; color: #333; }
+	.action-btn { display: inline-block; background: #165DFF; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500; margin: 10px 0 25px; transition: background 0.3s; }
+	.action-btn:hover { background: #0E42D2; }
+	.mail-footer { padding: 20px 30px; background: #f9fafb; border-top: 1px solid #f0f0f0; font-size: 14px; color: #888; }
+	.footer-note { margin-bottom: 12px; }
+	.unsubscribe { color: #165DFF; text-decoration: none; }
+	.unsubscribe:hover { text-decoration: underline; }
+	@media (max-width: 600px) {
+		.container { width: 95%; margin: 0 auto; }
+		.mail-header, .mail-content, .mail-footer { padding: 20px 15px; }
+		.mail-title { font-size: 18px; }
+		.action-btn { width: 100%; text-align: center; }
+	}
+	</style>
+	</head>
+	<body>
+	<div class="container">
+	<div class="mail-header">
+		<div class="brand"><div class="brand-name">新评论通知</div></div>
+	</div>
+	<div class="mail-content">
+		<h2 class="mail-title">新评论通知</h2>
+		<p class="subtitle">您的文章《${title}》收到了一条新评论</p>
+		<div class="comment-card"><div class="comment-content">${content}</div></div>
+		<p><strong>评论者：</strong>${author_name}</p>
+		<p><strong>评论时间：</strong>${created_at}</p>
+		<p><strong>评论者邮箱：</strong>${author_email}</p>
+		<p><strong>评论IP：</strong>${ip}</p>
+		<a href="#" target="_blank" class="action-btn">查看评论详情</a>
+	</div>
+	<div class="mail-footer">
+		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
+	</div>
+	</div>
+	</body>
+	</html>
+	`
+
+	item := gomail.NewMessage()
+	nickname := cast.ToString(SMSToml.Get("email.nickname"))
+	account := cast.ToString(SMSToml.Get("email.account"))
+	item.SetHeader("From", nickname+"<"+account+">")
+	item.SetHeader("To", recipient)
+	item.SetHeader("Subject", "新评论通知 - "+cast.ToString(SMSToml.Get("email.sign_name")))
+
+	// 转换评论信息为正确的格式
+	replaceMap := make(map[string]any)
+	for key, val := range commentInfo {
+		replaceMap["${"+key+"}"] = val
+	}
+
+	// 替换模板变量
+	temp := utils.Replace(template, replaceMap)
+	item.SetBody("text/html", temp)
+
+	// 发送邮件
+	err := this.Client.DialAndSend(item)
+	if err != nil {
+		response.Error = err
+		return response
+	}
+
+	response.Result = "邮件发送成功"
+	return response
+}
+
+// SendReplyNotify - 发送评论回复通知邮件
+func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if !utils.Is.Email(recipient) {
+		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		return
+	}
+
+	template := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta charset="UTF-8">
+	<title>评论回复通知</title>
+	<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { line-height: 1.7; color: #444; background-color: #f8f9fa; padding: 20px 0; }
+	.container { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); overflow: hidden; }
+	.mail-header { background: #165DFF; padding: 24px 30px; color: #fff; }
+	.brand { display: flex; align-items: center; gap: 12px; }
+	.brand-name { font-size: 18px; font-weight: 600; }
+	.mail-content { padding: 30px; }
+	.mail-title { font-size: 22px; color: #222; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #f0f0f0; }
+	.subtitle { color: #666; margin-bottom: 24px; font-size: 15px; }
+	.comment-card { background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0 30px; border-left: 4px solid #165DFF; font-size: 15px; }
+	.comment-content { line-height: 1.8; color: #333; }
+	.action-btn { display: inline-block; background: #165DFF; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500; margin: 10px 0 25px; transition: background 0.3s; }
+	.action-btn:hover { background: #0E42D2; }
+	.mail-footer { padding: 20px 30px; background: #f9fafb; border-top: 1px solid #f0f0f0; font-size: 14px; color: #888; }
+	.footer-note { margin-bottom: 12px; }
+	.unsubscribe { color: #165DFF; text-decoration: none; }
+	.unsubscribe:hover { text-decoration: underline; }
+	@media (max-width: 600px) {
+		.container { width: 95%; margin: 0 auto; }
+		.mail-header, .mail-content, .mail-footer { padding: 20px 15px; }
+		.mail-title { font-size: 18px; }
+		.action-btn { width: 100%; text-align: center; }
+	}
+	</style>
+	</head>
+	<body>
+	<div class="container">
+	<div class="mail-header">
+		<div class="brand"><div class="brand-name">评论回复通知</div></div>
+	</div>
+	<div class="mail-content">
+		<h2 class="mail-title">评论回复通知</h2>
+		<p class="subtitle">您在文章《${title}》中的评论收到了一条回复</p>
+		<div class="comment-card"><div class="comment-content">${content}</div></div>
+		<p><strong>回复者：</strong>${author_name}</p>
+		<p><strong>回复时间：</strong>${created_at}</p>
+		<p><strong>回复者邮箱：</strong>${author_email}</p>
+		<p><strong>回复IP：</strong>${ip}</p>
+		<a href="#" target="_blank" class="action-btn">查看回复详情</a>
+	</div>
+	<div class="mail-footer">
+		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
+	</div>
+	</div>
+	</body>
+	</html>
+	`
+
+	item := gomail.NewMessage()
+	nickname := cast.ToString(SMSToml.Get("email.nickname"))
+	account := cast.ToString(SMSToml.Get("email.account"))
+	item.SetHeader("From", nickname+"<"+account+">")
+	item.SetHeader("To", recipient)
+	item.SetHeader("Subject", "评论回复通知 - "+cast.ToString(SMSToml.Get("email.sign_name")))
+
+	// 转换评论信息为正确的格式
+	replaceMap := make(map[string]any)
+	for key, val := range commentInfo {
+		replaceMap["${"+key+"}"] = val
+	}
+
+	// 替换模板变量
+	temp := utils.Replace(template, replaceMap)
+	item.SetBody("text/html", temp)
+
+	// 发送邮件
+	err := this.Client.DialAndSend(item)
+	if err != nil {
+		response.Error = err
+		return response
+	}
+
+	response.Result = "邮件发送成功"
+	return response
+}
+
 // ================================== 阿里云短信 - 实现 ==================================
 // init 初始化 阿里云短信
 func (this *AliYunSMS) init() {
@@ -388,6 +588,20 @@ func (this *AliYunSMS) ApiInfo() (result *AliYunClient.Params) {
 		ReqBodyType: tea.String("json"),
 		BodyType:    tea.String("json"),
 	}
+}
+
+// SendCommentNotify - 发送评论通知邮件
+func (this *AliYunSMS) SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("阿里云短信服务暂不支持评论通知")
+	return response
+}
+
+// SendReplyNotify - 发送评论回复通知邮件
+func (this *AliYunSMS) SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("阿里云短信服务暂不支持评论回复通知")
+	return response
 }
 
 // ================================== 阿里云号码验证 ==================================
@@ -654,6 +868,20 @@ func (this *AliYunNumberVerify) CheckSmsVerifyCodeApiInfo() (result *AliYunClien
 	}
 }
 
+// SendCommentNotify - 发送评论通知邮件
+func (this *AliYunNumberVerify) SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("阿里云号码验证服务暂不支持评论通知")
+	return response
+}
+
+// SendReplyNotify - 发送评论回复通知邮件
+func (this *AliYunNumberVerify) SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("阿里云号码验证服务暂不支持评论回复通知")
+	return response
+}
+
 // ================================== 腾讯云短信 - 实现 ==================================
 // init 初始化 腾讯云短信
 func (this *TencentSMS) init() {
@@ -763,5 +991,19 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 	response.Text = item.ToJsonString()
 	response.Result = utils.Json.Decode(item.ToJsonString())
 
+	return response
+}
+
+// SendCommentNotify - 发送评论通知邮件
+func (this *TencentSMS) SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("腾讯云短信服务暂不支持评论通知")
+	return response
+}
+
+// SendReplyNotify - 发送评论回复通知邮件
+func (this *TencentSMS) SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+	response.Error = errors.New("腾讯云短信服务暂不支持评论回复通知")
 	return response
 }

@@ -2,15 +2,16 @@ package facade
 
 import (
 	"fmt"
+	"sort"
+	"strings"
+	"time"
+
 	"github.com/fsnotify/fsnotify"
 	"github.com/natefinch/lumberjack"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"sort"
-	"strings"
-	"time"
 )
 
 // LogToml - 日志配置文件
@@ -23,9 +24,9 @@ func initLogToml() {
 		Mode: "toml",
 		Name: "log",
 		Content: utils.Replace(TempLog, map[string]any{
-			"${on}": "true",
-			"${size}": 2,
-			"${age}": 7,
+			"${on}":      "true",
+			"${size}":    2,
+			"${age}":     7,
 			"${backups}": 20,
 		}),
 	}).Read()
@@ -48,7 +49,7 @@ func init() {
 	LogToml.Viper.WatchConfig()
 	// 配置文件变化时，重新初始化配置文件
 	LogToml.Viper.OnConfigChange(func(event fsnotify.Event) {
-InitLog()
+		InitLog()
 	})
 }
 
@@ -135,7 +136,10 @@ func logLevel(Level string) *zap.Logger {
 
 		encoderConfig := zap.NewProductionEncoderConfig()
 		encoderConfig.TimeKey = "time"
-		encoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05")
+		// 修改为使用本地时间
+		encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.Local().Format("2006-01-02 15:04:05"))
+		}
 		encoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
 
 		return zapcore.NewJSONEncoder(encoderConfig)
