@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket 状态推送测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .status-section h2 {
+            margin-top: 0;
+            color: #555;
+            font-size: 16px;
+        }
+        pre {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .connection-status {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .refresh-rate {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket 系统状态实时推送测试</h1>
+        
+        <div class="connection-status disconnected" id="connectionStatus">
+            未连接
+        </div>
+        
+        <div class="refresh-rate">
+            刷新频率: <span id="refreshRate">0</span> 秒
+        </div>
+        
+        <div class="status-section">
+            <h2>系统基本信息</h2>
+            <pre id="systemInfo">加载中...</pre>
+        </div>
+        
+        <div class="status-section">
+            <h2>数据库状态</h2>
+            <pre id="databaseStatus">加载中...</pre>
+        </div>
+        
+        <div class="status-section">
+            <h2>缓存状态</h2>
+            <pre id="cacheStatus">加载中...</pre>
+        </div>
+        
+        <div class="status-section">
+            <h2>系统资源</h2>
+            <pre id="systemResources">加载中...</pre>
+        </div>
+    </div>
+    
+    <script>
+        // WebSocket连接
+        let ws;
+        let lastUpdateTime = 0;
+        let refreshRate = 0;
+        
+        function connectWebSocket() {
+            // 构建WebSocket URL
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/socket`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                document.getElementById('connectionStatus').textContent = '已连接';
+                document.getElementById('connectionStatus').className = 'connection-status connected';
+                console.log('WebSocket连接已建立');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'status') {
+                        updateStatus(data.content);
+                        
+                        // 计算刷新频率
+                        const now = Date.now() / 1000;
+                        if (lastUpdateTime > 0) {
+                            refreshRate = (now - lastUpdateTime).toFixed(1);
+                            document.getElementById('refreshRate').textContent = refreshRate;
+                        }
+                        lastUpdateTime = now;
+                    }
+                } catch (error) {
+                    console.error('解析WebSocket消息失败:', error);
+                }
+            };
+            
+            ws.onclose = function() {
+                document.getElementById('connectionStatus').textContent = '已断开连接，正在重连...';
+                document.getElementById('connectionStatus').className = 'connection-status disconnected';
+                console.log('WebSocket连接已关闭');
+                // 尝试重连
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+            };
+        }
+        
+        function updateStatus(status) {
+            // 更新系统基本信息
+            document.getElementById('systemInfo').textContent = JSON.stringify(status.info, null, 2);
+            
+            // 更新数据库状态
+            document.getElementById('databaseStatus').textContent = JSON.stringify(status.database, null, 2);
+            
+            // 更新缓存状态
+            document.getElementById('cacheStatus').textContent = JSON.stringify(status.cache, null, 2);
+            
+            // 更新系统资源
+            document.getElementById('systemResources').textContent = JSON.stringify(status.resource, null, 2);
+        }
+        
+        // 初始化连接
+        connectWebSocket();
+    </script>
+</body>
+</html>

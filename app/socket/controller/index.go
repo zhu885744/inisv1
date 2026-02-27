@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cast"
@@ -204,15 +205,11 @@ func (hub *hub) run() {
 		// 通知通信
 		case message := <-hub.notice:
 			content := Json(message)
-			fmt.Println("进入通知通道：", content)
-			if empty := utils.Is.Empty(content["type"]); empty || content["type"] == "broadcast" {
+			if empty := utils.Is.Empty(content["type"]); empty || content["type"] == "broadcast" || content["type"] == "status" {
 				hub.broadcast(message)
 			} else if content["type"] == "single" {
 				hub.singlecast(message)
 			}
-		}
-		for key, val := range hub.clients {
-			fmt.Println("连接：", key, val.conn.RemoteAddr())
 		}
 		fmt.Println("================== 在线人数", len(hub.clients), " ==================")
 	}

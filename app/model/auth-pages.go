@@ -62,7 +62,7 @@ func InitAuthPages() {
 	// 后台管理页面列表
 	pages := []AuthPages{
 		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write", Size: "14px"},
-		{Name: "文章列表", Icon: "article", Path: "/admin/article", Size: "14px"},
+		{Name: "文章管理", Icon: "article", Path: "/admin/article", Size: "14px"},
 		{Name: "文章分组", Icon: "group", Path: "/admin/article/group", Size: "14px"},
 		{Name: "用户管理", Icon: "user", Path: "/admin/users", Size: "14px"},
 		{Name: "评论管理", Icon: "comment", Path: "/admin/comment", Size: "14px"},
@@ -73,14 +73,14 @@ func InitAuthPages() {
 		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},
 		{Name: "独立页面", Icon: "open", Path: "/admin/pages", Size: "14px"},
-		{Name: "撰写页面", Icon: "article", Path: "/admin/pages/write", Size: "14px"},
+		{Name: "撰写独立页面", Icon: "article", Path: "/admin/pages/write", Size: "14px"},
 		{Name: "友链分组", Icon: "group", Path: "/admin/links/group", Size: "14px"},
 		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "14px"},
 		{Name: "权限分组", Icon: "group", Path: "/admin/auth/group", Size: "14px"},
 		{Name: "接口密钥", Icon: "key", Path: "/admin/api/keys", Size: "14px"},
 		{Name: "IP黑名单", Icon: "qps", Path: "/admin/ip/black", Size: "14px"},
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
-		{Name: "管理后台页面", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
+		{Name: "后台页面管理", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 	}
 
 	wg := sync.WaitGroup{}
