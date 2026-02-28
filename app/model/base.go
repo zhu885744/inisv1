@@ -50,7 +50,7 @@ func InitTable() {
 	}
 
 	for _, fn := range allow {
-		go fn()
+		fn()
 	}
 }
 

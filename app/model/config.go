@@ -32,44 +32,38 @@ func InitConfig() {
 		return
 	}
 
-	// 初始化数据
-	go func() {
+	configs := []Config{
+		{Key: "SYSTEM_API_KEY", Value: "0", Remark: "API KEY验证"},
+		{Key: "SYSTEM_QPS", Value: "1", Json: utils.Json.Encode(facade.H{
+			"point": 15, "global": 50,
+		}), Remark: "接口限流器（QPS）"},
+		{Key: "SYSTEM_QPS_BLOCK", Value: "0", Json: utils.Json.Encode(facade.H{
+			"count": 3, "second": "60 * 60",
+		}), Remark: "满足QPS阈值后自动拦截"},
+		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
+		{Key: "ALLOW_REGISTER", Value: "1", Remark: "是否允许用户自行注册"},
+		{Key: "PAGE", Json: utils.Json.Encode(facade.H{
+			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
+		}), Remark: "页面配置"},
+		{Key: "ARTICLE", Json: utils.Json.Encode(facade.H{
+			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
+		}), Remark: "主题配置"},
+		{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
+			"rate_limit":       facade.H{"enabled": 1, "max_count": 5, "time_window": 60},
+			"max_length":       500,
+			"require_chinese":  1,
+			"sensitive_filter": 1,
+			"sensitive_words":  []string{"色情", "广告", "开户"},
+			"email_notify":     facade.H{"enabled": 1, "retry_count": 3, "retry_interval": 5},
+		}), Remark: "评论配置"},
+	}
 
-		configs := []Config{
-			{Key: "SYSTEM_API_KEY", Value: "0", Remark: "API KEY验证"},
-			{Key: "SYSTEM_QPS", Value: "1", Json: utils.Json.Encode(facade.H{
-				"point": 15, "global": 50,
-			}), Remark: "接口限流器（QPS）"},
-			{Key: "SYSTEM_QPS_BLOCK", Value: "0", Json: utils.Json.Encode(facade.H{
-				"count": 3, "second": "60 * 60",
-			}), Remark: "满足QPS阈值后自动拦截"},
-			{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
-			{Key: "ALLOW_REGISTER", Value: "1", Remark: "是否允许用户自行注册"},
-			{Key: "PAGE", Json: utils.Json.Encode(facade.H{
-				"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
-			}), Remark: "页面配置"},
-			{Key: "ARTICLE", Json: utils.Json.Encode(facade.H{
-				"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
-			}), Remark: "主题配置"},
-			{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
-				"rate_limit":       facade.H{"enabled": 1, "max_count": 5, "time_window": 60},     // 速率限制：每分钟最多5条评论
-				"max_length":       500,                                                           // 最大字数限制
-				"require_chinese":  1,                                                             // 必须包含中文
-				"sensitive_filter": 1,                                                             // 敏感词过滤
-				"sensitive_words":  []string{"色情", "广告", "开户"},                                    // 自定义敏感词
-				"email_notify":     facade.H{"enabled": 1, "retry_count": 3, "retry_interval": 5}, // 邮件通知配置
-			}), Remark: "评论配置"},
+	for _, item := range configs {
+		if facade.DB.Model(&Config{}).Where("key", item.Key).Exist() {
+			continue
 		}
-
-		for _, item := range configs {
-			// 判断是否存在
-			if facade.DB.Model(&Config{}).Where("key", item.Key).Exist() {
-				continue
-			}
-			// 创建数据
-			facade.DB.Model(&item).Create(&item)
-		}
-	}()
+		facade.DB.Model(&item).Create(&item)
+	}
 }
 
 // AfterFind - 查询Hook

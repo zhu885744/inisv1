@@ -3,16 +3,17 @@ package facade
 import (
 	"context"
 	"fmt"
-	"github.com/allegro/bigcache/v3"
-	"github.com/fsnotify/fsnotify"
-	"github.com/redis/go-redis/v9"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/allegro/bigcache/v3"
+	"github.com/fsnotify/fsnotify"
+	"github.com/redis/go-redis/v9"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 func init() {
@@ -34,9 +35,9 @@ const (
 	// CacheModeRedis - Redis缓存
 	CacheModeRedis = "redis"
 	// CacheModeFile  - 文件缓存
-	CacheModeFile  = "file"
+	CacheModeFile = "file"
 	// CacheModeRAM   - 内存缓存
-	CacheModeRAM   = "ram"
+	CacheModeRAM = "ram"
 )
 
 // NewCache - 创建Cache实例
@@ -80,7 +81,7 @@ func initCacheToml() {
 			"${redis.expire}":   "2 * 60 * 60",
 			"${redis.prefix}":   "inis:",
 			"${redis.database}": 0,
-			"${file.expire}"   : "2 * 60 * 60",
+			"${file.expire}":    "2 * 60 * 60",
 			"${file.path}":      "runtime/cache",
 			"${file.prefix}":    "inis_",
 			"${ram.expire}":     "2 * 60 * 60",
@@ -191,9 +192,7 @@ type CacheInterface interface {
 	Clear() (ok bool)
 }
 
-
 // ==================== Redis 缓存 ====================
-
 
 type RedisCacheStruct struct {
 	Client *redis.Client
@@ -357,9 +356,7 @@ func (this *RedisCacheStruct) Clear() (ok bool) {
 	return utils.Ternary[bool](err != nil, false, true)
 }
 
-
 // ============================ 文件缓存 ============================
-
 
 type FileCacheStruct struct {
 	Client *utils.FileCacheClient
@@ -367,27 +364,42 @@ type FileCacheStruct struct {
 
 // init 初始化 文件缓存
 func (this *FileCacheStruct) init() {
-
-	this.Client, _ = utils.NewFileCache(
+	var err error
+	this.Client, err = utils.NewFileCache(
 		CacheToml.Get("file.path"),
 		utils.Calc(CacheToml.Get("file.expire", 7200)),
 		CacheToml.Get("file.prefix"),
 	)
+	if err != nil {
+		fmt.Println("文件缓存初始化失败: " + err.Error())
+	}
 }
 
 func (this *FileCacheStruct) Has(key any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Has(key)
 }
 
 func (this *FileCacheStruct) Get(key any) (value any) {
+	if this.Client == nil {
+		return nil
+	}
 	return utils.Json.Decode(this.Client.Get(key))
 }
 
 func (this *FileCacheStruct) Set(key any, value any, expire ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Set(key, []byte(utils.Json.Encode(value)), expire...)
 }
 
 func (this *FileCacheStruct) Del(key any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Del(key)
 }
 
@@ -403,9 +415,7 @@ func (this *FileCacheStruct) Clear() (ok bool) {
 	return this.Client.Clear()
 }
 
-
 // ============================ 内存缓存 ============================
-
 
 type BigCacheStruct struct {
 	Client *BigCacheClient
@@ -413,7 +423,7 @@ type BigCacheStruct struct {
 
 // init 初始化 内存缓存
 func (this *BigCacheStruct) init() {
-    this.Client = NewBigCache(utils.Calc(CacheToml.Get("file.expire", 7200)))
+	this.Client = NewBigCache(utils.Calc(CacheToml.Get("file.expire", 7200)))
 }
 
 func (this *BigCacheStruct) Has(key any) (ok bool) {
@@ -446,10 +456,10 @@ func (this *BigCacheStruct) Clear() (ok bool) {
 
 // BigCacheClient 缓存
 type BigCacheClient struct {
-	mutex      sync.Mutex   	// 互斥锁，用于保证并发安全
-	prefix	   string			// 缓存文件名前缀
-	expire	   int64			// 默认缓存过期时间
-	items 	   map[string]*bigcache.BigCache
+	mutex  sync.Mutex // 互斥锁，用于保证并发安全
+	prefix string     // 缓存文件名前缀
+	expire int64      // 默认缓存过期时间
+	items  map[string]*bigcache.BigCache
 }
 
 // NewBigCache 创建一个新的缓存实例
@@ -458,7 +468,7 @@ func NewBigCache(expire any, prefix ...string) *BigCacheClient {
 	var cache BigCacheClient
 
 	cache.expire = cast.ToInt64(expire)
-	cache.items  = make(map[string]*bigcache.BigCache)
+	cache.items = make(map[string]*bigcache.BigCache)
 	cache.prefix = "cache_"
 	if len(prefix) > 0 {
 		cache.prefix = prefix[0]
