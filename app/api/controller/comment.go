@@ -545,31 +545,7 @@ func (this *Comment) create(ctx *gin.Context) {
 				"bind_id":      table.BindId,
 				"title":        title,
 			}
-			facade.Log.Info(map[string]any{"comment_id": table.Id, "bind_type": table.BindType, "bind_id": table.BindId}, "准备发送邮件通知")
-
-			// 发送邮件通知给管理员（使用邮件配置中的账户作为收件人）
-			adminEmail := cast.ToString(facade.SMSToml.Get("email.account"))
-			facade.Log.Info(map[string]any{"admin_email": adminEmail}, "获取管理员邮箱")
-
-			if utils.Is.Email(adminEmail) {
-				facade.Log.Info(map[string]any{"recipient": adminEmail}, "开始发送邮件给管理员")
-				for i := 0; i <= retryCount; i++ {
-					sms := facade.NewSMS("email")
-					response := sms.SendCommentNotify(adminEmail, commentInfo)
-					if response.Error == nil {
-						facade.Log.Info(map[string]any{"recipient": adminEmail}, "邮件发送给管理员成功")
-						break
-					}
-					if i < retryCount {
-						facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给管理员失败，准备重试")
-						time.Sleep(time.Duration(retryInterval) * time.Second)
-					} else {
-						facade.Log.Error(map[string]any{"error": response.Error, "recipient": adminEmail}, "发送评论邮件通知失败")
-					}
-				}
-			} else {
-				facade.Log.Warn(map[string]any{"admin_email": adminEmail}, "管理员邮箱无效，跳过发送")
-			}
+			facade.Log.Info(map[string]any{"comment_id": table.Id, "bind_type": table.BindType, "bind_id": table.BindId}, "评论通知处理")
 
 			// 发送邮件通知给文章作者
 			var authorEmail string
@@ -603,7 +579,7 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 
 			// 发送通知给文章作者，避免重复通知
-			if utils.Is.Email(authorEmail) && authorEmail != userEmail && authorEmail != adminEmail {
+			if utils.Is.Email(authorEmail) && authorEmail != userEmail {
 				facade.Log.Info(map[string]any{"recipient": authorEmail}, "开始发送邮件给作者")
 				for i := 0; i <= retryCount; i++ {
 					sms := facade.NewSMS("email")
@@ -620,7 +596,7 @@ func (this *Comment) create(ctx *gin.Context) {
 					}
 				}
 			} else {
-				facade.Log.Warn(map[string]any{"author_email": authorEmail, "user_email": userEmail, "admin_email": adminEmail}, "作者邮箱无效或重复，跳过发送")
+				facade.Log.Warn(map[string]any{"author_email": authorEmail, "user_email": userEmail}, "作者邮箱无效或重复，跳过发送")
 			}
 
 			// 如果是回复评论，还需要通知被回复的用户

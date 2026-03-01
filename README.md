@@ -60,23 +60,41 @@ inisv1/
 ├── build.bat           # 编译脚本（生成可执行文件）
 ├── go.mod              # Go模块依赖配置
 ├── go.sum              # 依赖校验文件
+├── inis.sh             # linux安装脚本
 ├── install.lock        # 安装锁文件（标记是否完成初始化）
 ├── main.go             # 程序入口文件
-├── public/             # 静态资源目录
-│   └── index.html      # 静态首页
+├── 项目规划.md          # 项目规划文档
 ├── config/             # 配置文件目录
 │   ├── .gitignore      # 配置目录的Git忽略规则
 │   ├── app.go          # 应用配置核心逻辑（启动服务等）
 │   └── i18n/           # 国际化语言配置
+│       ├── en-us.json   # 英语语言包
+│       ├── ja-jp.json   # 日语语言包
+│       ├── ko-kr.json   # 韩语语言包
+│       ├── ru-ru.json   # 俄语语言包
+│       └── zh-cn.json   # 中文语言包
+├── docs/               # API文档目录
+│   ├── docs.go         # Swagger文档生成
+│   ├── swagger.json    # Swagger JSON文件
+│   └── swagger.yaml    # Swagger YAML文件
 └── app/                # 核心业务代码目录
     ├── api/            # API接口相关（控制器、路由）
+    │   ├── controller/ # API控制器
+    │   ├── middleware/ # API中间件
+    │   └── route/      # API路由
     ├── dev/            # 开发相关功能（系统信息、调试等）
+    │   ├── controller/ # 开发控制器
+    │   └── route/      # 开发路由
     ├── facade/         # 门面层（封装核心服务、工具）
     ├── index/          # 首页相关路由/控制器
-    ├── inis/           # 框架核心功能（基础控制器等）
-    ├── middleware/     # 中间件（CORS、权限校验等）
+    │   ├── controller/ # 首页控制器
+    │   └── route/      # 首页路由
+    ├── middleware/     # 全局中间件（CORS、权限校验等）
     ├── model/          # 数据模型（与数据库交互）
     ├── socket/         # WebSocket相关（实时通信）
+    │   ├── controller/ # WebSocket控制器
+    │   ├── middleware/ # WebSocket中间件
+    │   └── route/      # WebSocket路由
     ├── timer/          # 定时任务（日志清理等）
     └── validator/      # 数据验证器
 ```
