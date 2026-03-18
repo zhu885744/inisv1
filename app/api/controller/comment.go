@@ -386,8 +386,10 @@ func (this *Comment) create(ctx *gin.Context) {
 
 		// 获取当前评论次数
 		currentCount := 0
-		if facade.Cache.Has(cacheKey) {
-			currentCount = cast.ToInt(facade.Cache.Get(cacheKey))
+		// 直接获取缓存值，不使用Has方法
+		cacheValue := facade.Cache.Get(cacheKey)
+		if cacheValue != nil {
+			currentCount = cast.ToInt(cacheValue)
 		}
 
 		if currentCount >= maxCount {

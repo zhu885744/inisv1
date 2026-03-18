@@ -59,11 +59,11 @@ func (this *Search) INDEX(ctx *gin.Context) {
 		"message": "搜索控制器首页",
 		"version": "1.0.0",
 		"endpoints": map[string]string{
-			"global":  "/api/search/index?keyword=关键词",
-			"article": "/api/search/article?keyword=关键词",
-			"pages":   "/api/search/pages?keyword=关键词",
-			"tags":    "/api/search/tags?keyword=关键词",
-		},
+            "global":  "/api/search/all?keyword=关键词",
+            "article": "/api/search/article?keyword=关键词",
+            "pages":   "/api/search/pages?keyword=关键词",
+            "tags":    "/api/search/tags?keyword=关键词",
+        },
 	}, facade.Lang(ctx, "搜索控制器首页"), 200)
 }
 

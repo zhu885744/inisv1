@@ -1,15 +1,16 @@
 package controller
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Links struct {
@@ -147,6 +148,12 @@ func (this *Links) one(ctx *gin.Context) {
 
 		mold := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
 		mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
+
+		// 非管理员只能查看已审核的友链
+		if !this.meta.root(ctx) {
+			mold.Where("audit", 1)
+		}
+
 		item := mold.Where(table).Find()
 
 		// 排除字段
@@ -196,6 +203,12 @@ func (this *Links) all(ctx *gin.Context) {
 	var result []model.Links
 	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
 	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
+
+	// 非管理员只能查看已审核的友链
+	if !this.meta.root(ctx) {
+		mold.Where("audit", 1)
+	}
+
 	count := mold.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
@@ -239,7 +252,7 @@ func (this *Links) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 限制最大数量
-	limit  := this.meta.limit(ctx)
+	limit := this.meta.limit(ctx)
 
 	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
@@ -250,6 +263,11 @@ func (this *Links) rand(ctx *gin.Context) {
 	item := facade.DB.Model(&model.Links{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	if !utils.Is.Empty(except) {
 		item = item.Where("id", "NOT IN", except)
+	}
+
+	// 非管理员只能查看已审核的友链
+	if !this.meta.root(ctx) {
+		item = item.Where("audit", 1)
 	}
 
 	// 从全部的 id 中随机选取指定数量的 id
@@ -310,7 +328,7 @@ func (this *Links) create(ctx *gin.Context) {
 
 	// 越权 - 增加可选字段
 	if this.meta.root(ctx) {
-		allow = append(allow, "check", "remark")
+		allow = append(allow, "audit", "remark")
 	}
 
 	// 动态给结构体赋值
@@ -337,7 +355,7 @@ func (this *Links) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -369,7 +387,7 @@ func (this *Links) update(ctx *gin.Context) {
 
 	// 越权 - 增加可选字段
 	if root {
-		allow = append(allow, "check", "remark")
+		allow = append(allow, "audit", "remark")
 	}
 
 	// 动态给结构体赋值
@@ -404,7 +422,7 @@ func (this *Links) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "id": table.Id }, facade.Lang(ctx, "更新成功！"), 200)
+	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
 // count 统计数据
@@ -695,7 +713,7 @@ func (this *Links) remove(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // delete 真实删除
@@ -738,7 +756,7 @@ func (this *Links) delete(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
 // clear 清空回收站
@@ -747,7 +765,7 @@ func (this *Links) clear(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Links{}
 
-	item  := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table).OnlyTrashed()
 
 	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
@@ -770,7 +788,7 @@ func (this *Links) clear(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "清空成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 // restore 恢复数据
@@ -813,5 +831,5 @@ func (this *Links) restore(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{ "ids": ids }, facade.Lang(ctx, "恢复成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
