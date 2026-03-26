@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -403,7 +404,7 @@ func (this *Comment) create(ctx *gin.Context) {
 
 	// 2. 最大字数限制
 	maxLength := cast.ToInt(commentConfig["max_length"])
-	if maxLength > 0 && len(cast.ToString(params["content"])) > maxLength {
+	if maxLength > 0 && utf8.RuneCountInString(cast.ToString(params["content"])) > maxLength {
 		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
 		return
 	}
@@ -1246,17 +1247,23 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 	// 是否开启了缓存
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
-	// 检查缓存是否存在
-	if cacheState && facade.Cache.Has(cacheName) {
-
-		config = cast.ToStringMap(facade.Cache.Get(cacheName))
-
-	} else {
-
+	// 对于评论配置，每次都从数据库获取最新值（不使用缓存）
+	if isCommentConfig {
 		config = facade.DB.Model(&model.Config{}).Where("key", configKey).Find()
-		// 存储到缓存中
+		// 更新缓存
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)
+		}
+	} else {
+		// 检查缓存是否存在
+		if cacheState && facade.Cache.Has(cacheName) {
+			config = cast.ToStringMap(facade.Cache.Get(cacheName))
+		} else {
+			config = facade.DB.Model(&model.Config{}).Where("key", configKey).Find()
+			// 存储到缓存中
+			if cacheState {
+				go facade.Cache.Set(cacheName, config)
+			}
 		}
 	}
 
