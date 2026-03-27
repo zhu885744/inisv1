@@ -63,6 +63,13 @@ func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 			this.Avatar = "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=100"
 
 		} else {
+			// 尝试获取随机头像，但添加错误处理
+			defer func() {
+				if err := recover(); err != nil {
+					// 忽略错误，使用默认头像
+				}
+			}()
+			
 			avatars := utils.File(utils.FileRequest{
 				Ext:    ".png, .jpg, .jpeg, .gif",
 				Dir:    "public/assets/rand/avatar/",
