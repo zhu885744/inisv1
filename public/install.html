@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安装引导</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        success: '#10b981',
+                        warning: '#f59e0b',
+                        danger: '#ef4444',
+                        info: '#3b82f6',
+                    },
+                },
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .step-active {
+                @apply bg-primary text-white;
+            }
+            .step-inactive {
+                @apply bg-gray-200 text-gray-600;
+            }
+            .form-input {
+                @apply w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+            }
+            .btn {
+                @apply px-4 py-2 rounded-md font-medium transition-colors;
+            }
+            .btn-primary {
+                @apply bg-primary text-white hover:bg-blue-600;
+            }
+            .btn-secondary {
+                @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+            }
+            .btn-success {
+                @apply bg-success text-white hover:bg-green-600;
+            }
+            .btn-danger {
+                @apply bg-danger text-white hover:bg-red-600;
+            }
+            .card {
+                @apply bg-white rounded-lg shadow-md p-6;
+            }
+            .alert {
+                @apply p-4 rounded-md mb-4;
+            }
+            .alert-success {
+                @apply bg-green-100 text-green-700;
+            }
+            .alert-danger {
+                @apply bg-red-100 text-red-700;
+            }
+            .alert-info {
+                @apply bg-blue-100 text-blue-700;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-4xl">
+        <div class="card">
+            <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">系统安装引导</h1>
+            
+            <!-- 安装步骤指示器 -->
+            <div class="flex justify-between mb-8">
+                <div class="flex flex-col items-center">
+                    <div id="step-1" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">1</div>
+                    <span class="text-sm text-gray-600">检查状态</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-2" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">2</div>
+                    <span class="text-sm text-gray-600">连接数据库</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-3" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">3</div>
+                    <span class="text-sm text-gray-600">初始化数据库</span>
+                </div>
+                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-4" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">4</div>
+                    <span class="text-sm text-gray-600">完成安装</span>
+                </div>
+            </div>
+            
+            <!-- 安装内容区域 -->
+            <div id="install-content">
+                <!-- 步骤一：检查安装锁状态 -->
+                <div id="check-step" class="install-step">
+                    <h2 class="text-xl font-semibold mb-4">检查安装状态</h2>
+                    <div class="alert alert-info">
+                        <p>系统将检查安装锁状态，确保您可以执行安装引导。</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="check-btn" class="btn btn-primary w-full">检查状态</button>
+                    </div>
+                </div>
+                
+                <!-- 步骤二：连接数据库 -->
+                <div id="connect-db-step" class="install-step hidden">
+                    <h2 class="text-xl font-semibold mb-4">连接数据库</h2>
+                    <form id="connect-db-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库地址</label>
+                            <input type="text" name="hostname" value="localhost" class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库端口</label>
+                            <input type="number" name="hostport" value="3306" class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库名称 <span class="text-danger">*</span></label>
+                            <input type="text" name="database" required class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库用户名 <span class="text-danger">*</span></label>
+                            <input type="text" name="username" required class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库密码 <span class="text-danger">*</span></label>
+                            <input type="password" name="password" required class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">字符集</label>
+                            <select name="charset" class="form-input">
+                                <option value="utf8mb4">utf8mb4 (推荐)</option>
+                                <option value="utf8">utf8</option>
+                                <option value="gb2312">gb2312</option>
+                                <option value="gbk">gbk</option>
+                                <option value="latin1">latin1</option>
+                            </select>
+                        </div>
+                        <div class="mt-6">
+                            <button type="submit" class="btn btn-primary w-full">连接数据库</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- 步骤三：初始化数据库 -->
+                <div id="init-db-step" class="install-step hidden">
+                    <h2 class="text-xl font-semibold mb-4">初始化数据库</h2>
+                    <div class="alert alert-info">
+                        <p>系统将初始化数据库表结构、默认数据，并自动创建管理员账号，请耐心等待。</p>
+                        <p class="mt-2">默认管理员账号：admin</p>
+                        <p>默认管理员密码：admin123456</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="init-db-btn" class="btn btn-primary w-full">初始化数据库</button>
+                    </div>
+                </div>
+                
+                <!-- 步骤四：完成安装 -->
+                <div id="lock-step" class="install-step hidden">
+                    <h2 class="text-xl font-semibold mb-4">完成安装</h2>
+                    <div class="alert alert-warning">
+                        <p class="font-medium">重要提示：</p>
+                        <p>点击「完成安装」后，系统将锁定安装引导，防止二次安装。请确保所有步骤都已正确完成。</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="lock-btn" class="btn btn-success w-full">完成安装</button>
+                    </div>
+                </div>
+                
+                <!-- 安装完成页面 -->
+                <div id="complete-step" class="install-step hidden">
+                    <h2 class="text-xl font-semibold mb-4 text-center">安装完成</h2>
+                    <div class="alert alert-success text-center">
+                        <p class="text-lg font-medium">🎉 系统安装成功！</p>
+                        <p class="mt-2">您的系统已经成功安装并锁定，现在可以开始使用了。</p>
+                        <p class="mt-2">默认管理员账号：admin</p>
+                        <p>默认管理员密码：admin123456</p>
+                    </div>
+                    <div class="mt-6 flex justify-center">
+                        <a href="/" class="btn btn-primary">返回首页</a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 消息提示区域 -->
+            <div id="message" class="mt-4 hidden"></div>
+        </div>
+    </div>
+    
+    <script>
+        // API基础URL
+        const API_BASE = '/dev/install';
+        
+        // 步骤元素
+        const steps = {
+            1: document.getElementById('step-1'),
+            2: document.getElementById('step-2'),
+            3: document.getElementById('step-3'),
+            4: document.getElementById('step-4')
+        };
+        
+        // 步骤内容
+        const stepContents = {
+            check: document.getElementById('check-step'),
+            connect: document.getElementById('connect-db-step'),
+            init: document.getElementById('init-db-step'),
+            lock: document.getElementById('lock-step'),
+            complete: document.getElementById('complete-step')
+        };
+        
+        // 消息区域
+        const message = document.getElementById('message');
+        
+        // 显示消息
+        function showMessage(text, type = 'info') {
+            message.className = `mt-4 alert alert-${type}`;
+            message.textContent = text;
+            message.classList.remove('hidden');
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                message.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // 更新步骤状态
+        function updateStepStatus(activeStep) {
+            // 重置所有步骤
+            for (let i = 1; i <= 4; i++) {
+                if (i < activeStep) {
+                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center bg-success text-white mb-2';
+                } else if (i === activeStep) {
+                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center step-active mb-2';
+                } else {
+                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2';
+                }
+            }
+        }
+        
+        // 显示步骤内容
+        function showStepContent(step) {
+            // 隐藏所有步骤
+            Object.values(stepContents).forEach(content => {
+                if (content) {
+                    content.classList.add('hidden');
+                }
+            });
+            
+            // 显示当前步骤
+            if (stepContents[step]) {
+                stepContents[step].classList.remove('hidden');
+            }
+        }
+        
+        // 检查安装锁状态
+        document.getElementById('check-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/check`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.code === 200 && !data.data) {
+                        showMessage('安装锁状态正常，可以执行安装引导', 'success');
+                        updateStepStatus(2);
+                        showStepContent('connect');
+                    } else {
+                        showMessage('安装锁已锁定，请先解锁', 'danger');
+                    }
+                } else {
+                    showMessage('检查安装锁状态失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('检查安装锁状态失败:', error);
+            }
+        });
+        
+        // 连接数据库
+        document.getElementById('connect-db-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            
+            try {
+                const response = await fetch(`${API_BASE}/connect-db`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('数据库连接成功，配置已保存', 'success');
+                    updateStepStatus(3);
+                    showStepContent('init');
+                } else {
+                    showMessage(result.message || '数据库连接失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('连接数据库失败:', error);
+            }
+        });
+        
+        // 初始化数据库
+        document.getElementById('init-db-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/init-db`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: ''
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('数据库初始化成功，默认管理员账号已创建', 'success');
+                    updateStepStatus(4);
+                    showStepContent('lock');
+                } else {
+                    showMessage(result.message || '数据库初始化失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('初始化数据库失败:', error);
+            }
+        });
+        
+
+        
+        // 上锁
+        document.getElementById('lock-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/lock`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: ''
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('安装引导已锁定', 'success');
+                    updateStepStatus(4);
+                    showStepContent('complete');
+                } else {
+                    showMessage(result.message || '锁定失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('锁定失败:', error);
+            }
+        });
+        
+        // 页面加载时检查安装锁状态
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/check`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.code === 200 && data.data) {
+                        // 已锁定，显示提示
+                        showMessage('安装引导已锁定，无法执行安装', 'danger');
+                        document.getElementById('check-btn').disabled = true;
+                        document.getElementById('check-btn').className = 'btn btn-secondary w-full cursor-not-allowed';
+                    }
+                }
+            } catch (error) {
+                console.error('检查安装锁状态失败:', error);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -3,16 +3,17 @@ package controller
 import (
 	"database/sql"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"runtime"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 type Install struct {
@@ -43,10 +44,9 @@ func (this *Install) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"lock": this.lock,
-		"init-db": this.initDB,
+		"lock":       this.lock,
+		"init-db":    this.initDB,
 		"connect-db": this.connectDB,
-		"create-admin": this.createAdmin,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -90,15 +90,15 @@ func (this *Install) INDEX(ctx *gin.Context) {
 	// params := this.params(ctx)
 
 	system := map[string]any{
-		"GOOS":   runtime.GOOS,
-		"GOARCH": runtime.GOARCH,
-		"GOROOT": runtime.GOROOT(),
-		"NumCPU": runtime.NumCPU(),
+		"GOOS":         runtime.GOOS,
+		"GOARCH":       runtime.GOARCH,
+		"GOROOT":       runtime.GOROOT(),
+		"NumCPU":       runtime.NumCPU(),
 		"NumGoroutine": runtime.NumGoroutine(),
-		"go": utils.Version.Go(),
-		"inis": facade.Version,
-		"compare": utils.Version.Compare("v1.0.0", "1 2 0"),
-		"agent":  this.header(ctx, "User-Agent"),
+		"go":           utils.Version.Go(),
+		"inis":         facade.Version,
+		"compare":      utils.Version.Compare("v1.0.0", "1 2 0"),
+		"agent":        this.header(ctx, "User-Agent"),
 	}
 
 	this.json(ctx, map[string]any{
@@ -112,11 +112,11 @@ func (this *Install) connectDB(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx, map[string]any{
 		"hostport": 3306,
-		"charset" : "utf8mb4",
+		"charset":  "utf8mb4",
 		"hostname": "localhost",
 	})
 
-	charset  := cast.ToString(params["charset"])
+	charset := cast.ToString(params["charset"])
 	hostname := cast.ToString(params["hostname"])
 	hostport := cast.ToString(params["hostport"])
 
@@ -172,25 +172,73 @@ func (this *Install) connectDB(ctx *gin.Context) {
 		"${mysql.username}": username,
 		"${mysql.database}": database,
 		"${mysql.password}": password,
-		"${mysql.charset}" : charset,
-		"${mysql.migrate}" : "true",
+		"${mysql.charset}":  charset,
+		"${mysql.migrate}":  "true",
 	})), "config/database.toml")
 }
 
 // initDB - 初始化数据库
 func (this *Install) initDB(ctx *gin.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			this.json(ctx, nil, fmt.Sprintf("数据库初始化失败：%v", err), 500)
+			return
+		}
+	}()
+
 	// 初始化数据库
 	facade.WatchDB(false)
+
 	// 初始化数据表
 	model.InitTable()
+
+	// 自动创建内置管理员账号
+	this.createDefaultAdmin()
+
 	this.json(ctx, nil, facade.Lang(ctx, "好的！"), 200)
+}
+
+// createDefaultAdmin - 创建默认管理员账号
+func (this *Install) createDefaultAdmin() {
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{
+				"error": err,
+			}, "创建默认管理员账号失败")
+		}
+	}()
+
+	// 表数据结构体
+	table := model.Users{}
+
+	// 检查admin账号是否已存在
+	if exist := facade.DB.Model(&table).Where("account", "admin").Exist(); exist {
+		return
+	}
+
+	// 设置默认管理员信息
+	table.Account = "admin"
+	table.Email = "admin@admin.com"
+	table.Password = utils.Password.Create("admin123456")
+	table.Nickname = "系统管理员"
+
+	// 创建用户
+	result := facade.DB.Model(&table).Create(&table)
+	if result.Error != nil {
+		facade.Log.Error(map[string]any{
+			"error": result.Error,
+		}, "创建管理员用户失败")
+		return
+	}
+
+	// 系统管理员分组会在数据库初始化时自动创建
 }
 
 // createAdmin - 创建管理员
 func (this *Install) createAdmin(ctx *gin.Context) {
 
 	// 表数据结构体
-	table  := model.Users{}
+	table := model.Users{}
 	// 请求参数
 	params := this.params(ctx)
 

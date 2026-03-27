@@ -44,37 +44,21 @@ func InitAuthGroup() {
 	if count != 0 {
 		return
 	}
-	// 创建系统管理员分组
-    facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
-	    Id:      1,          // 分组唯一标识ID，指定为1（系统管理员固定ID）
-	    Name:    "系统管理员", // 分组名称（可视化展示用，如后台管理界面显示）
-	    Key:     "admin",    // 分组唯一标识键（代码逻辑中使用，如权限判断、接口鉴权）
-	    Uids:    "|1|",      // 该分组关联的用户ID集合，竖线分隔（|为分隔符，1代表默认管理员用户ID）
-	    Rules:   "all",      // 该分组拥有的接口权限规则ID集合，"all"代表拥有所有接口权限（非all时为逗号分隔的规则ID）
-	    Pages:   "all",      // 该分组拥有的页面权限ID集合，"all"代表拥有所有页面权限（非all时为逗号分隔的页面ID）
-	    Root:    1,          // 是否为超级管理员分组（1=是，0=否），拥有最高权限豁免权
-	    Default: 0,          // 是否为默认分组（1=是，0=否），新用户注册时默认加入的分组
-	    Remark:  "系统管理员，拥有所有权限！", // 分组备注说明（用于后台管理界面的备注展示）
-    })
+	facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
+		Id: 	 1,
+		Name:    "超级管理员",
+        Key:     "admin",
+		Uids:    "|1|",
+		Rules:   "all",
+		Pages:   "all",
+		Root: 	 1,
+		Default: 1,
+		Remark:  "超级管理员，拥有所有权限！",
+	})
 }
 
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
-    // 保护系统管理员分组核心字段
-    if this.Id == 1 {
-        // 强制重置核心字段为初始值（防止被篡改）
-        resetFields := map[string]any{
-            "Root":   1,
-            "Rules":  "all",
-            "Pages":  "all",
-            "Key":    "admin",
-            "Name":   "系统管理员",
-            "Default": 0,
-        }
-        if err := tx.Model(this).Updates(resetFields).Error; err != nil {
-            return fmt.Errorf("重置系统管理员分组字段失败：%v", err)
-        }
-    }
 
 	// key 唯一处理
 	if !utils.Is.Empty(this.Key) {
@@ -88,6 +72,7 @@ func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
 
 // AfterFind - 查询Hook
 func (this *AuthGroup) AfterFind(tx *gorm.DB) (err error) {
+
 	this.Result = this.result()
 	this.Text   = cast.ToString(this.Text)
 	this.Json   = utils.Json.Decode(this.Json)
@@ -96,11 +81,15 @@ func (this *AuthGroup) AfterFind(tx *gorm.DB) (err error) {
 
 // result - 返回结果
 func (this *AuthGroup) result() (result map[string]any) {
+
 	var users any
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+
 	go this.users(&wg, &users)
+
 	wg.Wait()
+
 	return map[string]any{
 		"users"   : users,
 	}
@@ -108,7 +97,9 @@ func (this *AuthGroup) result() (result map[string]any) {
 
 // tags - 标签
 func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
+
 	defer wg.Done()
+
 	// 标签信息
 	tags  := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Uids, "|")))
 	*result = facade.DB.Model(&[]Users{}).WhereIn("id", tags).Column("id", "nickname", "avatar", "account")
@@ -116,12 +107,8 @@ func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
 
 // Auth 应用权限
 func (this *AuthGroup) Auth(uid any, group any, isRemove bool) {
+
 	for _, id := range utils.Unity.Ids(group) {
-		// 禁止修改系统管理员分组（ID=1）的用户关联
-		if id == 1 {
-			facade.Log.Warn(map[string]any{"msg": "系统管理员分组禁止修改用户关联", "groupId": id, "uid": uid})
-			continue
-		}
 
 		item := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", id).Find()
 		if utils.Is.Empty(item) {
@@ -161,10 +148,10 @@ func (this *AuthGroup) Auth(uid any, group any, isRemove bool) {
 
 // BeforeDelete - 删除前Hook（软删除/物理删除都会触发）
 func (this *AuthGroup) BeforeDelete(tx *gorm.DB) (err error) {
-    // 禁止删除系统管理员分组（ID=1）
-    if this.Id == 1 {
-        facade.Log.Warn(map[string]any{"msg": "尝试删除系统管理员分组被拦截", "groupId": this.Id})
-        return errors.New("禁止删除系统管理员分组！")
-    }
-    return
+	// 禁止删除系统管理员分组（ID=1）
+	if this.Id == 1 {
+		facade.Log.Warn(map[string]any{"msg": "尝试删除系统管理员分组被拦截", "groupId": this.Id})
+		return errors.New("禁止删除系统管理员分组！")
+	}
+	return
 }

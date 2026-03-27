@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"inis/app/facade"
+	"time"
 
 	"github.com/jasonlvhit/gocron"
 	"github.com/spf13/cast"
@@ -26,31 +27,58 @@ func task() {
 // InitTable - 初始化数据库表 - 自动迁移
 func InitTable() {
 
-	allow := []func(){
-		InitApiKeys,
-		InitArticle,
-		InitArticleGroup,
-		InitAuthGroup,
-		InitAuthPages,
-		InitAuthRules,
-		InitBanner,
-		InitComment,
-		InitConfig,
-		InitLinks,
-		InitLinksGroup,
-		InitPlacard,
-		InitTags,
-		InitUsers,
-		InitPages,
-		InitLevel,
-		InitEXP,
-		InitQpsWarn,
-		InitIpBlack,
-		InitUpgrade,
+	allow := []struct {
+		name string
+		fn   func()
+	}{{
+		"ApiKeys", InitApiKeys},
+		{"Article", InitArticle},
+		{"ArticleGroup", InitArticleGroup},
+		{"AuthPages", InitAuthPages},
+		{"AuthRules", InitAuthRules},
+		{"Banner", InitBanner},
+		{"Comment", InitComment},
+		{"Config", InitConfig},
+		{"Links", InitLinks},
+		{"LinksGroup", InitLinksGroup},
+		{"Placard", InitPlacard},
+		{"Tags", InitTags},
+		{"Users", InitUsers},
+		{"AuthGroup", InitAuthGroup},
+		{"Pages", InitPages},
+		{"Level", InitLevel},
+		{"EXP", InitEXP},
+		{"QpsWarn", InitQpsWarn},
+		{"IpBlack", InitIpBlack},
+		{"Upgrade", InitUpgrade},
 	}
 
-	for _, fn := range allow {
-		fn()
+	for _, item := range allow {
+		// 为每个表的初始化添加超时控制
+		done := make(chan struct{})
+		go func(name string, fn func()) {
+			defer func() {
+				if err := recover(); err != nil {
+					facade.Log.Error(map[string]any{
+						"error": err,
+					}, fmt.Sprintf("初始化%s表时发生错误", name))
+				}
+				close(done)
+			}()
+
+			facade.Log.Info(map[string]any{}, fmt.Sprintf("开始初始化%s表", name))
+			fn()
+			facade.Log.Info(map[string]any{}, fmt.Sprintf("初始化%s表完成", name))
+		}(item.name, item.fn)
+
+		// 等待初始化完成，最多等待30秒
+		select {
+		case <-done:
+			// 初始化完成
+		case <-time.After(30 * time.Second):
+			// 超时
+			facade.Log.Error(map[string]any{}, fmt.Sprintf("初始化%s表超时", item.name))
+		}
 	}
 }
 

@@ -4,45 +4,77 @@
     <meta charset="UTF-8">
     <!-- 自适应移动端 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>朱某的生活印记</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+    <title>安装完成</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        success: '#10b981',
+                        warning: '#f59e0b',
+                        danger: '#ef4444',
+                        info: '#3b82f6',
+                    },
+                },
+            }
         }
-
-        /* 页面整体样式 */
-        body {
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: "Microsoft YaHei", sans-serif;
-            background-color: #f5f5f5;
-            color: #333;
-        }
-
-        /* 主标题样式 */
-        .title {
-            font-size: 32px;
-            font-weight: 500;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        /* 鼠标悬浮效果 */
-        .title:hover {
-            color: #007bff;
-            transform: scale(1.05);
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .btn {
+                @apply px-4 py-2 rounded-md font-medium transition-colors;
+            }
+            .btn-primary {
+                @apply bg-primary text-white hover:bg-blue-600;
+            }
+            .btn-secondary {
+                @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+            }
+            .card {
+                @apply bg-white rounded-lg shadow-md p-6;
+            }
+            .alert {
+                @apply p-4 rounded-md mb-4;
+            }
+            .alert-success {
+                @apply bg-green-100 text-green-700;
+            }
         }
     </style>
 </head>
-<body>
-    <!-- 点击跳转链接 -->
-    <div class="title" onclick="window.open('https://zhuxu.asia/', '_blank')">
-        朱某的生活印记
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-4xl">
+        <div class="card">
+            <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">🎉 系统安装完成</h1>
+            
+            <div class="alert alert-success text-center">
+                <p class="text-lg font-medium">系统已经成功安装并配置完成！</p>
+                <p class="mt-2">默认管理员账号：admin</p>
+                <p>默认管理员密码：admin123456</p>
+            </div>
+            
+            <div class="mt-6 space-y-4">
+                <div class="flex flex-col space-y-2">
+                    <h3 class="text-lg font-semibold">温馨提示：</h3>
+                    <ul class="list-disc list-inside space-y-1 text-gray-600">
+                        <li>由于本程序默认不提供后台管理面板，需要您手动部署或自托管带有后台管理面板的主题到服务器上。</li>
+                        <li>初次使用需要您修改默认管理员账号密码为您自己的账号密码。</li>
+                        <li>本程序默认提供了一套免费主题，需要您自行部署到服务器上。</li>
+                        <li>您可以在本页面下方GitHub仓库中找到免费主题。</li>
+                    </ul>
+                </div>
+                
+                <div class="flex justify-center space-x-4">
+                    <a href="https://github.com/zhu885744/inisv1" class="btn btn-secondary">后端 GitHub 仓库</a>
+                    <a href="https://github.com/zhu885744/xiao-inisv1-vue" class="btn btn-secondary">前端主题 GitHub 仓库</a>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 </html>
