@@ -1,9 +1,10 @@
 package controller
 
 import (
-	"github.com/gorilla/websocket"
 	"net/http"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 var socket = websocket.Upgrader{
@@ -46,6 +47,8 @@ type hub struct {
 	connect chan *client
 	// 取消注册来自客户端的请求。
 	close chan *client
+	// 在线状态更新通道
+	status chan map[string]any
 }
 
 var Hub = func() *hub {
@@ -53,6 +56,7 @@ var Hub = func() *hub {
 		notice:  make(chan []byte),
 		connect: make(chan *client),
 		close:   make(chan *client),
+		status:  make(chan map[string]any),
 		clients: make(map[string]*client),
 	}
 }()

@@ -47,8 +47,12 @@ func (this Index) Read(ctx *gin.Context) {
 // Connect - socket 连接
 func (this Index) Connect(ctx *gin.Context) {
 
-	// 生成客户端ID
-	id := guid()
+	// 获取客户端ID
+	id, exists := ctx.Get("client_id")
+	if !exists {
+		// 如果中间件没有设置客户端ID，使用随机生成的ID
+		id = guid()
+	}
 
 	// 检查请求头中是否包含Upgrade: websocket
 	if ctx.GetHeader("Upgrade") != "websocket" {
@@ -64,7 +68,7 @@ func (this Index) Connect(ctx *gin.Context) {
 
 	conn, err := socket.Upgrade(ctx.Writer, ctx.Request, map[string][]string{
 		// 客户端ID
-		"X-Client-Id": {id},
+		"X-Client-Id": {fmt.Sprintf("%v", id)},
 		// 客户端信息
 		"X-Client-info": {"Welcome to inis pro socket service！"},
 	})
@@ -80,7 +84,7 @@ func (this Index) Connect(ctx *gin.Context) {
 		conn: conn,
 		send: make(chan []byte, 256),
 		info: &info{
-			ID:      id,
+			ID:      fmt.Sprintf("%v", id),
 			Type:    "connect",
 			Content: "连接成功",
 		},
@@ -195,12 +199,16 @@ func (hub *hub) run() {
 			hub.clients[client.info.ID] = client
 			// 发送连接成功消息
 			client.send <- []byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`)
+			// 广播在线状态更新
+			hub.broadcastStatus()
 		// 退出连接
 		case client := <-hub.close:
 			fmt.Println("客户端退出连接")
 			if _, ok := hub.clients[client.info.ID]; ok {
 				delete(hub.clients, client.info.ID)
 				close(client.send)
+				// 广播在线状态更新
+				hub.broadcastStatus()
 			}
 		// 通知通信
 		case message := <-hub.notice:
@@ -210,9 +218,38 @@ func (hub *hub) run() {
 			} else if content["type"] == "single" {
 				hub.singlecast(message)
 			}
+		// 状态更新
+		case status := <-hub.status:
+			// 处理状态更新
+			statusMsg, _ := json.Marshal(map[string]any{
+				"type":    "status",
+				"content": status,
+			})
+			hub.broadcast(statusMsg)
 		}
 		fmt.Println("================== 在线人数", len(hub.clients), " ==================")
 	}
+}
+
+// 广播在线状态
+func (hub *hub) broadcastStatus() {
+	// 收集在线用户ID
+	onlineUsers := []string{}
+	for clientId := range hub.clients {
+		onlineUsers = append(onlineUsers, clientId)
+	}
+
+	// 构建状态消息
+	statusMsg, _ := json.Marshal(map[string]any{
+		"type": "status",
+		"content": map[string]any{
+			"online_users": onlineUsers,
+			"online_count": len(onlineUsers),
+		},
+	})
+
+	// 广播状态消息
+	hub.broadcast(statusMsg)
 }
 
 // 广播消息
