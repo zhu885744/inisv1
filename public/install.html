@@ -4,94 +4,371 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>安装引导</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3b82f6',
-                        success: '#10b981',
-                        warning: '#f59e0b',
-                        danger: '#ef4444',
-                        info: '#3b82f6',
-                    },
-                },
+    <style>
+        /* 全局样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --success-color: #10b981;
+            --success-hover: #059669;
+            --danger-color: #ef4444;
+            --danger-hover: #dc2626;
+            --warning-color: #f59e0b;
+            --warning-hover: #d97706;
+            --info-color: #3b82f6;
+            --info-hover: #2563eb;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #4b5563;
+            --border-color: #d1d5db;
+            --border-radius: 0.5rem;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        
+        /* 卡片样式 */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 600px;
+        }
+        
+        /* 标题样式 */
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            color: var(--text-primary);
+        }
+        
+        h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        /* 步骤指示器样式 */
+        .steps-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .step-number {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .step-active {
+            background-color: var(--primary-color);
+            color: #ffffff;
+        }
+        
+        .step-inactive {
+            background-color: #e5e7eb;
+            color: var(--text-secondary);
+        }
+        
+        .step-completed {
+            background-color: var(--success-color);
+            color: #ffffff;
+        }
+        
+        .step-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+            border: none;
+            cursor: pointer;
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: #ffffff;
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+        }
+        
+        .btn-secondary {
+            background-color: #e5e7eb;
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #d1d5db;
+        }
+        
+        .btn-success {
+            background-color: var(--success-color);
+            color: #ffffff;
+        }
+        
+        .btn-success:hover {
+            background-color: var(--success-hover);
+        }
+        
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: #ffffff;
+        }
+        
+        .btn-danger:hover {
+            background-color: var(--danger-hover);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* 提示框样式 */
+        .alert {
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+        }
+        
+        .alert-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+        }
+        
+        .alert-info {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .alert-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        /* 间距样式 */
+        .mt-4 {
+            margin-top: 1rem;
+        }
+        
+        .mt-6 {
+            margin-top: 1.5rem;
+        }
+        
+        .mb-4 {
+            margin-bottom: 1rem;
+        }
+        
+        .mb-6 {
+            margin-bottom: 1.5rem;
+        }
+        
+        .mb-8 {
+            margin-bottom: 2rem;
+        }
+        
+        .space-y-4 {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .flex {
+            display: flex;
+        }
+        
+        .flex-col {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .justify-center {
+            justify-content: center;
+        }
+        
+        .text-center {
+            text-align: center;
+        }
+        
+        /* 隐藏类 */
+        .hidden {
+            display: none;
+        }
+        
+        /* 文本样式 */
+        .text-sm {
+            font-size: 0.875rem;
+        }
+        
+        .text-lg {
+            font-size: 1.125rem;
+        }
+        
+        .font-medium {
+            font-weight: 500;
+        }
+        
+        .text-danger {
+            color: var(--danger-color);
+        }
+        
+        /* 宽度样式 */
+        .w-full {
+            width: 100%;
+        }
+        
+        /* 网格布局 */
+        .grid {
+            display: grid;
+        }
+        
+        .grid-cols-1 {
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+        }
+        
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        
+        .gap-4 {
+            gap: 1rem;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .steps-container {
+                gap: 0.5rem;
+            }
+            
+            .step-label {
+                font-size: 0.75rem;
+            }
+            
+            .grid-cols-2 {
+                grid-template-columns: repeat(1, minmax(0, 1fr));
+            }
+            
+            .card {
+                padding: 1rem;
             }
         }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
+        
+        @media (max-width: 480px) {
+            .step-number {
+                width: 2rem;
+                height: 2rem;
+                font-size: 0.875rem;
             }
-            .step-active {
-                @apply bg-primary text-white;
+            
+            h1 {
+                font-size: 1.25rem;
             }
-            .step-inactive {
-                @apply bg-gray-200 text-gray-600;
-            }
-            .form-input {
-                @apply w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
-            }
-            .btn {
-                @apply px-4 py-2 rounded-md font-medium transition-colors;
-            }
-            .btn-primary {
-                @apply bg-primary text-white hover:bg-blue-600;
-            }
-            .btn-secondary {
-                @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
-            }
-            .btn-success {
-                @apply bg-success text-white hover:bg-green-600;
-            }
-            .btn-danger {
-                @apply bg-danger text-white hover:bg-red-600;
-            }
-            .card {
-                @apply bg-white rounded-lg shadow-md p-6;
-            }
-            .alert {
-                @apply p-4 rounded-md mb-4;
-            }
-            .alert-success {
-                @apply bg-green-100 text-green-700;
-            }
-            .alert-danger {
-                @apply bg-red-100 text-red-700;
-            }
-            .alert-info {
-                @apply bg-blue-100 text-blue-700;
+            
+            h2 {
+                font-size: 1.125rem;
             }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-4xl">
+<body>
+    <div class="container">
         <div class="card">
-            <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">系统安装引导</h1>
+            <h1>系统安装引导</h1>
             
             <!-- 安装步骤指示器 -->
-            <div class="flex justify-between mb-8">
-                <div class="flex flex-col items-center">
-                    <div id="step-1" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">1</div>
-                    <span class="text-sm text-gray-600">检查状态</span>
+            <div class="steps-container">
+                <div class="step">
+                    <div id="step-1" class="step-number step-inactive">1</div>
+                    <span class="step-label">检查状态</span>
                 </div>
-                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
-                <div class="flex flex-col items-center">
-                    <div id="step-2" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">2</div>
-                    <span class="text-sm text-gray-600">连接数据库</span>
+                <div class="step">
+                    <div id="step-2" class="step-number step-inactive">2</div>
+                    <span class="step-label">连接数据库</span>
                 </div>
-                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
-                <div class="flex flex-col items-center">
-                    <div id="step-3" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">3</div>
-                    <span class="text-sm text-gray-600">初始化数据库</span>
+                <div class="step">
+                    <div id="step-3" class="step-number step-inactive">3</div>
+                    <span class="step-label">初始化数据库</span>
                 </div>
-                <div class="flex-1 h-1 bg-gray-200 mx-2 self-center"></div>
-                <div class="flex flex-col items-center">
-                    <div id="step-4" class="w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2">4</div>
-                    <span class="text-sm text-gray-600">完成安装</span>
+                <div class="step">
+                    <div id="step-4" class="step-number step-inactive">4</div>
+                    <span class="step-label">完成安装</span>
                 </div>
             </div>
             
@@ -99,7 +376,7 @@
             <div id="install-content">
                 <!-- 步骤一：检查安装锁状态 -->
                 <div id="check-step" class="install-step">
-                    <h2 class="text-xl font-semibold mb-4">检查安装状态</h2>
+                    <h2>检查安装状态</h2>
                     <div class="alert alert-info">
                         <p>系统将检查安装锁状态，确保您可以执行安装引导。</p>
                     </div>
@@ -110,30 +387,34 @@
                 
                 <!-- 步骤二：连接数据库 -->
                 <div id="connect-db-step" class="install-step hidden">
-                    <h2 class="text-xl font-semibold mb-4">连接数据库</h2>
+                    <h2>连接数据库</h2>
                     <form id="connect-db-form" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库地址</label>
-                            <input type="text" name="hostname" value="localhost" class="form-input">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>数据库地址</label>
+                                <input type="text" name="hostname" value="localhost" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>数据库端口</label>
+                                <input type="number" name="hostport" value="3306" class="form-input">
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库端口</label>
-                            <input type="number" name="hostport" value="3306" class="form-input">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库名称 <span class="text-danger">*</span></label>
+                        <div class="form-group">
+                            <label>数据库名称 <span class="text-danger">*</span></label>
                             <input type="text" name="database" required class="form-input">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库用户名 <span class="text-danger">*</span></label>
-                            <input type="text" name="username" required class="form-input">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>数据库用户名 <span class="text-danger">*</span></label>
+                                <input type="text" name="username" required class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>数据库密码 <span class="text-danger">*</span></label>
+                                <input type="password" name="password" required class="form-input">
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">数据库密码 <span class="text-danger">*</span></label>
-                            <input type="password" name="password" required class="form-input">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">字符集</label>
+                        <div class="form-group">
+                            <label>字符集</label>
                             <select name="charset" class="form-input">
                                 <option value="utf8mb4">utf8mb4 (推荐)</option>
                                 <option value="utf8">utf8</option>
@@ -150,11 +431,12 @@
                 
                 <!-- 步骤三：初始化数据库 -->
                 <div id="init-db-step" class="install-step hidden">
-                    <h2 class="text-xl font-semibold mb-4">初始化数据库</h2>
+                    <h2>初始化数据库</h2>
                     <div class="alert alert-info">
                         <p>系统将初始化数据库表结构、默认数据，并自动创建管理员账号，请耐心等待。</p>
-                        <p class="mt-2">默认管理员账号：admin</p>
+                        <p class="mt-4">默认管理员账号：admin</p>
                         <p>默认管理员密码：admin123456</p>
+                        <p class="mt-4 text-danger font-medium">提示：需要点击两次初始化按钮才可初始化成功</p>
                     </div>
                     <div class="mt-6">
                         <button id="init-db-btn" class="btn btn-primary w-full">初始化数据库</button>
@@ -163,7 +445,7 @@
                 
                 <!-- 步骤四：完成安装 -->
                 <div id="lock-step" class="install-step hidden">
-                    <h2 class="text-xl font-semibold mb-4">完成安装</h2>
+                    <h2>完成安装</h2>
                     <div class="alert alert-warning">
                         <p class="font-medium">重要提示：</p>
                         <p>点击「完成安装」后，系统将锁定安装引导，防止二次安装。请确保所有步骤都已正确完成。</p>
@@ -175,15 +457,18 @@
                 
                 <!-- 安装完成页面 -->
                 <div id="complete-step" class="install-step hidden">
-                    <h2 class="text-xl font-semibold mb-4 text-center">安装完成</h2>
+                    <h2 class="text-center">安装完成</h2>
                     <div class="alert alert-success text-center">
                         <p class="text-lg font-medium">🎉 系统安装成功！</p>
-                        <p class="mt-2">您的系统已经成功安装并锁定，现在可以开始使用了。</p>
-                        <p class="mt-2">默认管理员账号：admin</p>
+                        <p class="mt-4">您的系统已经成功安装并锁定，现在可以开始使用了。</p>
+                        <p class="mt-4">默认管理员账号：admin</p>
                         <p>默认管理员密码：admin123456</p>
+                        <p class="mt-4 text-danger font-medium">提示：请在安装完成后，立即修改默认管理员密码，以保障系统安全。</p>
+                        <p class="text-danger font-medium">安装成功后需在系统根目录 /config/app.toml 文件中配置前端跨域域名，否则前端将无法正常访问。</p>
                     </div>
-                    <div class="mt-6 flex justify-center">
+                    <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                         <a href="/" class="btn btn-primary">返回首页</a>
+                        <a href="https://zhuxu.asia/archives/83" class="btn btn-primary">查看系统文档</a>
                     </div>
                 </div>
             </div>
@@ -234,11 +519,11 @@
             // 重置所有步骤
             for (let i = 1; i <= 4; i++) {
                 if (i < activeStep) {
-                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center bg-success text-white mb-2';
+                    steps[i].className = 'step-number step-completed';
                 } else if (i === activeStep) {
-                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center step-active mb-2';
+                    steps[i].className = 'step-number step-active';
                 } else {
-                    steps[i].className = 'w-10 h-10 rounded-full flex items-center justify-center step-inactive mb-2';
+                    steps[i].className = 'step-number step-inactive';
                 }
             }
         }
@@ -338,8 +623,6 @@
             }
         });
         
-
-        
         // 上锁
         document.getElementById('lock-btn').addEventListener('click', async () => {
             try {
@@ -377,7 +660,7 @@
                         // 已锁定，显示提示
                         showMessage('安装引导已锁定，无法执行安装', 'danger');
                         document.getElementById('check-btn').disabled = true;
-                        document.getElementById('check-btn').className = 'btn btn-secondary w-full cursor-not-allowed';
+                        document.getElementById('check-btn').className = 'btn btn-secondary w-full';
                     }
                 }
             } catch (error) {

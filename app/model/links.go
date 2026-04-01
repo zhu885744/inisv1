@@ -49,7 +49,7 @@ func (this *Links) AfterFind(tx *gorm.DB) (err error) {
 	this.Avatar = utils.Replace(this.Avatar, DomainTemp1())
 
 	group := map[string]any{
-		"id":          0,
+		"id":          1,
 		"name":        "默认分组",
 		"avatar":      "",
 		"description": "默认分组",
@@ -101,9 +101,11 @@ func initLinksData() {
 
 	array := []Links{
 		{
+			Uid:         1,
 			Nickname:    "朱某的生活印记",
 			Description: "没有销声匿迹，我在热爱生活",
 			Url:         "https://zhuxu.asia/",
+			Audit:       1,
 			Avatar:      "https://q1.qlogo.cn/g?b=qq&nk=2776686748&s=100",
 			Remark:      "如果可以，请不要删除我！开发不易，感谢支持！",
 		},

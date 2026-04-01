@@ -4,64 +4,216 @@
     <meta charset="UTF-8">
     <!-- 自适应移动端 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安装完成</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3b82f6',
-                        success: '#10b981',
-                        warning: '#f59e0b',
-                        danger: '#ef4444',
-                        info: '#3b82f6',
-                    },
-                },
+    <title>温馨提示</title>
+    <style>
+        /* 全局样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --success-color: #10b981;
+            --success-hover: #059669;
+            --danger-color: #ef4444;
+            --danger-hover: #dc2626;
+            --warning-color: #f59e0b;
+            --warning-hover: #d97706;
+            --info-color: #3b82f6;
+            --info-hover: #2563eb;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #4b5563;
+            --border-color: #d1d5db;
+            --border-radius: 0.5rem;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        
+        /* 容器样式 */
+        .container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* 卡片样式 */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            width: 50%;
+            max-width: 600px;
+        }
+        
+        /* 标题样式 */
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            color: var(--text-primary);
+        }
+        
+        h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        
+        /* 提示框样式 */
+        .alert {
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+        }
+        
+        .alert-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        /* 段落样式 */
+        p {
+            margin-bottom: 0.5rem;
+        }
+        
+        /* 列表样式 */
+        ul {
+            list-style-type: disc;
+            list-style-position: inside;
+            color: var(--text-secondary);
+        }
+        
+        li {
+            margin-bottom: 0.25rem;
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn-secondary {
+            background-color: #e5e7eb;
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #d1d5db;
+        }
+        
+        /* 间距样式 */
+        .mt-6 {
+            margin-top: 1.5rem;
+        }
+        
+        .space-y-4 {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .flex-col {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .space-y-2 {
+            gap: 0.5rem;
+        }
+        
+        .flex {
+            display: flex;
+        }
+        
+        .justify-center {
+            justify-content: center;
+        }
+        
+        .space-x-4 {
+            gap: 1rem;
+        }
+        
+        .text-lg {
+            font-size: 1.125rem;
+        }
+        
+        .font-medium {
+            font-weight: 500;
+        }
+        
+        .text-center {
+            text-align: center;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .card {
+                width: 90%;
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 1.25rem;
+            }
+            
+            h3 {
+                font-size: 1rem;
             }
         }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
-            }
-            .btn {
-                @apply px-4 py-2 rounded-md font-medium transition-colors;
-            }
-            .btn-primary {
-                @apply bg-primary text-white hover:bg-blue-600;
-            }
-            .btn-secondary {
-                @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
-            }
+        
+        @media (max-width: 480px) {
             .card {
-                @apply bg-white rounded-lg shadow-md p-6;
+                width: 100%;
+                padding: 0.75rem;
             }
-            .alert {
-                @apply p-4 rounded-md mb-4;
+            
+            .flex {
+                flex-direction: column;
+                gap: 0.5rem;
             }
-            .alert-success {
-                @apply bg-green-100 text-green-700;
+            
+            .btn {
+                width: 100%;
             }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-4xl">
+<body>
+    <div class="container">
         <div class="card">
-            <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">🎉 系统安装完成</h1>
+            <h1>🎉 系统已安装 🎉</h1>
             
             <div class="alert alert-success text-center">
-                <p class="text-lg font-medium">系统已经成功安装并配置完成！</p>
-                <p class="mt-2">默认管理员账号：admin</p>
-                <p>默认管理员密码：admin123456</p>
+                <p class="text-lg font-medium">系统已经成功安装！</p>
             </div>
             
             <div class="mt-6 space-y-4">
-                <div class="flex flex-col space-y-2">
-                    <h3 class="text-lg font-semibold">温馨提示：</h3>
-                    <ul class="list-disc list-inside space-y-1 text-gray-600">
+                <div class="flex-col space-y-2">
+                    <h3>温馨提示：</h3>
+                    <ul>
                         <li>由于本程序默认不提供后台管理面板，需要您手动部署或自托管带有后台管理面板的主题到服务器上。</li>
                         <li>初次使用需要您修改默认管理员账号密码为您自己的账号密码。</li>
                         <li>本程序默认提供了一套免费主题，需要您自行部署到服务器上。</li>
