@@ -449,8 +449,8 @@ func createAuthRules() (result []AuthRules) {
 		"auth-group":    "【权限分组 API】",
 		"auth-pages":    "【页面权限 API】",
 		"auth-rules":    "【权限规则 API】",
-		"links-group":   "【友链分组 API】",
-		"article-group": "【文章分组 API】",
+		"links-group":   "【友链分类 API】",
+		"article-group": "【文章分类 API】",
 		"search":        "【搜索 API】",
 	}
 

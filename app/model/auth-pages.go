@@ -63,7 +63,7 @@ func InitAuthPages() {
 	pages := []AuthPages{
 		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write", Size: "14px"},
 		{Name: "文章管理", Icon: "article", Path: "/admin/article", Size: "14px"},
-		{Name: "文章分组", Icon: "group", Path: "/admin/article/group", Size: "14px"},
+		{Name: "文章分类", Icon: "group", Path: "/admin/article/group", Size: "14px"},
 		{Name: "用户管理", Icon: "user", Path: "/admin/users", Size: "14px"},
 		{Name: "评论管理", Icon: "comment", Path: "/admin/comment", Size: "14px"},
 		{Name: "公告管理", Icon: "bell", Path: "/admin/placard", Size: "14px"},

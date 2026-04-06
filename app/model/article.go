@@ -20,7 +20,7 @@ type Article struct {
 	Top 	   int     				 `gorm:"type:int(12); comment:置顶; default:0;" json:"top"`
 	Views	   int     				 `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
 	Tags 	   string  				 `gorm:"comment:标签; default:Null;" json:"tags"`
-	Group	   string  				 `gorm:"comment:分组; default:Null;" json:"group"`
+	Group	   string  				 `gorm:"comment:分类; default:Null;" json:"group"`
 	Remark     string  				 `gorm:"comment:备注; default:Null;" json:"remark"`
 	Editor     string  				 `gorm:"comment:编辑器; default:'vditor';" json:"editor"`
 	Audit	   int    				 `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
