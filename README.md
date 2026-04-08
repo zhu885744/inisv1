@@ -63,7 +63,6 @@ inisv1/
 ├── inis.sh             # linux安装脚本
 ├── install.lock        # 安装锁文件（标记是否完成初始化）
 ├── main.go             # 程序入口文件
-├── 项目规划.md          # 项目规划文档
 ├── config/             # 配置文件目录
 │   ├── .gitignore      # 配置目录的Git忽略规则
 │   ├── app.go          # 应用配置核心逻辑（启动服务等）

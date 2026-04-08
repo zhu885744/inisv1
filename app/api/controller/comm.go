@@ -446,9 +446,12 @@ func (this *Comm) socialLogin(ctx *gin.Context) {
 			return
 		}
 
+		// 生成随机账号
+		randomAccount := "user" + utils.Rand.String(8, "0123456789abcdefghijklmnopqrstuvwxyz")
+
 		user := &model.Users{
-			Account:   cast.ToString(params["email"]),
-			Nickname:  "会员" + utils.Rand.String(4, "0123456789"),
+			Account:   randomAccount,
+			Nickname:  "用户" + utils.Rand.String(4, "0123456789"),
 			Source:    cast.ToString(params["source"]),
 			LoginTime: time.Now().Unix(),
 		}
