@@ -95,12 +95,11 @@ func createAuthRules() (result []AuthRules) {
 		},
 		"comm": {
 			"POST": {
-				"path=login&name=传统和加密登录&type=common",
-				"path=social-login&name=验证码登录&type=common",
-				"path=register&name=注册账户&type=common",
-				"path=check-token&name=校验登录&type=common",
-				"path=reset-password&name=重置密码&type=common",
-			},
+			"path=login&name=传统和加密登录&type=common",
+			"path=register&name=注册账户&type=common",
+			"path=check-token&name=校验登录&type=common",
+			"path=reset-password&name=重置密码&type=common",
+		},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
 		"toml": {

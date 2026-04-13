@@ -335,14 +335,12 @@ func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[s
 		<div class="brand"><div class="brand-name">新评论通知</div></div>
 	</div>
 	<div class="mail-content">
-		<h2 class="mail-title">新评论通知</h2>
 		<p class="subtitle">您的文章《${title}》收到了一条新评论</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
 		<p><strong>评论者：</strong>${author_name}</p>
 		<p><strong>评论时间：</strong>${created_at}</p>
 		<p><strong>评论者邮箱：</strong>${author_email}</p>
 		<p><strong>评论IP：</strong>${ip}</p>
-		<a href="#" target="_blank" class="action-btn">查看评论详情</a>
 	</div>
 	<div class="mail-footer">
 		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
@@ -427,14 +425,12 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 		<div class="brand"><div class="brand-name">评论回复通知</div></div>
 	</div>
 	<div class="mail-content">
-		<h2 class="mail-title">评论回复通知</h2>
 		<p class="subtitle">您在文章《${title}》中的评论收到了一条回复</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
 		<p><strong>回复者：</strong>${author_name}</p>
 		<p><strong>回复时间：</strong>${created_at}</p>
 		<p><strong>回复者邮箱：</strong>${author_email}</p>
 		<p><strong>回复IP：</strong>${ip}</p>
-		<a href="#" target="_blank" class="action-btn">查看回复详情</a>
 	</div>
 	<div class="mail-footer">
 		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
