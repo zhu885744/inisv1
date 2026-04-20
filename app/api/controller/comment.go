@@ -461,6 +461,15 @@ func (this *Comment) create(ctx *gin.Context) {
 				val = utils.Json.Encode(val)
 			case "slice":
 				val = strings.Join(cast.ToStringSlice(val), ",")
+			case "string":
+				// 检测是否包含XSS攻击
+				if key == "content" || key == "text" {
+					if facade.Comm.DetectXSS(cast.ToString(val)) {
+						this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
+						return
+					}
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 			utils.Struct.Set(&table, key, val)
 		}
@@ -691,6 +700,15 @@ func (this *Comment) update(ctx *gin.Context) {
 				val = utils.Json.Encode(val)
 			case "slice":
 				val = strings.Join(cast.ToStringSlice(val), ",")
+			case "string":
+				// 检测是否包含XSS攻击
+				if key == "content" || key == "text" {
+					if facade.Comm.DetectXSS(cast.ToString(val)) {
+						this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
+						return
+					}
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 			async.Set(key, val)
 		}

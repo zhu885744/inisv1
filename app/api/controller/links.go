@@ -333,6 +333,16 @@ func (this *Links) create(ctx *gin.Context) {
 
 	// 动态给结构体赋值
 	for key, val := range params {
+		// 检测是否包含XSS攻击
+		if utils.Get.Type(val) == "string" {
+			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
+				if facade.Comm.DetectXSS(cast.ToString(val)) {
+					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
+					return
+				}
+				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+			}
+		}
 		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {
 			switch utils.Get.Type(val) {
@@ -392,6 +402,16 @@ func (this *Links) update(ctx *gin.Context) {
 
 	// 动态给结构体赋值
 	for key, val := range params {
+		// 检测是否包含XSS攻击
+		if utils.Get.Type(val) == "string" {
+			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
+				if facade.Comm.DetectXSS(cast.ToString(val)) {
+					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
+					return
+				}
+				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+			}
+		}
 		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {
 			switch utils.Get.Type(val) {

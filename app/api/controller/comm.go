@@ -357,6 +357,15 @@ func (this *Comm) register(ctx *gin.Context) {
 		// 加密密码
 		if key == "password" {
 			val = utils.Password.Create(params["password"])
+		} else if utils.Get.Type(val) == "string" {
+			// 检测是否包含XSS攻击
+			if key == "account" || key == "nickname" || key == "avatar" || key == "description" {
+				if facade.Comm.DetectXSS(cast.ToString(val)) {
+					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
+					return
+				}
+				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+			}
 		}
 		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {

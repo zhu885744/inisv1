@@ -17,6 +17,7 @@ require (
 	github.com/google/uuid v1.4.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/jasonlvhit/gocron v0.0.1
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/qiniu/go-sdk/v7 v7.18.2
 	github.com/redis/go-redis/v9 v9.2.1
@@ -46,6 +47,7 @@ require (
 	github.com/alibabacloud-go/tea-utils v1.4.5 // indirect
 	github.com/alibabacloud-go/tea-xml v1.1.3 // indirect
 	github.com/aliyun/credentials-go v1.3.1 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.14.2 // indirect
 	github.com/bytedance/sonic/loader v0.4.0 // indirect
@@ -74,6 +76,7 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.1 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
