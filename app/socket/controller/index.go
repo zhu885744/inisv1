@@ -201,6 +201,8 @@ func (hub *hub) run() {
 			client.send <- []byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`)
 			// 广播在线状态更新
 			hub.broadcastStatus()
+			// 只在连接变化时显示在线人数
+			fmt.Println("================== 在线人数", len(hub.clients), " ==================")
 		// 退出连接
 		case client := <-hub.close:
 			fmt.Println("客户端退出连接")
@@ -209,6 +211,8 @@ func (hub *hub) run() {
 				close(client.send)
 				// 广播在线状态更新
 				hub.broadcastStatus()
+				// 只在连接变化时显示在线人数
+				fmt.Println("================== 在线人数", len(hub.clients), " ==================")
 			}
 		// 通知通信
 		case message := <-hub.notice:
@@ -227,7 +231,6 @@ func (hub *hub) run() {
 			})
 			hub.broadcast(statusMsg)
 		}
-		fmt.Println("================== 在线人数", len(hub.clients), " ==================")
 	}
 }
 
@@ -254,7 +257,6 @@ func (hub *hub) broadcastStatus() {
 
 // 广播消息
 func (hub *hub) broadcast(message []byte) {
-	fmt.Println("进入广播通道")
 	for _, client := range hub.clients {
 		select {
 		case client.send <- message:

@@ -1,7 +1,6 @@
 package facade
 
 import (
-	"html"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -21,13 +20,20 @@ var htmlSanitizer = bluemonday.UGCPolicy()
 // XSS 检测正则（预编译，提升性能）
 var (
 	scriptRegex    = regexp.MustCompile(`(?i)<script\b[^>]*>[\s\S]*?</script>`)
-	eventRegex     = regexp.MustCompile(`(?i)\bon\w+\s*=\s*(?:["']|)[\s\S]*?`)
+	eventRegex     = regexp.MustCompile(`(?i)\bon(click|mouse|key|load|error|submit|change|focus|blur|scroll|resize|select|abort|afterprint|beforeprint|beforeunload|canplay|canplaythrough|cuechange|dblclick|drag|dragend|dragenter|dragleave|dragover|dragstart|drop|durationchange|emptied|ended|error|focusin|focusout|hashchange|input|invalid|keydown|keypress|keyup|load|loadeddata|loadedmetadata|loadstart|message|mousedown|mousemove|mouseout|mouseover|mouseup|mousewheel|offline|online|open|pagehide|pageshow|play|playing|popstate|progress|ratechange|readystatechange|reset|resize|scroll|seeked|seeking|select|show|stalled|storage|submit|suspend|timeupdate|toggle|touchcancel|touchend|touchmove|touchstart|transitionend|unload|volumechange|waiting|wheel)\b[^=]*=\s*(?:"[^"]*"|'[^']*'|[^'"<>]+)`)
 	jsUrlRegex     = regexp.MustCompile(`(?i)javascript:\s*[\s\S]*`)
 	iframeRegex    = regexp.MustCompile(`(?i)<iframe\b[^>]*>[\s\S]*?</iframe>`)
 	objectRegex    = regexp.MustCompile(`(?i)<object\b[^>]*>[\s\S]*?</object>`)
 	embedRegex     = regexp.MustCompile(`(?i)<embed\b[^>]*>`)
 	evalRegex      = regexp.MustCompile(`(?i)\beval\s*\(\s*[\s\S]*?\)`)
 	timerRegex     = regexp.MustCompile(`(?i)\b(setTimeout|setInterval)\s*\(\s*[\s\S]*?\)`)
+	styleRegex     = regexp.MustCompile(`(?i)<style\b[^>]*>[\s\S]*?</style>`)
+	svgRegex       = regexp.MustCompile(`(?i)<svg\b[^>]*>[\s\S]*?</svg>`)
+	imgRegex       = regexp.MustCompile(`(?i)<img\b[^>]*on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^'"<>]+)`)
+	linkRegex      = regexp.MustCompile(`(?i)<link\b[^>]*href\s*=\s*["']?javascript:`)
+	dataUrlRegex   = regexp.MustCompile(`(?i)data:text/html[^>]*`)
+	base64Regex    = regexp.MustCompile(`(?i)base64[^>]*<[^>]+>`)
+	entityRegex    = regexp.MustCompile(`(?i)&[a-z0-9]+;`)
 	hexEntityRegex = regexp.MustCompile(`&#x([0-9a-fA-F]+);`)
 	decEntityRegex = regexp.MustCompile(`&#([0-9]+);`)
 )
@@ -122,11 +128,9 @@ func (c *CommStruct) SanitizeHTML(input string) string {
 	if input == "" {
 		return ""
 	}
-	// 1. 专业 XSS 过滤
+	// 专业 XSS 过滤（使用 bluemonday）
 	clean := htmlSanitizer.Sanitize(input)
-	// 2. 双重转义，彻底杜绝执行
-	clean = html.EscapeString(clean)
-	// 3. 清理空白
+	// 清理空白
 	return strings.TrimSpace(clean)
 }
 
@@ -147,7 +151,13 @@ func (c *CommStruct) DetectXSS(input string) bool {
 		objectRegex.MatchString(input) ||
 		embedRegex.MatchString(input) ||
 		evalRegex.MatchString(input) ||
-		timerRegex.MatchString(input) {
+		timerRegex.MatchString(input) ||
+		styleRegex.MatchString(input) ||
+		svgRegex.MatchString(input) ||
+		imgRegex.MatchString(input) ||
+		linkRegex.MatchString(input) ||
+		dataUrlRegex.MatchString(input) ||
+		base64Regex.MatchString(input) {
 		return true
 	}
 
@@ -158,11 +168,42 @@ func (c *CommStruct) DetectXSS(input string) bool {
 func (c *CommStruct) decodeHTMLEntities(input string) string {
 	// 基础实体
 	replacements := map[string]string{
-		"&lt;":   "<",
-		"&gt;":   ">",
-		"&amp;":  "&",
-		"&quot;": "\"",
-		"&apos;": "'",
+		"&lt;":     "<",
+		"&gt;":     ">",
+		"&amp;":    "&",
+		"&quot;":   "\"",
+		"&apos;":   "'",
+		"&nbsp;":   " ",
+		"&iexcl;":  "¡",
+		"&cent;":   "¢",
+		"&pound;":  "£",
+		"&curren;": "¤",
+		"&yen;":    "¥",
+		"&brvbar;": "¦",
+		"&sect;":   "§",
+		"&uml;":    "¨",
+		"&copy;":   "©",
+		"&ordf;":   "ª",
+		"&laquo;":  "«",
+		"&not;":    "¬",
+		"&reg;":    "®",
+		"&macr;":   "¯",
+		"&deg;":    "°",
+		"&plusmn;": "±",
+		"&sup2;":   "²",
+		"&sup3;":   "³",
+		"&acute;":  "´",
+		"&micro;":  "µ",
+		"&para;":   "¶",
+		"&middot;": "·",
+		"&cedil;":  "¸",
+		"&sup1;":   "¹",
+		"&ordm;":   "º",
+		"&raquo;":  "»",
+		"&frac14;": "¼",
+		"&frac12;": "½",
+		"&frac34;": "¾",
+		"&iquest;": "¿",
 	}
 	for k, v := range replacements {
 		input = strings.ReplaceAll(input, k, v)
