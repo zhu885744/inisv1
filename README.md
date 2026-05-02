@@ -185,8 +185,6 @@ bee pack -ba="-ldflags -s -w"
 ### API 接口文档
 本文档详细标注了如何在开发主题中使用自定义接口。
 
-登录后，可通过访问 swagger 访问地址：https://{host}/swagger/index.html 查看所有 API。
-
 ## 目录结构
 
 ```
