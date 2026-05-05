@@ -5,7 +5,9 @@ import (
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -122,7 +124,9 @@ func (this *Links) one(ctx *gin.Context) {
 	var data any
 
 	// 获取请求参数
-	params := this.params(ctx)
+	params := this.params(ctx, map[string]any{
+		"status": false,
+	})
 
 	// 表数据结构体
 	table := model.Links{}
@@ -170,7 +174,34 @@ func (this *Links) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 如果需要检测友链状态
+	checkStatus := cast.ToBool(params["status"])
+	if checkStatus && !utils.Is.Empty(data) {
+		data = this.checkSingleLinkStatus(ctx, data)
+	}
+
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// checkSingleLinkStatus 检测单个友链的在线状态
+func (this *Links) checkSingleLinkStatus(ctx *gin.Context, data any) any {
+	item, ok := data.(map[string]any)
+	if !ok {
+		return data
+	}
+
+	url := cast.ToString(item["url"])
+	if url == "" {
+		item["online"] = false
+		item["responseTime"] = 0
+		return item
+	}
+
+	online, responseTime := this.checkURLStatus(url)
+	item["online"] = online
+	item["responseTime"] = responseTime
+
+	return item
 }
 
 // all 获取全部数据
@@ -182,8 +213,9 @@ func (this *Links) all(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx, map[string]any{
-		"page":  1,
-		"order": "create_time desc",
+		"page":   1,
+		"order":  "create_time desc",
+		"status": false,
 	})
 
 	// 表数据结构体
@@ -238,11 +270,124 @@ func (this *Links) all(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 如果需要检测友链状态
+	checkStatus := cast.ToBool(params["status"])
+	if checkStatus && !utils.Is.Empty(data) {
+		if items, ok := data.([]any); ok {
+			if checkedItems := this.checkLinksStatus(ctx, items); checkedItems != nil {
+				data = checkedItems
+			}
+		}
+	}
+
 	this.json(ctx, gin.H{
 		"data":  data,
 		"count": count,
 		"page":  math.Ceil(float64(count) / float64(limit)),
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// checkLinksStatus 检测友链在线状态
+func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
+	items, ok := data.([]any)
+	if !ok {
+		return data
+	}
+
+	var wg sync.WaitGroup
+	statusMap := make(map[int]map[string]any)
+	mu := sync.Mutex{}
+
+	for i, item := range items {
+		link, linkOk := item.(map[string]any)
+		if !linkOk {
+			continue
+		}
+
+		wg.Add(1)
+		go func(index int, linkMap map[string]any) {
+			defer wg.Done()
+
+			url := cast.ToString(linkMap["url"])
+
+			if url == "" {
+				mu.Lock()
+				statusMap[index] = map[string]any{
+					"online":       false,
+					"responseTime": 0,
+				}
+				mu.Unlock()
+				return
+			}
+
+			online, responseTime := this.checkURLStatus(url)
+
+			mu.Lock()
+			statusMap[index] = map[string]any{
+				"online":       online,
+				"responseTime": responseTime,
+			}
+			mu.Unlock()
+		}(i, link)
+	}
+
+	wg.Wait()
+
+	for i := range items {
+		if status, ok := statusMap[i]; ok {
+			if linkMap, ok := items[i].(map[string]any); ok {
+				linkMap["online"] = status["online"]
+				linkMap["responseTime"] = status["responseTime"]
+			}
+		}
+	}
+
+	return items
+}
+
+// checkURLStatus 检测单个URL的在线状态和响应时间
+func (this *Links) checkURLStatus(urlStr string) (bool, int) {
+	urlStr = strings.TrimSpace(urlStr)
+	urlStr = strings.Trim(urlStr, "`")
+	urlStr = strings.TrimSpace(urlStr)
+
+	if urlStr == "" {
+		return false, 0
+	}
+
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "https://" + urlStr
+	}
+
+	start := time.Now()
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequest("HEAD", urlStr, nil)
+	if err != nil {
+		req, err = http.NewRequest("GET", urlStr, nil)
+		if err != nil {
+			return false, 0
+		}
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; LinksChecker/1.0)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, 0
+	}
+	defer resp.Body.Close()
+
+	duration := time.Since(start)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+		return true, int(duration.Milliseconds())
+	}
+
+	return false, int(duration.Milliseconds())
 }
 
 // rand 随机获取
