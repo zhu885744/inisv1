@@ -95,11 +95,11 @@ func createAuthRules() (result []AuthRules) {
 		},
 		"comm": {
 			"POST": {
-			"path=login&name=传统和加密登录&type=common",
-			"path=register&name=注册账户&type=common",
-			"path=check-token&name=校验登录&type=common",
-			"path=reset-password&name=重置密码&type=common",
-		},
+				"path=login&name=传统和加密登录&type=common",
+				"path=register&name=注册账户&type=common",
+				"path=check-token&name=校验登录&type=common",
+				"path=reset-password&name=重置密码&type=common",
+			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
 		"toml": {
@@ -401,24 +401,30 @@ func createAuthRules() (result []AuthRules) {
 			"DELETE": {"remove", "delete", "clear"},
 		},
 		"upgrade": {
-            "GET": {
-                "path=list&type=default&name=获取版本列表",
-                "path=detail&type=default&name=获取版本详情",
-            },
-            "POST": {
-                "path=theme&type=default&name=主题升级",
-                "path=system&type=default&name=系统升级",
-                "path=create&type=default&name=创建版本",
-                "path=update&type=default&name=更新版本",
-                "path=delete&type=default&name=删除版本",
-            },
-        },
+			"GET": {
+				"path=list&type=default&name=获取版本列表",
+				"path=detail&type=default&name=获取版本详情",
+			},
+			"POST": {
+				"path=theme&type=default&name=主题升级",
+				"path=system&type=default&name=系统升级",
+				"path=create&type=default&name=创建版本",
+				"path=update&type=default&name=更新版本",
+				"path=delete&type=default&name=删除版本",
+			},
+		},
 		"search": {
 			"GET": {
 				"path=article&type=common&name=文章搜索",
 				"path=pages&type=common&name=独立页面搜索",
 				"path=tags&type=common&name=标签搜索",
 				"path=all&type=common&name=全局搜索",
+			},
+		},
+		"rss": {
+			"GET": {
+				"path=&type=common&name=RSS订阅源",
+				"path=index&type=common&name=RSS订阅源",
 			},
 		},
 	}
@@ -451,6 +457,7 @@ func createAuthRules() (result []AuthRules) {
 		"links-group":   "【友链分类 API】",
 		"article-group": "【文章分类 API】",
 		"search":        "【搜索 API】",
+		"rss":           "【RSS订阅 API】",
 	}
 
 	// 基础方法

@@ -50,6 +50,7 @@ func Route(Gin *gin.Engine) {
 		"links-group":   &controller.LinksGroup{},
 		"article-group": &controller.ArticleGroup{},
 		"search":        &controller.Search{},
+		"rss":           &controller.Rss{},
 	}
 
 	// 动态配置路由
