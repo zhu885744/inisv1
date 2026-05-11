@@ -273,10 +273,8 @@ func (this *Links) all(ctx *gin.Context) {
 	// 如果需要检测友链状态
 	checkStatus := cast.ToBool(params["status"])
 	if checkStatus && !utils.Is.Empty(data) {
-		if items, ok := data.([]any); ok {
-			if checkedItems := this.checkLinksStatus(ctx, items); checkedItems != nil {
-				data = checkedItems
-			}
+		if checkedItems, ok := this.checkLinksStatus(ctx, data).([]any); ok {
+			data = checkedItems
 		}
 	}
 
@@ -294,10 +292,43 @@ func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
 		return data
 	}
 
-	var wg sync.WaitGroup
-	statusMap := make(map[int]map[string]any)
+	numLinks := len(items)
+	if numLinks == 0 {
+		return data
+	}
+
+	statusMap := make(map[int]map[string]any, numLinks)
 	mu := sync.Mutex{}
 
+	cacheKey := "links_status_cache"
+	if facade.Cache.Has(cacheKey) {
+		cachedData := facade.Cache.Get(cacheKey)
+		if cachedData != nil {
+			if cachedStatus, ok := cachedData.(map[string]any); ok {
+				for i, item := range items {
+					if linkMap, linkOk := item.(map[string]any); linkOk {
+						url := cast.ToString(linkMap["url"])
+						if statusData, exists := cachedStatus[url]; exists {
+							if statusMap, statusOk := statusData.(map[string]any); statusOk {
+								if online, ok := statusMap["online"]; ok {
+									linkMap["online"] = online
+								}
+								if responseTime, ok := statusMap["responseTime"]; ok {
+									linkMap["responseTime"] = responseTime
+								}
+								continue
+							}
+						}
+					}
+					statusMap[i] = map[string]any{"online": false, "responseTime": 0}
+				}
+				go this.updateLinksStatusCache(items)
+				return items
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
 	for i, item := range items {
 		link, linkOk := item.(map[string]any)
 		if !linkOk {
@@ -333,6 +364,8 @@ func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
 
 	wg.Wait()
 
+	this.cacheLinksStatus(items, statusMap)
+
 	for i := range items {
 		if status, ok := statusMap[i]; ok {
 			if linkMap, ok := items[i].(map[string]any); ok {
@@ -343,6 +376,56 @@ func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
 	}
 
 	return items
+}
+
+// cacheLinksStatus 缓存友链状态
+func (this *Links) cacheLinksStatus(items []any, statusMap map[int]map[string]any) {
+	cachedStatus := make(map[string]any)
+	for i, item := range items {
+		if linkMap, ok := item.(map[string]any); ok {
+			url := cast.ToString(linkMap["url"])
+			if status, ok := statusMap[i]; ok {
+				cachedStatus[url] = status
+			}
+		}
+	}
+	facade.Cache.Set("links_status_cache", cachedStatus, 300)
+}
+
+// updateLinksStatusCache 异步更新友链状态缓存
+func (this *Links) updateLinksStatusCache(items []any) {
+	statusMap := make(map[int]map[string]any)
+	mu := sync.Mutex{}
+
+	var wg sync.WaitGroup
+
+	for i, item := range items {
+		link, linkOk := item.(map[string]any)
+		if !linkOk {
+			continue
+		}
+
+		wg.Add(1)
+		go func(index int, linkMap map[string]any) {
+			defer wg.Done()
+
+			url := cast.ToString(linkMap["url"])
+			if url == "" {
+				mu.Lock()
+				statusMap[index] = map[string]any{"online": false, "responseTime": 0}
+				mu.Unlock()
+				return
+			}
+
+			online, responseTime := this.checkURLStatus(url)
+			mu.Lock()
+			statusMap[index] = map[string]any{"online": online, "responseTime": responseTime}
+			mu.Unlock()
+		}(i, link)
+	}
+
+	wg.Wait()
+	this.cacheLinksStatus(items, statusMap)
 }
 
 // checkURLStatus 检测单个URL的在线状态和响应时间
@@ -359,42 +442,96 @@ func (this *Links) checkURLStatus(urlStr string) (bool, int) {
 		urlStr = "https://" + urlStr
 	}
 
-	start := time.Now()
-
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
 	}
 
-	req, err := http.NewRequest("HEAD", urlStr, nil)
-	if err != nil {
-		req, err = http.NewRequest("GET", urlStr, nil)
+	return this.tryCheckURL(urlStr, client, 1)
+}
+
+// tryCheckURL 尝试检测URL状态，支持重试和协议切换
+func (this *Links) tryCheckURL(urlStr string, client *http.Client, maxRetries int) (bool, int) {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		start := time.Now()
+
+		req, err := http.NewRequest("HEAD", urlStr, nil)
 		if err != nil {
+			req, err = http.NewRequest("GET", urlStr, nil)
+			if err != nil {
+				return false, 0
+			}
+		}
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Connection", "close")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if attempt < maxRetries {
+				if strings.HasPrefix(urlStr, "https://") {
+					urlStr = "http://" + strings.TrimPrefix(urlStr, "https://")
+				} else if strings.HasPrefix(urlStr, "http://") {
+					urlStr = "https://" + strings.TrimPrefix(urlStr, "http://")
+				}
+				continue
+			}
 			return false, 0
 		}
+		defer resp.Body.Close()
+
+		duration := time.Since(start)
+
+		if this.isValidStatusCode(resp.StatusCode) {
+			return true, int(duration.Milliseconds())
+		}
+
+		if attempt < maxRetries {
+			if strings.HasPrefix(urlStr, "https://") {
+				urlStr = "http://" + strings.TrimPrefix(urlStr, "https://")
+			} else if strings.HasPrefix(urlStr, "http://") {
+				urlStr = "https://" + strings.TrimPrefix(urlStr, "http://")
+			}
+			continue
+		}
+
+		return false, int(duration.Milliseconds())
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; LinksChecker/1.0)")
+	return false, 0
+}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, 0
+// isValidStatusCode 检查状态码是否表示正常访问
+func (this *Links) isValidStatusCode(statusCode int) bool {
+	switch statusCode {
+	case 200, 201, 202, 203, 204, 205, 206:
+		return true
+	case 301, 302, 303, 304, 307, 308:
+		return true
+	case 401, 403:
+		return true
+	case 404:
+		return true
+	case 500, 502, 503, 504:
+		return false
+	default:
+		return statusCode >= 200 && statusCode < 500
 	}
-	defer resp.Body.Close()
-
-	duration := time.Since(start)
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-		return true, int(duration.Milliseconds())
-	}
-
-	return false, int(duration.Milliseconds())
 }
 
 // rand 随机获取
 func (this *Links) rand(ctx *gin.Context) {
 
 	// 请求参数
-	params := this.params(ctx)
+	params := this.params(ctx, map[string]any{
+		"status": false,
+	})
 
 	// 限制最大数量
 	limit := this.meta.limit(ctx)
@@ -429,6 +566,14 @@ func (this *Links) rand(ctx *gin.Context) {
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
 		return
+	}
+
+	// 如果需要检测友链状态
+	checkStatus := cast.ToBool(params["status"])
+	if checkStatus && !utils.Is.Empty(data) {
+		if checkedItems, ok := this.checkLinksStatus(ctx, data).([]any); ok {
+			data = checkedItems
+		}
 	}
 
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
