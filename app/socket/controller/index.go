@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,9 +11,6 @@ import (
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 )
-
-// 是否输出调试信息
-var debugMode = false
 
 func init() {
 	go Hub.run()
@@ -47,36 +43,52 @@ func (this Index) Read(ctx *gin.Context) {
 // Connect - socket 连接
 func (this Index) Connect(ctx *gin.Context) {
 
-	// 获取客户端ID
 	id, exists := ctx.Get("client_id")
 	if !exists {
-		// 如果中间件没有设置客户端ID，使用随机生成的ID
 		id = guid()
 	}
 
-	// 检查请求头中是否包含Upgrade: websocket
 	if ctx.GetHeader("Upgrade") != "websocket" {
-		// 只在debug模式下输出错误信息
-		if debugMode {
-			fmt.Println("非WebSocket连接请求:", ctx.Request.RemoteAddr)
-		}
+		socketLog("非WebSocket连接请求: %s", ctx.Request.RemoteAddr)
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"error": "非WebSocket连接请求",
 		})
 		return
 	}
 
+	clientIP := ctx.ClientIP()
+
+	if Hub.IsBlacklisted(clientIP) {
+		socketLog("IP在黑名单中，拒绝连接: %s", clientIP)
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error": "您的IP已被封禁",
+		})
+		return
+	}
+
+	origin := ctx.GetHeader("Origin")
+	if !Hub.IsOriginAllowed(origin) {
+		socketLog("Origin不允许，拒绝连接: %s", origin)
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error": "不允许的来源",
+		})
+		return
+	}
+
+	if !Hub.checkIPLimit(clientIP) {
+		socketLog("IP连接数超限，拒绝连接: %s", clientIP)
+		ctx.JSON(http.StatusTooManyRequests, gin.H{
+			"error": "连接数超限，请稍后再试",
+		})
+		return
+	}
+
 	conn, err := socket.Upgrade(ctx.Writer, ctx.Request, map[string][]string{
-		// 客户端ID
-		"X-Client-Id": {fmt.Sprintf("%v", id)},
-		// 客户端信息
+		"X-Client-Id":   {cast.ToString(id)},
 		"X-Client-info": {"Welcome to inis pro socket service！"},
 	})
 	if err != nil {
-		// 只在debug模式下输出错误信息
-		if debugMode {
-			fmt.Println("WebSocket升级错误:", err)
-		}
+		socketLog("WebSocket升级错误: %v", err)
 		return
 	}
 	client := &client{
@@ -84,21 +96,21 @@ func (this Index) Connect(ctx *gin.Context) {
 		conn: conn,
 		send: make(chan []byte, 256),
 		info: &info{
-			ID:      fmt.Sprintf("%v", id),
+			ID:      cast.ToString(id),
 			Type:    "connect",
 			Content: "连接成功",
 		},
 	}
+
+	Hub.addIPConnection(clientIP, cast.ToString(id))
 	client.hub.connect <- client
 
 	go client.write()
 	go client.read()
 }
 
-// 客户端消息读取
 func (this *client) read() {
-
-	fmt.Println("============= read - socket =============")
+	socketLog("开始读取消息: %s", this.info.ID)
 
 	defer func() {
 		this.hub.close <- this
@@ -111,42 +123,153 @@ func (this *client) read() {
 		return nil
 	})
 	for {
-		_, msg, err := this.conn.ReadMessage()
+		wsMsgType, msg, err := this.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				fmt.Println("error: ", err)
+				socketLog("连接异常关闭: %s, 错误: %v", this.info.ID, err)
+			} else {
+				socketLog("连接正常关闭: %s, 原因: %v", this.info.ID, err)
 			}
 			break
 		}
-		// 有效的JSON数据
+
+		if wsMsgType == websocket.PingMessage {
+			socketLog("收到ping消息，回复pong: %s", this.info.ID)
+			this.conn.WriteMessage(websocket.PongMessage, []byte{})
+			continue
+		}
+
+		if wsMsgType == websocket.PongMessage {
+			socketLog("收到pong消息: %s", this.info.ID)
+			continue
+		}
+
+		if wsMsgType == websocket.CloseMessage {
+			socketLog("收到关闭消息: %s", this.info.ID)
+			break
+		}
+
 		if json.Valid(msg) {
+			if valid, errMsg := this.hub.ValidateMessage(msg); !valid {
+				socketLog("消息验证失败: %s, 错误: %s", this.info.ID, errMsg)
+				continue
+			}
+
+			item := Json(msg)
+			msgType := cast.ToString(item["type"])
+
+			if msgType == "ack" {
+				msgId := cast.ToString(item["msg_id"])
+				this.handleAck(msgId)
+				continue
+			}
+
+			if msgType == "read" {
+				msgId := cast.ToString(item["msg_id"])
+				this.hub.MarkMessageRead(msgId, this.info.ID)
+				socketLog("消息已读: %s, msgId: %s", this.info.ID, msgId)
+				continue
+			}
+
+			if msgType == "ping" {
+				socketLog("收到JSON ping消息，回复pong: %s", this.info.ID)
+				pongMsg, _ := json.Marshal(map[string]any{"type": "pong"})
+				this.send <- pongMsg
+				continue
+			}
+
+			if !this.hub.checkRateLimit(this.info.ID) {
+				socketLog("消息频率超限，丢弃消息: %s", this.info.ID)
+				continue
+			}
+
 			info := &info{
 				ID: this.info.ID,
 			}
-			item := Json(msg)
 			if empty := utils.Is.Empty(item["to"]); empty {
 				info.Type = "broadcast"
 			} else {
 				info.To = cast.ToString(item["to"])
-				info.Type = "single"
+				if msgType == "private" {
+					info.Type = "private"
+				} else {
+					info.Type = "single"
+				}
 			}
 
-			// 删掉这个字段
 			delete(item, "to")
 			info.Content = item
 
 			msg, _ = json.Marshal(info)
 			this.hub.notice <- msg
 		} else {
-			fmt.Println("无效的JSON数据", string(msg))
+			socketLog("无效的JSON数据: %s, 内容: %s", this.info.ID, string(msg))
 		}
 	}
 }
 
-// 客户端消息写入
-func (this *client) write() {
+func (this *client) handleAck(msgId string) {
+	if _, ok := this.hub.pendingMessages[msgId]; ok {
+		socketLog("收到ACK确认: %s, 客户端: %s", msgId, this.info.ID)
+		delete(this.hub.pendingMessages, msgId)
+	}
+}
 
-	fmt.Println("============= write - socket =============")
+func (this *client) sendWithAck(message []byte) {
+	msgId := guid()
+
+	var content map[string]any
+	if err := json.Unmarshal(message, &content); err == nil {
+		content["msg_id"] = msgId
+		message, _ = json.Marshal(content)
+	}
+
+	this.hub.pendingMessages[msgId] = &pendingMessage{
+		message: message,
+		client:  this,
+		attempt: 1,
+		sentAt:  time.Now(),
+	}
+
+	select {
+	case this.send <- message:
+		socketLog("发送消息(带ACK): %s, msgId: %s", this.info.ID, msgId)
+		go this.waitForAck(msgId)
+	default:
+		socketLog("发送队列满: %s", this.info.ID)
+		delete(this.hub.pendingMessages, msgId)
+	}
+}
+
+func (this *client) waitForAck(msgId string) {
+	ticker := time.NewTicker(this.hub.ackTimeout)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if pm, ok := this.hub.pendingMessages[msgId]; ok {
+			if pm.attempt >= this.hub.maxRetries {
+				socketLog("消息重试次数耗尽: %s, msgId: %s", this.info.ID, msgId)
+				delete(this.hub.pendingMessages, msgId)
+				return
+			}
+
+			pm.attempt++
+			pm.sentAt = time.Now()
+			socketLog("重传消息: %s, msgId: %s, 尝试次数: %d", this.info.ID, msgId, pm.attempt)
+
+			select {
+			case this.send <- pm.message:
+			default:
+				socketLog("重传队列满: %s", this.info.ID)
+			}
+		} else {
+			return
+		}
+	}
+}
+
+func (this *client) write() {
+	socketLog("开始写入消息: %s", this.info.ID)
 
 	ticker := time.NewTicker(pingPeriod)
 
@@ -160,18 +283,17 @@ func (this *client) write() {
 		case msg, ok := <-this.send:
 			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
 				this.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
 			next, err := this.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
+				socketLog("创建消息写入器失败: %s, 错误: %v", this.info.ID, err)
 				return
 			}
 			next.Write(msg)
 
-			// Add queued chat messages to the current websocket message.
 			len := len(this.send)
 			for i := 0; i < len; i++ {
 				next.Write(line)
@@ -179,11 +301,13 @@ func (this *client) write() {
 			}
 
 			if err := next.Close(); err != nil {
+				socketLog("关闭消息写入器失败: %s, 错误: %v", this.info.ID, err)
 				return
 			}
 		case <-ticker.C:
 			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := this.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				socketLog("发送Ping失败: %s, 错误: %v", this.info.ID, err)
 				return
 			}
 		}
@@ -193,38 +317,64 @@ func (this *client) write() {
 func (hub *hub) run() {
 	for {
 		select {
-		// 注册
 		case client := <-hub.connect:
-			fmt.Println("开始连接：" + client.info.ID)
+			socketLog("客户端连接: %s", client.info.ID)
 			hub.clients[client.info.ID] = client
-			// 发送连接成功消息
+
+			if state, ok := hub.clientStates[client.info.ID]; ok {
+				socketLog("检测到重连，恢复客户端状态: %s", client.info.ID)
+				hub.sendOfflineMessages(client, state)
+				state.lastSeen = time.Now()
+				hub.recordReconnect()
+			} else {
+				hub.clientStates[client.info.ID] = &clientState{
+					clientId: client.info.ID,
+					lastSeen: time.Now(),
+				}
+			}
+
+			hub.recordConnection()
 			client.send <- []byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`)
-			// 广播在线状态更新
 			hub.broadcastStatus()
-			// 只在连接变化时显示在线人数
-			fmt.Println("================== 在线人数", len(hub.clients), " ==================")
-		// 退出连接
+			socketLog("当前在线人数: %d", len(hub.clients))
 		case client := <-hub.close:
-			fmt.Println("客户端退出连接")
+			socketLog("客户端断开连接: %s", client.info.ID)
 			if _, ok := hub.clients[client.info.ID]; ok {
 				delete(hub.clients, client.info.ID)
 				close(client.send)
-				// 广播在线状态更新
 				hub.broadcastStatus()
-				// 只在连接变化时显示在线人数
-				fmt.Println("================== 在线人数", len(hub.clients), " ==================")
+				socketLog("当前在线人数: %d", len(hub.clients))
+
+				hub.recordDisconnection()
+
+				if state, ok := hub.clientStates[client.info.ID]; ok {
+					state.lastSeen = time.Now()
+					go hub.cleanupClientStateAfterTimeout(client.info.ID)
+				}
+
+				for ip, conn := range hub.ipConnections {
+					for _, cid := range conn.clientIds {
+						if cid == client.info.ID {
+							hub.removeIPConnection(ip, client.info.ID)
+							break
+						}
+					}
+				}
 			}
-		// 通知通信
 		case message := <-hub.notice:
 			content := Json(message)
-			if empty := utils.Is.Empty(content["type"]); empty || content["type"] == "broadcast" || content["type"] == "status" {
+			msgType := cast.ToString(content["type"])
+			if empty := utils.Is.Empty(msgType); empty || msgType == "broadcast" || msgType == "status" {
+				hub.recordMessage("broadcast")
 				hub.broadcast(message)
-			} else if content["type"] == "single" {
+			} else if msgType == "single" {
+				hub.recordMessage("single")
 				hub.singlecast(message)
+			} else if msgType == "private" {
+				hub.recordMessage("single")
+				hub.privatecast(message)
 			}
-		// 状态更新
 		case status := <-hub.status:
-			// 处理状态更新
 			statusMsg, _ := json.Marshal(map[string]any{
 				"type":    "status",
 				"content": status,
@@ -267,25 +417,113 @@ func (hub *hub) broadcast(message []byte) {
 	}
 }
 
-// 单播消息
 func (hub *hub) singlecast(message []byte) {
 	content := Json(message)
 	to := content["to"]
-	fmt.Println("进入单播通道:", content)
+	socketLog("单播消息: %v", content)
 	if empty := utils.Is.Empty(to); empty {
-		// 没有指定发送对象
 		to = content["id"]
-		fmt.Println("没有指定发送对象，发送给自己")
+		socketLog("未指定接收者，发送给自己: %s", to)
 	}
-	for _, client := range hub.clients {
-		if client.info.ID == cast.ToString(to) {
-			select {
-			case client.send <- message:
-				fmt.Println("发送给：" + cast.ToString(to))
-			default:
-				close(client.send)
-				delete(hub.clients, client.info.ID)
+
+	targetId := cast.ToString(to)
+	if client, ok := hub.clients[targetId]; ok {
+		select {
+		case client.send <- message:
+			socketLog("消息发送成功: %s -> %s", content["id"], to)
+		default:
+			socketLog("发送队列满，断开连接: %s", client.info.ID)
+			close(client.send)
+			delete(hub.clients, client.info.ID)
+		}
+	} else {
+		socketLog("目标客户端离线，缓存消息: %s", targetId)
+		hub.storeOfflineMessage(targetId, message)
+	}
+}
+
+func (hub *hub) sendOfflineMessages(client *client, state *clientState) {
+	now := time.Now()
+	validMsgs := []*offlineMessage{}
+
+	for _, msg := range state.offlineMsgs {
+		if now.Sub(msg.sentAt) < hub.offlineMsgTTL {
+			validMsgs = append(validMsgs, msg)
+			client.send <- msg.message
+			socketLog("发送离线消息: %s", client.info.ID)
+		}
+	}
+
+	state.offlineMsgs = validMsgs
+}
+
+func (hub *hub) storeOfflineMessage(clientId string, message []byte) {
+	if state, ok := hub.clientStates[clientId]; ok {
+		if len(state.offlineMsgs) >= hub.maxOfflineMsgs {
+			state.offlineMsgs = state.offlineMsgs[1:]
+		}
+		state.offlineMsgs = append(state.offlineMsgs, &offlineMessage{
+			message: message,
+			sentAt:  time.Now(),
+		})
+	} else {
+		hub.clientStates[clientId] = &clientState{
+			clientId: clientId,
+			lastSeen: time.Now(),
+			offlineMsgs: []*offlineMessage{
+				{message: message, sentAt: time.Now()},
+			},
+		}
+	}
+}
+
+func (hub *hub) cleanupClientStateAfterTimeout(clientId string) {
+	time.Sleep(hub.reconnectTimeout)
+
+	if _, ok := hub.clients[clientId]; !ok {
+		if state, ok := hub.clientStates[clientId]; ok {
+			if time.Since(state.lastSeen) >= hub.reconnectTimeout {
+				socketLog("清理超时客户端状态: %s", clientId)
+				delete(hub.clientStates, clientId)
 			}
 		}
+	}
+}
+
+func (hub *hub) privatecast(message []byte) {
+	content := Json(message)
+	from := cast.ToString(content["id"])
+	to := cast.ToString(content["to"])
+
+	socketLog("私聊消息: %s -> %s", from, to)
+
+	hub.GetOrCreateChatSession(from, to)
+
+	if client, ok := hub.clients[to]; ok {
+		msgId := cast.ToString(content["msg_id"])
+		if msgId == "" {
+			msgId = guid()
+			content["msg_id"] = msgId
+			message, _ = json.Marshal(content)
+		}
+
+		hub.messageStatuses[msgId] = &messageStatus{
+			msgId:     msgId,
+			readBy:    map[string]bool{from: false, to: false},
+			delivered: map[string]bool{from: true, to: false},
+			sentAt:    time.Now(),
+		}
+
+		select {
+		case client.send <- message:
+			hub.messageStatuses[msgId].delivered[to] = true
+			socketLog("私聊消息发送成功: %s -> %s", from, to)
+		default:
+			socketLog("私聊发送队列满: %s", to)
+			hub.storeOfflineMessage(to, message)
+		}
+	} else {
+		socketLog("目标客户端离线，缓存私聊消息: %s", to)
+		hub.storeOfflineMessage(to, message)
 	}
 }

@@ -404,14 +404,23 @@ func (this *FileCacheStruct) Del(key any) (ok bool) {
 }
 
 func (this *FileCacheStruct) DelPrefix(prefix ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.DelPrefix(prefix...)
 }
 
 func (this *FileCacheStruct) DelTags(tag ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.DelTags(tag...)
 }
 
 func (this *FileCacheStruct) Clear() (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Clear()
 }
 
@@ -427,30 +436,51 @@ func (this *BigCacheStruct) init() {
 }
 
 func (this *BigCacheStruct) Has(key any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Has(key)
 }
 
 func (this *BigCacheStruct) Get(key any) (value any) {
+	if this.Client == nil {
+		return nil
+	}
 	return utils.Json.Decode(this.Client.Get(key))
 }
 
 func (this *BigCacheStruct) Set(key any, value any, expire ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Set(key, []byte(utils.Json.Encode(value)), expire...)
 }
 
 func (this *BigCacheStruct) Del(key any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Del(key)
 }
 
 func (this *BigCacheStruct) DelPrefix(prefix ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.DelPrefix(prefix...)
 }
 
 func (this *BigCacheStruct) DelTags(tag ...any) (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.DelTags(tag...)
 }
 
 func (this *BigCacheStruct) Clear() (ok bool) {
+	if this.Client == nil {
+		return false
+	}
 	return this.Client.Clear()
 }
 
