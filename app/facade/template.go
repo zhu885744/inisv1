@@ -12,12 +12,24 @@ debug       = false
 # 登录token名称（别乱改，别作死）
 token_name  = "INIS_LOGIN_TOKEN"
 
+# rss配置
+[rss]
+url = "博客链接"
+name = "博客名称"
+description = "博客简介"
+
+# socket配置
+[socket]
+debug = false          # 开启调试日志
+ping_timeout = 120    # ping超时时间(秒)
+max_message_size = 1048576  # 最大消息大小(字节)
+
 # CORS配置
 [system.cors]
 # 是否启用CORS
 enabled = true
-# 允许的源列表（多个源用逗号分隔）
-allowed_origins = "https://zhuxu.asia,http://localhost:3000,http://127.0.0.1:3000"
+# 允许的源列表（多个源用,分隔）
+allowed_origins = "http://localhost:3000,http://127.0.0.1:3000"
 # 允许的HTTP方法
 allowed_methods = "GET, POST, PATCH, PUT, DELETE, OPTIONS"
 # 允许的HTTP头
@@ -29,7 +41,7 @@ allow_credentials = true
 # 预检请求的缓存时间（秒）
 max_age = 1800
 # 默认的源（当请求源不在白名单中时使用）
-default_origin = "https://cs.zhuxu.asia"
+default_origin = "https://zhuxu.asia/"
 `
 
 // TempDatabase - 数据库配置模板
