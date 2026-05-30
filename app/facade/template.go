@@ -13,7 +13,6 @@ debug       = false
 token_name  = "INIS_LOGIN_TOKEN"
 
 # rss配置
-[rss]
 url = "博客链接"
 name = "博客名称"
 description = "博客简介"
