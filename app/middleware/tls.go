@@ -8,16 +8,13 @@ import (
 	"strings"
 )
 
-// Tls https 处理, 即变为 wss://*
+// Tls - HTTPS处理中间件
 func Tls() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-
-		// 获取配置文件中的启动端口
 		port := func() string {
 			item := utils.Env().Get("app.port", ":8642")
 			result := cast.ToString(item)
 
-			// 判断 result 是否包含 :
 			if !strings.Contains(result, ":") {
 				result = ":" + result
 			}

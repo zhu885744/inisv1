@@ -1,28 +1,40 @@
 package route
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"inis/app/dev/controller"
 	global "inis/app/middleware"
 )
 
-func Route(Gin *gin.Engine) {
+// 路由组前缀
+const (
+	apiPrefix    = "/dev/"
+)
 
-	// 全局中间件
-	install := Gin.Group("/dev/").Use(
-		global.Params(),	// 解析参数
-	)
+// 中间件配置
+var defaultDevMiddleware = []gin.HandlerFunc{
+	global.Params(),
+}
 
-	// 动态配置路由 - 允许动态挂载的路由
-	for key, item := range map[string]controller.ApiInterface{
-		"info":  &controller.Info{},
-		"install":	&controller.Install{},
-	} {
-		install.Any(key, item.INDEX)
-		install.GET(fmt.Sprintf("%s/:method", key), item.IGET)
-		install.PUT(fmt.Sprintf("%s/:method", key), item.IPUT)
-		install.POST(fmt.Sprintf("%s/:method", key), item.IPOST)
-		install.DELETE(fmt.Sprintf("%s/:method", key), item.IDEL)
+// 控制器映射
+var devControllers = map[string]controller.ApiInterface{
+	"info":    &controller.Info{},
+	"install": &controller.Install{},
+}
+
+// registerDevRoutes 注册开发路由
+func registerDevRoutes(group *gin.RouterGroup, controllers map[string]controller.ApiInterface) {
+	for key, item := range controllers {
+		group.Any(key, item.INDEX)
+		group.GET(key+"/:method", item.IGET)
+		group.PUT(key+"/:method", item.IPUT)
+		group.POST(key+"/:method", item.IPOST)
+		group.DELETE(key+"/:method", item.IDEL)
 	}
+}
+
+// Route - 路由配置
+func Route(Gin *gin.Engine) {
+	devGroup := Gin.Group(apiPrefix, defaultDevMiddleware...)
+	registerDevRoutes(devGroup, devControllers)
 }

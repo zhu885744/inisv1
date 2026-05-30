@@ -1,45 +1,72 @@
 package middleware
 
 import (
+	"inis/app/facade"
+	"inis/app/model"
+
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"inis/app/facade"
-	"inis/app/model"
 )
+
+var (
+	cacheConfigPrefix = "config"
+	cacheApiKeyPrefix = "[GET]/api/api-keys/column"
+)
+
+// getConfigValue 获取配置值（带缓存）
+func getConfigValue(key string) any {
+	cacheName := cacheConfigPrefix + "[" + key + "]"
+	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
+
+	if cacheState && facade.Cache.Has(cacheName) {
+		return facade.Cache.Get(cacheName)
+	}
+
+	item := facade.DB.Model(&model.Config{}).Where("key", key).Find()
+	value := item["value"]
+
+	if cacheState {
+		go facade.Cache.Set(cacheName, value)
+	}
+
+	return value
+}
+
+// getApiKeys 获取所有API密钥（带缓存）
+func getApiKeys() []string {
+	cacheName := cacheApiKeyPrefix + "[value]"
+	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
+
+	if cacheState && facade.Cache.Has(cacheName) {
+		return cast.ToStringSlice(facade.Cache.Get(cacheName))
+	}
+
+	keys := cast.ToStringSlice(facade.DB.Model(&model.ApiKeys{}).Column("value"))
+
+	if cacheState {
+		go facade.Cache.Set(cacheName, keys)
+	}
+
+	return keys
+}
+
+// isPublicPath 判断是否为公开路径
+func isPublicPath(path string) bool {
+	publicPaths := []any{"/api/file/rand"}
+	return utils.In.Array(path, publicPaths)
+}
 
 // ApiKey - 安全校验中间件
 func ApiKey() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+		open := cast.ToBool(getConfigValue("SYSTEM_API_KEY"))
 
-		var open bool
-		// 缓存名字
-		cacheName  := "config[SYSTEM_API_KEY]"
-		cacheState := cast.ToBool(facade.CacheToml.Get("open"))
-
-		// 检查缓存是否存在
-		if cacheState && facade.Cache.Has(cacheName) {
-			// 获取缓存
-			open = cast.ToBool(facade.Cache.Get(cacheName))
-		} else {
-
-			// 获取配置
-			item := facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_API_KEY").Find()
-			// 转换为布尔值
-			open = cast.ToBool(item["value"])
-			// 设置缓存
-			if cacheState {
-				go facade.Cache.Set(cacheName, open)
-			}
-		}
-
-		// 如果关闭了安全校验，则直接跳过
 		if !open {
 			ctx.Next()
 			return
 		}
 
-		// 获取请求头中的 key
 		var key string
 		if !utils.Is.Empty(ctx.Request.Header.Get("i-api-key")) {
 			key = ctx.Request.Header.Get("i-api-key")
@@ -47,33 +74,15 @@ func ApiKey() gin.HandlerFunc {
 			key, _ = ctx.GetQuery("i-api-key")
 		}
 
-		// 为空拦截请求
-		if utils.Is.Empty(key) && !utils.In.Array(ctx.Request.URL.Path, []any{"/api/file/rand"}) {
+		if utils.Is.Empty(key) && !isPublicPath(ctx.Request.URL.Path) {
 			ctx.JSON(200, gin.H{"code": 403, "msg": facade.Lang(ctx, "禁止非法操作！"), "data": nil})
 			ctx.Abort()
 			return
 		}
 
-		var keys []string
-		cacheColumn := "[GET]/api/api-keys/column[value]"
+		keys := getApiKeys()
 
-		// 检查缓存是否存在
-		if cacheState && facade.Cache.Has(cacheColumn) {
-
-			keys = cast.ToStringSlice(facade.Cache.Get(cacheColumn))
-
-		} else {
-
-			// 获取所有的 key
-			keys = cast.ToStringSlice(facade.DB.Model(&model.ApiKeys{}).Column("value"))
-			// 设置缓存
-			if cacheState {
-				go facade.Cache.Set(cacheColumn, keys)
-			}
-		}
-
-		// 如果 key 不在 keys 中，并且不是随机图接口，则拦截请求
-		if !utils.InArray(key, keys) && !utils.In.Array(ctx.Request.URL.Path, []any{"/api/file/rand"}) {
+		if !utils.InArray(key, keys) && !isPublicPath(ctx.Request.URL.Path) {
 			ctx.JSON(200, gin.H{"code": 403, "msg": facade.Lang(ctx, "禁止非法操作！"), "data": nil})
 			ctx.Abort()
 			return

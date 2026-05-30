@@ -6,12 +6,15 @@ import (
 	"github.com/unti-io/go-utils/utils"
 )
 
-// Token 简单 token 验证
+// Token常量
+const (
+	defaultTokenValue = "0147."
+)
+
+// Token - 简单token验证中间件
 func Token() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// 检查请求头的 Authorization 字段是否存在
 		auth := ctx.Request.Header.Get("Authorization")
-		// 从请求参数中获取 token
 		if utils.Is.Empty(auth) {
 			auth = ctx.Query("token")
 		}
@@ -22,10 +25,8 @@ func Token() gin.HandlerFunc {
 			return
 		}
 
-		// token := cast.ToString(utils.Env().Get("app.token", "0147."))
-		token := cast.ToString("0147.")
+		token := cast.ToString(defaultTokenValue)
 
-		// 检查请求头的 Authorization 字段是否正确
 		if auth != token {
 			ctx.JSON(200, gin.H{"data": nil, "code": 403, "msg": "无权限"})
 			ctx.Abort()

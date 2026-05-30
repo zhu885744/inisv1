@@ -7,16 +7,24 @@ import (
 
 type H map[string]any
 
-// AppToml - App配置文件
+const (
+	// ConfigPath - 配置目录
+	ConfigPath = "config"
+	// ModeToml - 配置文件格式
+	ModeToml = "toml"
+	// ConfigNameApp - 应用配置文件名
+	ConfigNameApp = "app"
+)   
+   
+// AppToml - APP配置文件
 var AppToml *utils.ViperResponse
 
 // initAppToml - 初始化App配置文件
 func initAppToml() {
-
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "app",
+		Path:    ConfigPath,
+		Mode:    ModeToml,
+		Name:    ConfigNameApp,
 		Content: utils.Replace(TempApp, nil),
 	}).Read()
 
@@ -25,29 +33,34 @@ func initAppToml() {
 			"error":     item.Error,
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "Crypt配置初始化错误")
-		return
+			"file_line": utils.Caller().Line}, 
+			"App配置初始化错误")
 	}
 
 	AppToml = &item
 }
 
+// init - 初始化函数
 func init() {
-	// 初始化配置文件
 	initAppToml()
-	// 初始化缓存
 	initApp()
 
-	// 监听配置文件变化
-	AppToml.Viper.WatchConfig()
-	// 配置文件变化时，重新初始化配置文件
-	AppToml.Viper.OnConfigChange(func(event fsnotify.Event) {
-		initApp()
-	})
+	WatchConfigChange(AppToml, initApp)
 }
 
-// 初始化加密配置
+// initApp - 初始化应用
 func initApp() {
 
+}
+
+
+// WatchConfigChange - 监听配置文件变化（导出函数，供包内其他文件使用）
+func WatchConfigChange(config *utils.ViperResponse, callback func()) {
+	if config == nil || config.Viper == nil {
+		return
+	}
+	config.Viper.WatchConfig()
+	config.Viper.OnConfigChange(func(event fsnotify.Event) {
+		callback()
+	})
 }

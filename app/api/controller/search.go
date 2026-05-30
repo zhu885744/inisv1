@@ -19,6 +19,76 @@ type Search struct {
 	base
 }
 
+// buildSearchQuery 构建搜索查询
+func (this *Search) buildSearchQuery(keyword string, searchFields []string, auditCondition string) (string, map[string]any) {
+	searchTerm := "%" + keyword + "%"
+	var conditions []string
+	var args []any
+
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+
+	query := strings.Join(conditions, " OR ")
+	if auditCondition != "" {
+		query = "(" + query + ") AND " + auditCondition
+	}
+
+	return query, map[string]any{
+		"term": searchTerm,
+		"args": args,
+	}
+}
+
+// processSearchResult 处理搜索结果
+func (this *Search) processSearchResult(items any, count int64, limit int, searchType string) map[string]interface{} {
+	var data []map[string]any
+
+	switch v := items.(type) {
+	case []model.Article:
+		for _, article := range v {
+			data = append(data, map[string]any{
+				"id":          article.Id,
+				"title":       article.Title,
+				"covers":      article.Covers,
+				"abstract":    article.Abstract,
+				"create_time":  article.CreateTime,
+				"tags":        article.Tags,
+				"views":       article.Views,
+				"audit":       article.Audit,
+			})
+		}
+	case []model.Pages:
+		for _, page := range v {
+			data = append(data, map[string]any{
+				"id":          page.Id,
+				"key":         page.Key,
+				"title":       page.Title,
+				"create_time": page.CreateTime,
+				"views":       page.Views,
+				"audit":       page.Audit,
+			})
+		}
+	case []model.Tags:
+		for _, tag := range v {
+			data = append(data, map[string]any{
+				"id":          tag.Id,
+				"name":        tag.Name,
+				"avatar":      tag.Avatar,
+				"description": tag.Description,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"data":  data,
+		"count": count,
+		"page":  math.Ceil(float64(count) / float64(limit)),
+		"type":  searchType,
+	}
+}
+
 // IGET - GET请求本体
 func (this *Search) IGET(ctx *gin.Context) {
 	// 转小写
@@ -59,11 +129,11 @@ func (this *Search) INDEX(ctx *gin.Context) {
 		"message": "搜索控制器首页",
 		"version": "1.0.0",
 		"endpoints": map[string]string{
-            "global":  "/api/search/all?keyword=关键词",
-            "article": "/api/search/article?keyword=关键词",
-            "pages":   "/api/search/pages?keyword=关键词",
-            "tags":    "/api/search/tags?keyword=关键词",
-        },
+			"global":  "/api/search/all?keyword=关键词",
+			"article": "/api/search/article?keyword=关键词",
+			"pages":   "/api/search/pages?keyword=关键词",
+			"tags":    "/api/search/tags?keyword=关键词",
+		},
 	}, facade.Lang(ctx, "搜索控制器首页"), 200)
 }
 
@@ -184,11 +254,9 @@ func (this *Search) all(ctx *gin.Context) {
 
 // searchArticle - 搜索文章
 func (this *Search) searchArticle(keyword string, page, limit int) map[string]interface{} {
-	// 构建搜索条件
 	searchTerm := "%" + keyword + "%"
 
 	// 使用数据库级别的 LIKE 查询，提高性能
-	// 注意：直接使用底层的 GORM 连接来构建复杂查询
 	db := facade.DB.Drive()
 
 	// 构建搜索查询
@@ -203,37 +271,14 @@ func (this *Search) searchArticle(keyword string, page, limit int) map[string]in
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&articles)
 
-	// 处理返回字段
-	var data []map[string]any
-	for _, article := range articles {
-		item := map[string]any{
-			"id":          article.Id,
-			"title":       article.Title,
-			"covers":      article.Covers,
-			"abstract":    article.Abstract,
-			"create_time": article.CreateTime,
-			"tags":        article.Tags,
-			"views":       article.Views,
-			"audit":       article.Audit,
-		}
-		data = append(data, item)
-	}
-
-	return map[string]interface{}{
-		"data":  data,
-		"count": count,
-		"page":  math.Ceil(float64(count) / float64(limit)),
-		"type":  "article",
-	}
+	return this.processSearchResult(articles, count, limit, "article")
 }
 
 // searchPages - 搜索独立页面
 func (this *Search) searchPages(keyword string, page, limit int) map[string]interface{} {
-	// 构建搜索条件
 	searchTerm := "%" + keyword + "%"
 
 	// 使用数据库级别的 LIKE 查询，提高性能
-	// 注意：直接使用底层的 GORM 连接来构建复杂查询
 	db := facade.DB.Drive()
 
 	// 构建搜索查询
@@ -248,35 +293,14 @@ func (this *Search) searchPages(keyword string, page, limit int) map[string]inte
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&pages)
 
-	// 处理返回字段
-	var data []map[string]any
-	for _, page := range pages {
-		item := map[string]any{
-			"id":          page.Id,
-			"key":         page.Key,
-			"title":       page.Title,
-			"create_time": page.CreateTime,
-			"views":       page.Views,
-			"audit":       page.Audit,
-		}
-		data = append(data, item)
-	}
-
-	return map[string]interface{}{
-		"data":  data,
-		"count": count,
-		"page":  math.Ceil(float64(count) / float64(limit)),
-		"type":  "pages",
-	}
+	return this.processSearchResult(pages, count, limit, "pages")
 }
 
 // searchTags - 搜索标签
 func (this *Search) searchTags(keyword string, page, limit int) map[string]interface{} {
-	// 构建搜索条件
 	searchTerm := "%" + keyword + "%"
 
 	// 使用数据库级别的 LIKE 查询，提高性能
-	// 注意：直接使用底层的 GORM 连接来构建复杂查询
 	db := facade.DB.Drive()
 
 	// 构建搜索查询
@@ -291,29 +315,11 @@ func (this *Search) searchTags(keyword string, page, limit int) map[string]inter
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&tags)
 
-	// 处理返回字段
-	var data []map[string]any
-	for _, tag := range tags {
-		item := map[string]any{
-			"id":          tag.Id,
-			"name":        tag.Name,
-			"avatar":      tag.Avatar,
-			"description": tag.Description,
-		}
-		data = append(data, item)
-	}
-
-	return map[string]interface{}{
-		"data":  data,
-		"count": count,
-		"page":  math.Ceil(float64(count) / float64(limit)),
-		"type":  "tags",
-	}
+	return this.processSearchResult(tags, count, limit, "tags")
 }
 
 // searchAll - 全局搜索
 func (this *Search) searchAll(keyword string, page, limit int) map[string]interface{} {
-	// 构建搜索条件
 	searchTerm := "%" + keyword + "%"
 
 	// 使用底层的 GORM 连接
@@ -325,22 +331,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	var articleCount int64
 	articleQuery.Count(&articleCount)
 	articleQuery.Limit(limit / 3).Order("create_time desc").Find(&articles)
-
-	// 处理文章数据
-	var articleData []map[string]any
-	for _, article := range articles {
-		item := map[string]any{
-			"id":          article.Id,
-			"title":       article.Title,
-			"covers":      article.Covers,
-			"abstract":    article.Abstract,
-			"create_time": article.CreateTime,
-			"tags":        article.Tags,
-			"views":       article.Views,
-			"audit":       article.Audit,
-		}
-		articleData = append(articleData, item)
-	}
+	articleResult := this.processSearchResult(articles, articleCount, limit/3, "article")
 
 	// 搜索独立页面
 	var pages []model.Pages
@@ -348,19 +339,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	var pagesCount int64
 	pagesQuery.Count(&pagesCount)
 	pagesQuery.Limit(limit / 3).Order("create_time desc").Find(&pages)
-
-	// 处理页面数据
-	var pagesData []map[string]any
-	for _, page := range pages {
-		item := map[string]any{
-			"id":          page.Id,
-			"key":         page.Key,
-			"title":       page.Title,
-			"create_time": page.CreateTime,
-			"views":       page.Views,
-		}
-		pagesData = append(pagesData, item)
-	}
+	pagesResult := this.processSearchResult(pages, pagesCount, limit/3, "pages")
 
 	// 搜索标签
 	var tags []model.Tags
@@ -368,33 +347,13 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	var tagsCount int64
 	tagsQuery.Count(&tagsCount)
 	tagsQuery.Limit(limit / 3).Order("create_time desc").Find(&tags)
-
-	// 处理标签数据
-	var tagsData []map[string]any
-	for _, tag := range tags {
-		item := map[string]any{
-			"id":          tag.Id,
-			"name":        tag.Name,
-			"avatar":      tag.Avatar,
-			"description": tag.Description,
-		}
-		tagsData = append(tagsData, item)
-	}
+	tagsResult := this.processSearchResult(tags, tagsCount, limit/3, "tags")
 
 	return map[string]interface{}{
-		"article": map[string]interface{}{
-			"data":  articleData,
-			"count": articleCount,
-		},
-		"pages": map[string]interface{}{
-			"data":  pagesData,
-			"count": pagesCount,
-		},
-		"tags": map[string]interface{}{
-			"data":  tagsData,
-			"count": tagsCount,
-		},
-		"total": articleCount + pagesCount + tagsCount,
-		"type":  "all",
+		"article": articleResult,
+		"pages":   pagesResult,
+		"tags":    tagsResult,
+		"total":   articleCount + pagesCount + tagsCount,
+		"type":    "all",
 	}
 }

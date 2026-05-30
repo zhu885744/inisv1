@@ -13,52 +13,38 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// main - 主入口函数
 func main() {
-
-	// 监听服务
 	watch()
-	// 运行服务
 	run()
-
-	// 静默运行 - 不显示控制台
-	// go build -ldflags -H=windowsgui 或 bee pack -ba="-ldflags -H=windowsgui"
-	// 压缩二进制包 - https://github.com/upx/upx/releases
-	// upx -9 -o inis unti
 }
 
+// run - 运行服务
 func run() {
-	// 允许跨域
 	app.Gin.Use(middleware.Cors(), middleware.Install())
-
-	// 注册路由
 	app.Use(api.Route, dev.Route, index.Route, socket.Route)
-	// 运行服务
 	app.Run(func() {
 		timer.Run()
 	})
 }
 
-// 监听配置文件变化
+// watch - 监听配置文件变化
 func watch() {
-
 	app.AppToml.Viper.WatchConfig()
-	// 配置文件变化时，重新初始化配置文件
 	app.AppToml.Viper.OnConfigChange(func(event fsnotify.Event) {
-
-		// 关闭服务
-		if app.Server != nil {
-			// 关闭服务
-			err := app.Server.Shutdown(nil)
-			if err != nil {
-				fmt.Println("关闭服务发生错误: ", err)
-				return
-			}
-		}
-
+		shutdownServer()
 		watch()
-		// 重新初始化驱动
 		app.InitApp()
-		// 重新运行服务
 		run()
 	})
+}
+
+// shutdownServer - 关闭服务
+func shutdownServer() {
+	if app.Server != nil {
+		err := app.Server.Shutdown(nil)
+		if err != nil {
+			fmt.Println("关闭服务发生错误: ", err)
+		}
+	}
 }

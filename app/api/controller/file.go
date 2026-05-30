@@ -7,6 +7,7 @@ import (
 	"image"
 	"inis/app/facade"
 	"mime/multipart"
+	"net/http"
 	"regexp"
 	"strings"
 
@@ -15,6 +16,41 @@ import (
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 )
+
+// 预编译正则表达式
+var (
+	sizeRegex = regexp.MustCompile(`^(\d+)\D+(\d+)$`)
+)
+
+// 允许的文件扩展名集合
+var allowedExtensions = map[string]bool{
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+	".gif":  true,
+	".bmp":  true,
+	".webp": true,
+	".svg":  true,
+	".pdf":  true,
+	".doc":  true,
+	".docx": true,
+	".xls":  true,
+	".xlsx": true,
+	".ppt":  true,
+	".pptx": true,
+	".txt":  true,
+	".zip":  true,
+	".rar":  true,
+	".7z":   true,
+	".tar":  true,
+	".gz":   true,
+	".mp3":  true,
+	".mp4":  true,
+	".wav":  true,
+	".avi":  true,
+	".mov":  true,
+	".flv":  true,
+}
 
 // File - 文件管理控制器
 // @Summary 文件管理API
@@ -148,33 +184,33 @@ func (this *File) upload(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 上传文件
-	file, err := ctx.FormFile("file")
+	fileHeader, err := ctx.FormFile("file")
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "获取文件失败：%v", err.Error()), badRequestCode)
 		return
 	}
 
 	// 检查文件大小
-	if file.Size > maxFileSize {
+	if fileHeader.Size > maxFileSize {
 		this.json(ctx, nil, facade.Lang(ctx, "文件大小超过限制（最大10MB）"), badRequestCode)
 		return
 	}
 
 	// 文件数据
-	Byte, err := file.Open()
+	file, err := fileHeader.Open()
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "打开文件失败：%v", err.Error()), badRequestCode)
 		return
 	}
-	defer func(bytes multipart.File) {
-		if err := bytes.Close(); err != nil {
+	defer func(f multipart.File) {
+		if err := f.Close(); err != nil {
 			// 记录错误但继续执行
 			fmt.Printf("关闭文件失败: %v\n", err.Error())
 		}
-	}(Byte)
+	}(file)
 
 	// 安全处理文件名，防止路径遍历攻击
-	fileName := strings.TrimSpace(file.Filename)
+	fileName := strings.TrimSpace(fileHeader.Filename)
 	fileName = strings.ReplaceAll(fileName, "..", "")
 	fileName = strings.ReplaceAll(fileName, "/", "")
 	fileName = strings.ReplaceAll(fileName, "\\", "")
@@ -186,34 +222,14 @@ func (this *File) upload(ctx *gin.Context) {
 	}
 	params["suffix"] = suffix
 
-	// 安全检查：允许的文件类型
-	allowedExtensions := []string{
-		// 图片文件
-		".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
-		// 文档文件
-		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt",
-		// 压缩文件
-		".zip", ".rar", ".7z", ".tar", ".gz",
-		// 音视频文件
-		".mp3", ".mp4", ".wav", ".avi", ".mov", ".flv",
-	}
-
 	// 检查文件类型是否允许
-	isAllowed := false
-	for _, ext := range allowedExtensions {
-		if suffix == ext {
-			isAllowed = true
-			break
-		}
-	}
-
-	if !isAllowed {
+	if !allowedExtensions[suffix] {
 		this.json(ctx, nil, facade.Lang(ctx, "不允许上传该类型的文件！"), badRequestCode)
 		return
 	}
 
 	// 上传文件
-	item := facade.Storage.Upload(facade.Storage.Path()+suffix, Byte)
+	item := facade.Storage.Upload(facade.Storage.Path()+suffix, file)
 	if item.Error != nil {
 		this.json(ctx, nil, item.Error.Error(), badRequestCode)
 		return
@@ -239,23 +255,25 @@ func (this *File) rand(ctx *gin.Context) {
 		return
 	}
 
+	domain := cast.ToString(this.get(ctx, "domain"))
+
 	// 获取目录下的文件
-	fnDir := func(path any) (slice []string) {
-		item := utils.File().Dir(path).List()
+	fnDir := func(dirPath any) (slice []string) {
+		item := utils.File().Dir(dirPath).List()
 		if item.Error != nil {
 			return []string{}
 		}
 		for _, val := range item.Slice {
 			// 替换 root 为域名
-			val = strings.Replace(cast.ToString(val), root, cast.ToString(this.get(ctx, "domain")), 1)
+			val = strings.Replace(cast.ToString(val), root, domain, 1)
 			slice = append(slice, cast.ToString(val))
 		}
 		return slice
 	}
 
 	// 读取文件内容
-	fnFile := func(path any) (slice []string) {
-		item := utils.File().Path(path).Byte()
+	fnFile := func(filePath any) (slice []string) {
+		item := utils.File().Path(filePath).Byte()
 		if item.Error != nil {
 			return []string{}
 		}
@@ -268,19 +286,21 @@ func (this *File) rand(ctx *gin.Context) {
 
 	var list []string
 	result := cast.ToStringMap(info.Result)
+	dirs := cast.ToStringSlice(result["dirs"])
+	files := cast.ToStringSlice(result["files"])
 
 	// 读取系统内全部的图片
-	fnAll := func(result map[string]any) []string {
+	fnAll := func() []string {
 		var allImages []string
 
-		if !utils.Is.Empty(result["dirs"]) {
-			for _, value := range cast.ToStringSlice(result["dirs"]) {
+		if !utils.Is.Empty(dirs) {
+			for _, value := range dirs {
 				allImages = append(allImages, fnDir(path+value)...)
 			}
 		}
 
-		if !utils.Is.Empty(result["files"]) {
-			for _, value := range cast.ToStringSlice(result["files"]) {
+		if !utils.Is.Empty(files) {
+			for _, value := range files {
 				allImages = append(allImages, fnFile(path+value)...)
 			}
 		}
@@ -288,18 +308,20 @@ func (this *File) rand(ctx *gin.Context) {
 		return allImages
 	}
 
+	nameStr := cast.ToString(params["name"])
+
 	// 没有指定目录或文件
 	if utils.Is.Empty(params["name"]) {
-		list = fnAll(result)
+		list = fnAll()
 	}
 
 	// 指定目录
-	if utils.InArray[string](cast.ToString(params["name"]), cast.ToStringSlice(result["dirs"])) {
-		list = fnDir(path + cast.ToString(params["name"]))
+	if utils.InArray[string](nameStr, dirs) {
+		list = fnDir(path + nameStr)
 	}
 	// 指定文件
-	if utils.InArray[string](cast.ToString(params["name"]), cast.ToStringSlice(result["files"])) {
-		list = fnFile(path + cast.ToString(params["name"]))
+	if utils.InArray[string](nameStr, files) {
+		list = fnFile(path + nameStr)
 	}
 
 	if utils.Is.Empty(list) {
@@ -317,7 +339,6 @@ func (this *File) rand(ctx *gin.Context) {
 
 	if cast.ToBool(params["redirect"]) {
 		// 验证URL是否为安全域名（这里简单检查是否为预期的域名格式）
-		domain := cast.ToString(this.get(ctx, "domain"))
 		if !strings.HasPrefix(url, "http://"+domain) && !strings.HasPrefix(url, "https://"+domain) {
 			this.json(ctx, nil, facade.Lang(ctx, "不安全的重定向URL"), badRequestCode)
 			return
@@ -327,20 +348,18 @@ func (this *File) rand(ctx *gin.Context) {
 	}
 
 	// 读取远程图片内容
-	item := utils.Curl().Url(url).Send()
-	if item.Error != nil {
-		this.json(ctx, nil, item.Error.Error(), badRequestCode)
+	curlItem := utils.Curl().Url(url).Send()
+	if curlItem.Error != nil {
+		this.json(ctx, nil, curlItem.Error.Error(), badRequestCode)
 		return
 	}
 
-	// 正则表达式，匹配图片尺寸
-	reg := regexp.MustCompile(`^(\d+)\D+(\d+)$`)
 	// 从 query 的 size 中获取图片尺寸
-	match := reg.FindStringSubmatch(ctx.Query("size"))
+	match := sizeRegex.FindStringSubmatch(ctx.Query("size"))
 
 	var err error
 	var write int
-	img := item.Byte
+	imgBytes := curlItem.Byte
 
 	if match != nil {
 		width := cast.ToInt(match[1])
@@ -352,19 +371,19 @@ func (this *File) rand(ctx *gin.Context) {
 			ext = strings.ToLower(url[lastIndex+1:])
 		}
 		// 图片压缩
-		img = compress(ctx, img, width, height, ext)
+		imgBytes = compress(ctx, imgBytes, width, height, ext)
 	}
 
 	// 输出图片到页面上
 	ctx.Writer.Header().Set("Content-Type", "image/jpeg")
-	ctx.Writer.Header().Set("Content-Length", cast.ToString(len(img)))
+	ctx.Writer.Header().Set("Content-Length", cast.ToString(len(imgBytes)))
 
-	write, err = ctx.Writer.Write(img)
+	write, err = ctx.Writer.Write(imgBytes)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), badRequestCode)
 		return
 	}
-	if write != len(img) {
+	if write != len(imgBytes) {
 		this.json(ctx, nil, facade.Lang(ctx, "写入失败！"), badRequestCode)
 		return
 	}
@@ -393,23 +412,26 @@ func (this *File) toBase64(ctx *gin.Context) {
 		return
 	}
 
-	// 由于无法直接获取Content-Type，我们根据文件扩展名或内容推断类型
-	contentType := "image/jpeg" // 默认类型
-
-	// 尝试从URL中获取扩展名
-	if lastIndex := strings.LastIndex(url, "."); lastIndex > 0 {
-		ext := strings.ToLower(url[lastIndex+1:])
-		switch ext {
-		case "png":
-			contentType = "image/png"
-		case "gif":
-			contentType = "image/gif"
-		case "webp":
-			contentType = "image/webp"
-		case "svg":
-			contentType = "image/svg+xml"
-		case "bmp":
-			contentType = "image/bmp"
+	// 使用 http.DetectContentType 检测内容类型
+	contentType := http.DetectContentType(item.Byte)
+	// 若检测到的类型是通用的，尝试从扩展名推断
+	if contentType == "application/octet-stream" {
+		contentType = "image/jpeg" // 默认类型
+		// 尝试从URL中获取扩展名
+		if lastIndex := strings.LastIndex(url, "."); lastIndex > 0 {
+			ext := strings.ToLower(url[lastIndex+1:])
+			switch ext {
+			case "png":
+				contentType = "image/png"
+			case "gif":
+				contentType = "image/gif"
+			case "webp":
+				contentType = "image/webp"
+			case "svg":
+				contentType = "image/svg+xml"
+			case "bmp":
+				contentType = "image/bmp"
+			}
 		}
 	}
 
@@ -419,7 +441,7 @@ func (this *File) toBase64(ctx *gin.Context) {
 }
 
 // compress - 图片压缩
-func compress(ctx *gin.Context, byte []byte, width, height int, ext string) (result []byte) {
+func compress(ctx *gin.Context, imgData []byte, width, height int, ext string) (result []byte) {
 	// 图片处理模式
 	mode := ctx.DefaultQuery("mode", "")
 	if width == height && mode == "" {
@@ -428,11 +450,11 @@ func compress(ctx *gin.Context, byte []byte, width, height int, ext string) (res
 		mode = "fit" // 默认使用fit模式
 	}
 
-	// byte 转 image
-	src, err := imaging.Decode(bytes.NewReader(byte))
+	// 字节转 image
+	src, err := imaging.Decode(bytes.NewReader(imgData))
 	if err != nil {
 		// 如果解码失败，返回原图
-		return byte
+		return imgData
 	}
 
 	// 处理图片
@@ -473,7 +495,7 @@ func compress(ctx *gin.Context, byte []byte, width, height int, ext string) (res
 	// 解决GIF压缩之后不会动的问题
 	if err := imaging.Encode(buffer, dstImage, format); err != nil {
 		// 如果编码失败，返回原图
-		return byte
+		return imgData
 	}
 
 	return buffer.Bytes()

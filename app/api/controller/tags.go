@@ -179,6 +179,65 @@ func (this *Tags) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "tags"})
 }
 
+// getFromCache 通用缓存处理
+func (this *Tags) getFromCache(ctx *gin.Context, params map[string]any, fetchFunc func() any) (any, string) {
+	msg := ""
+	cacheName := this.cache.name(ctx)
+
+	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
+		msg = "（来自缓存）"
+		return facade.Cache.Get(cacheName), msg
+	}
+
+	data := fetchFunc()
+	if this.cache.enable(ctx) {
+		go facade.Cache.Set(cacheName, data)
+	}
+	return data, msg
+}
+
+// buildQuery 构建通用查询
+func (this *Tags) buildQuery(ctx *gin.Context, table any, params map[string]any) *facade.ModelStruct {
+	onlyTrashed := cast.ToBool(params["onlyTrashed"])
+	withTrashed := cast.ToBool(params["withTrashed"])
+	mold := facade.DB.Model(table).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
+
+	// id 数组 - 参数归一化
+	ids := utils.Unity.Keys(params["ids"])
+	if !utils.Is.Empty(ids) {
+		mold.WhereIn("id", ids)
+	}
+
+	return mold
+}
+
+// aggregateQuery 聚合查询（sum/min/max）
+func (this *Tags) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
+
+	// 获取请求参数
+	params := this.params(ctx)
+
+	// field 数组 - 参数归一化
+	fields := utils.Unity.Keys(params["field"])
+
+	if utils.Is.Empty(fields) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
+		return nil, ""
+	}
+
+	// 从缓存或数据库获取数据
+	return this.getFromCache(ctx, params, func() any {
+		query := this.buildQuery(ctx, &model.Tags{}, params)
+		query.Order(params["order"])
+		result := make(map[string]any)
+		for _, val := range fields {
+			result[cast.ToString(val)] = aggFunc(query, cast.ToString(val))
+		}
+		return result
+	})
+}
+
 // one 获取指定数据
 func (this *Tags) one(ctx *gin.Context) {
 
@@ -486,54 +545,12 @@ func (this *Tags) sum(ctx *gin.Context) {
 
 	code := 204
 	msg := []string{"无数据！", ""}
-	var data any
 
-	// 表数据结构体
-	var table model.Tags
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
-		return
-	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Sum(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
+	// 使用聚合查询
+	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Sum(field)
+	})
+	msg[1] = cacheMsg
 
 	if !utils.Is.Empty(data) {
 		code = 200
@@ -548,54 +565,12 @@ func (this *Tags) min(ctx *gin.Context) {
 
 	code := 204
 	msg := []string{"无数据！", ""}
-	var data any
 
-	// 表数据结构体
-	var table model.Tags
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
-		return
-	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Min(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
+	// 使用聚合查询
+	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Min(field)
+	})
+	msg[1] = cacheMsg
 
 	if !utils.Is.Empty(data) {
 		code = 200
@@ -610,54 +585,12 @@ func (this *Tags) max(ctx *gin.Context) {
 
 	code := 204
 	msg := []string{"无数据！", ""}
-	var data any
 
-	// 表数据结构体
-	var table model.Tags
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
-		return
-	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Max(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
+	// 使用聚合查询
+	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Max(field)
+	})
+	msg[1] = cacheMsg
 
 	if !utils.Is.Empty(data) {
 		code = 200

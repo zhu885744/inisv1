@@ -1,19 +1,40 @@
 package config
 
 import (
-    "bytes"
-    "fmt"
-    "image"
-    "inis/app/facade"
-    "inis/app/middleware"
-    "io"
-    "net/http"
-    "regexp"
-    "strings"
-    "github.com/disintegration/imaging"
-    "github.com/gin-gonic/gin"
-    "github.com/spf13/cast"
-    "github.com/unti-io/go-utils/utils"
+	"bytes"
+	"fmt"
+	"image"
+	"inis/app/facade"
+	"inis/app/middleware"
+	"io"
+	"net/http"
+	"regexp"
+	"strings"
+
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
+)
+
+// HTTP响应常量
+const (
+	SuccessCode      = 200
+	ErrorCode        = 400
+	ServerErrorCode  = 500
+	StatusNotFound   = 404
+	InternalErrorMsg = "服务器内部错误！"
+	ResourceNotFound = "资源不存在！"
+	FileReadError    = "文件读取失败！"
+	RouteNotDefined  = "路由未定义！"
+)
+
+// 文件类型常量
+var (
+	// 页面文件后缀
+	PageFiles = []any{"/", "/index.htm", "/index.html", "/index.php", "/index.jsp"}
+	// 图片文件后缀
+	ImageFiles = []any{"jpg", "jpeg", "png", "gif", "tif", "tiff", "bmp"}
 )
 
 // Gin - gin引擎
@@ -26,265 +47,247 @@ var AppToml *utils.ViperResponse
 var Server *http.Server
 
 func init() {
-
-    // 初始化配置文件
-    initAppToml()
-    // 初始化
-    InitApp()
+	initAppToml()
+	InitApp()
 }
 
 // initAppToml - 初始化APP配置文件
 func initAppToml() {
+	item := utils.Viper(utils.ViperModel{
+		Path:    "config",
+		Mode:    "toml",
+		Name:    "app",
+		Content: utils.Replace(facade.TempApp, nil),
+	}).Read()
 
-    item := utils.Viper(utils.ViperModel{
-        Path:    "config",
-        Mode:    "toml",
-        Name:    "app",
-        Content: utils.Replace(facade.TempApp, nil),
-    }).Read()
+	if item.Error != nil {
+		fmt.Println("APP配置文件初始化发生错误", item.Error)
+		return
+	}
 
-    if item.Error != nil {
-        fmt.Println("APP配置文件初始化发生错误", item.Error)
-        return
-    }
-
-    AppToml = &item
+	AppToml = &item
 }
 
 // InitApp 初始化App
 func InitApp() {
+	debug := cast.ToBool(AppToml.Get("app.debug", false))
 
-    debug := cast.ToBool(AppToml.Get("app.debug", false))
+	if !debug {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultWriter = io.Discard
+	}
 
-    // 关闭 gin 的日志
-    if !debug {
-        // 设置 release 模式
-        gin.SetMode(gin.ReleaseMode)
-        // 关闭 gin 的日志
-        gin.DefaultWriter = io.Discard
-    }
+	Gin = gin.Default()
+	notRoute(Gin)
+	console()
 
-    Gin = gin.Default()
-    // 处理资源路由 和 404路由
-    notRoute(Gin)
-    // 打印版本信息
-    console()
-
-    // 全局日志处理
-    Gin.Use(middleware.GinLogger(), middleware.GinRecovery(true))
+	Gin.Use(middleware.GinLogger(), middleware.GinRecovery(true))
 }
 
 // Use 注册配置
 func Use(args ...func(*gin.Engine)) {
-    var opts []func(*gin.Engine)
-    opts = append(opts, args...)
-    for _, fn := range args {
-        fn(Gin)
-    }
+	for _, fn := range args {
+		fn(Gin)
+	}
 }
 
 // Run 启动服务
 func Run(callback ...func()) {
+	for _, fn := range callback {
+		fn()
+	}
 
-    // 启动服务
-    for _, fn := range callback {
-        fn()
-    }
+	port := ":" + cast.ToString(AppToml.Get("app.port", 8080))
 
-    port := ":" + cast.ToString(AppToml.Get("app.port", 8080))
+	Server = &http.Server{
+		Addr:    port,
+		Handler: Gin,
+	}
 
-    Server = &http.Server{
-        Addr:    port,
-        Handler: Gin,
-    }
+	go func() {
+		if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Println("服务启动失败", err)
+		}
+	}()
 
-    go func() {
-        if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            fmt.Println("服务启动失败", err)
-        }
-    }()
-
-    // 保持主线程不退出
-    select {}
+	select {}
 }
 
-// 路由不存在
+// notRoute 路由不存在
 func notRoute(Gin *gin.Engine) {
-    Gin.NoRoute(func(ctx *gin.Context) {
+	Gin.NoRoute(func(ctx *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				ctx.JSON(SuccessCode, gin.H{"code": ServerErrorCode, "msg": InternalErrorMsg, "data": nil})
+			}
+		}()
 
-        // 拦截异常
-        defer func() {
-            if err := recover(); err != nil {
-                ctx.JSON(200, gin.H{"code": 500, "msg": "服务器内部错误！", "data": nil})
-            }
-        }()
+		ctx.Status(SuccessCode)
 
-        ctx.Status(200)
+		path := ctx.Request.URL.Path
+		prefix := path[:strings.LastIndex(path, "/")]
+		fileName := path[strings.LastIndex(path, "/"):]
+		ext := strings.ToLower(fileName[strings.LastIndex(fileName, ".")+1:])
 
-        // 获取请求的路径
-        path := ctx.Request.URL.Path
-        // 页面资源
-        page := []any{"/", "/index.htm", "/index.html", "/index.php", "/index.jsp"}
-        imgs := []any{"jpg", "jpeg", "png", "gif", "tif", "tiff", "bmp"}
+		isExist := checkFileExist(ctx, "public"+path)
+		writeErrorGif := writeGifError(ctx)
+		writeImage := writeImageFile(ctx)
 
-        // path 以 / 分隔，取最后一个到末尾
-        prefix := path[:strings.LastIndex(path, "/")]
-        // 文件名
-        fileName := path[strings.LastIndex(path, "/"):]
-        // 文件后缀 - 转小写
-        ext := strings.ToLower(fileName[strings.LastIndex(fileName, ".")+1:])
+		switch {
+		case utils.In.Array(fileName, PageFiles):
+			handlePageFile(ctx, prefix, writeErrorGif)
+		case utils.In.Array(ext, ImageFiles):
+			handleImageFile(ctx, path, ext, writeImage, writeErrorGif, isExist)
+		case strings.Contains(fileName, "."):
+			handleStaticFile(ctx, path, ext, isExist)
+		default:
+			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": RouteNotDefined, "data": nil})
+		}
+	})
+}
 
-        // 判断文件是否存在
-        IsExist := func(path string) (check bool) {
-            // 判断 path 是否以 public 开头
-            if !strings.HasPrefix(path, "public") {
-                path = "public/" + path
-            }
-            exist := utils.File().Exist(path)
-            if !exist {
-                ctx.JSON(200, gin.H{"code": 400, "msg": "资源不存在！", "data": nil})
-            }
-            return exist
-        }
-        // 输出错误图片
-        WriteByte := func(path string) {
-            _, err := ctx.Writer.Write(utils.File().Byte("public/assets/images/gif/" + path).Byte)
-            if err != nil {
-                ctx.JSON(200, gin.H{"code": 400, "msg": "资源不存在！", "data": nil})
-            }
-        }
+// checkFileExist 检查文件是否存在
+func checkFileExist(ctx *gin.Context, path string) func(string) bool {
+	return func(checkPath string) bool {
+		if !strings.HasPrefix(checkPath, "public") {
+			checkPath = "public/" + checkPath
+		}
+		exist := utils.File().Exist(checkPath)
+		if !exist {
+			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
+		}
+		return exist
+	}
+}
 
-        switch {
-        // 页面文件
-        case utils.In.Array(fileName, page):
-            if check := IsExist("public/" + prefix + "/index.html"); check {
-                ctx.Header("Content-Type", "text/html; charset=utf-8")
-                _, err := ctx.Writer.Write(utils.File().Byte("public" + prefix + "/index.html").Byte)
-                if err != nil {
-                    ctx.JSON(200, gin.H{"code": 400, "msg": "资源不存在！", "data": nil})
-                    break
-                }
-            }
-        // 图片文件 - 条件压缩处理
-        case utils.In.Array(ext, imgs):
+// writeGifError 写入错误GIF
+func writeGifError(ctx *gin.Context) func(string) {
+	return func(gifName string) {
+		_, err := ctx.Writer.Write(utils.File().Byte("public/assets/images/gif/" + gifName).Byte)
+		if err != nil {
+			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
+		}
+	}
+}
 
-            // 设置文件类型
-            ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-            exist := utils.File().Exist("public" + path)
-            if !exist {
-                WriteByte("404.gif")
-                break
-            }
+// writeImageFile 写入图片文件
+func writeImageFile(ctx *gin.Context) func(string, string) {
+	return func(path string, ext string) {
+		ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
+		_, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
+		if err != nil {
+			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
+		}
+	}
+}
 
-            // 正则表达式，匹配图片尺寸
-            reg := regexp.MustCompile(`^(\d+)\D+(\d+)$`)
-            // 从 query 的 size 中获取图片尺寸
-            match := reg.FindStringSubmatch(ctx.Query("size"))
+// handlePageFile 处理页面文件
+func handlePageFile(ctx *gin.Context, prefix string, writeErrorGif func(string)) {
+	if check := utils.File().Exist("public/" + prefix + "/index.html"); check {
+		ctx.Header("Content-Type", "text/html; charset=utf-8")
+		_, err := ctx.Writer.Write(utils.File().Byte("public" + prefix + "/index.html").Byte)
+		if err != nil {
+			writeErrorGif("error.gif")
+		}
+	}
+}
 
-            if match != nil {
+// handleImageFile 处理图片文件
+func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string, string), writeErrorGif func(string), isExist func(string) bool) {
+	ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
 
-                width := cast.ToInt(match[1])
-                height := cast.ToInt(match[2])
+	if !isExist("public" + path) {
+		writeErrorGif("404.gif")
+		return
+	}
 
-                // 图片处理模式
-                var mode string
-                mode = utils.Ternary(width == height, "fill", mode)
-                mode = ctx.DefaultQuery("mode", mode)
+	reg := regexp.MustCompile(`^(\d+)\D+(\d+)$`)
+	match := reg.FindStringSubmatch(ctx.Query("size"))
 
-                src, err := imaging.Open("public" + path)
-                if err != nil {
-                    WriteByte("error.gif")
-                    break
-                }
+	if match == nil {
+		writeImage(path, ext)
+		return
+	}
 
-                // 处理图片
-                var dstImage *image.NRGBA
-                switch mode {
-                case "fill":
-                    // 填充
-                    dstImage = imaging.Fill(src, width, height, imaging.Center, imaging.Lanczos)
-                case "resize":
-                    // 完全自定义大小
-                    dstImage = imaging.Resize(src, width, height, imaging.Lanczos)
-                case "fit":
-                    // 等比例缩放
-                    dstImage = imaging.Fit(src, width, height, imaging.Lanczos)
-                default:
-                    // 等比例缩放
-                    dstImage = imaging.Fit(src, width, height, imaging.Lanczos)
-                }
+	width := cast.ToInt(match[1])
+	height := cast.ToInt(match[2])
+	mode := ctx.DefaultQuery("mode", utils.Ternary(width == height, "fill", ""))
 
-                // 压缩的图片格式
-                var format imaging.Format
-                switch ext {
-                case "jpg", "jpeg":
-                    format = imaging.JPEG
-                case "png":
-                    format = imaging.PNG
-                case "gif":
-                    format = imaging.GIF
-                case "tif", "tiff":
-                    format = imaging.TIFF
-                case "bmp":
-                    format = imaging.BMP
-                default:
-                    format = imaging.JPEG
-                }
-                buffer := new(bytes.Buffer)
-                // 解决GIG压缩之后不会动的问题
-                err = imaging.Encode(buffer, dstImage, format)
+	src, err := imaging.Open("public" + path)
+	if err != nil {
+		writeErrorGif("error.gif")
+		return
+	}
 
-                if err != nil {
-                    WriteByte("error.gif")
-                    break
-                }
+	dstImage := processImage(src, width, height, mode)
+	format := getImageFormat(ext)
 
-                _, err = ctx.Writer.Write(buffer.Bytes())
-                if err != nil {
-                    WriteByte("error.gif")
-                    break
-                }
+	buffer := new(bytes.Buffer)
+	err = imaging.Encode(buffer, dstImage, format)
+	if err != nil {
+		writeErrorGif("error.gif")
+		return
+	}
 
-                break
-            }
+	_, err = ctx.Writer.Write(buffer.Bytes())
+	if err != nil {
+		writeErrorGif("error.gif")
+	}
+}
 
-            _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
-            if err != nil {
-                WriteByte("error.gif")
-                break
-            }
-        // 其他文件
-        case strings.Contains(fileName, "."):
+// processImage 处理图片
+func processImage(src image.Image, width, height int, mode string) *image.NRGBA {
+	switch mode {
+	case "fill":
+		return imaging.Fill(src, width, height, imaging.Center, imaging.Lanczos)
+	case "resize":
+		return imaging.Resize(src, width, height, imaging.Lanczos)
+	case "fit":
+		return imaging.Fit(src, width, height, imaging.Lanczos)
+	default:
+		return imaging.Fit(src, width, height, imaging.Lanczos)
+	}
+}
 
-            exist := IsExist("public" + path)
-            if !exist {
-                break
-            }
+// getImageFormat 获取图片格式
+func getImageFormat(ext string) imaging.Format {
+	formats := map[string]imaging.Format{
+		"jpg":  imaging.JPEG,
+		"jpeg": imaging.JPEG,
+		"png":  imaging.PNG,
+		"gif":  imaging.GIF,
+		"tif":  imaging.TIFF,
+		"tiff": imaging.TIFF,
+		"bmp":  imaging.BMP,
+	}
 
-            if check := IsExist(path); check {
-                // 设置文件类型
-                ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-                _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
-                if err != nil {
-                    ctx.JSON(200, gin.H{"code": 400, "msg": "文件读取失败！", "data": err.Error()})
-                    break
-                }
-            }
-        // 路由未定义
-        default:
-            ctx.JSON(200, gin.H{"code": 400, "msg": "路由未定义！", "data": nil})
-        }
-    })
+	if format, ok := formats[ext]; ok {
+		return format
+	}
+	return imaging.JPEG
+}
+
+// handleStaticFile 处理静态文件
+func handleStaticFile(ctx *gin.Context, path, ext string, isExist func(string) bool) {
+	if !isExist("public" + path) {
+		return
+	}
+
+	ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
+	_, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
+	if err != nil {
+		ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": FileReadError, "data": err.Error()})
+	}
 }
 
 // console 控制台
 func console() {
-    port := AppToml.Get("app.port", 8080)
-    char := `
+	port := AppToml.Get("app.port", 8080)
+	char := `
     ──────────────────────────────
       版本号: %-10s  端口: %-6d    
       状态: 服务已启动               
     ──────────────────────────────
     `
-    fmt.Println(fmt.Sprintf(char, facade.Version, port))
+	fmt.Println(fmt.Sprintf(char, facade.Version, port))
 }

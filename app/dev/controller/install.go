@@ -6,7 +6,6 @@ import (
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
-	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -17,153 +16,98 @@ import (
 )
 
 type Install struct {
-	// 继承
 	base
 }
 
+const (
+	defaultHostPort     = 3306
+	defaultCharset      = "utf8mb4"
+	defaultHostName     = "localhost"
+	databaseConfigFile  = "config/database.toml"
+	installLockFile     = "install.lock"
+	defaultAdminAccount = "admin"
+	defaultAdminEmail   = "admin@admin.com"
+	defaultAdminPassword = "admin123456"
+	defaultAdminNickname = "系统管理员"
+)
+
 // IGET - GET请求本体
 func (this *Install) IGET(ctx *gin.Context) {
-	// 转小写
-	method := strings.ToLower(ctx.Param("method"))
-
 	allow := map[string]any{
 		"check": this.check,
 	}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
+	this.handleHTTPMethod(ctx, allow)
 }
 
 // IPOST - POST请求本体
 func (this *Install) IPOST(ctx *gin.Context) {
-
-	// 转小写
-	method := strings.ToLower(ctx.Param("method"))
-
 	allow := map[string]any{
 		"lock":       this.lock,
 		"init-db":    this.initDB,
 		"connect-db": this.connectDB,
+		"create-admin": this.createAdmin,
 	}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
+	this.handleHTTPMethod(ctx, allow)
 }
 
 // IPUT - PUT请求本体
 func (this *Install) IPUT(ctx *gin.Context) {
-	// 转小写
-	method := strings.ToLower(ctx.Param("method"))
-
-	allow := map[string]any{}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
+	this.handleHTTPMethod(ctx, map[string]any{})
 }
 
 // IDEL - DELETE请求本体
 func (this *Install) IDEL(ctx *gin.Context) {
-	// 转小写
-	method := strings.ToLower(ctx.Param("method"))
-
-	allow := map[string]any{}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
+	this.handleHTTPMethod(ctx, map[string]any{})
 }
 
 // INDEX - GET请求本体
 func (this *Install) INDEX(ctx *gin.Context) {
-
-	// params := this.params(ctx)
-
-	system := map[string]any{
-		"GOOS":         runtime.GOOS,
-		"GOARCH":       runtime.GOARCH,
-		"GOROOT":       runtime.GOROOT(),
-		"NumCPU":       runtime.NumCPU(),
-		"NumGoroutine": runtime.NumGoroutine(),
-		"go":           utils.Version.Go(),
-		"inis":         facade.Version,
-		"compare":      utils.Version.Compare("v1.0.0", "1 2 0"),
-		"agent":        this.header(ctx, "User-Agent"),
-	}
-
 	this.json(ctx, map[string]any{
-		"system": system,
-	}, facade.Lang(ctx, "好的！"), 200)
+		"system": this.getSystemInfo(ctx),
+	}, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
 // connectDB - 连接数据库
 func (this *Install) connectDB(ctx *gin.Context) {
-
-	// 请求参数
 	params := this.params(ctx, map[string]any{
-		"hostport": 3306,
-		"charset":  "utf8mb4",
-		"hostname": "localhost",
+		"hostport": defaultHostPort,
+		"charset":  defaultCharset,
+		"hostname": defaultHostName,
 	})
+
+	// 验证必填参数
+	params, ok := this.validateRequiredParams(ctx, "username", "database", "password")
+	if !ok {
+		return
+	}
 
 	charset := cast.ToString(params["charset"])
 	hostname := cast.ToString(params["hostname"])
 	hostport := cast.ToString(params["hostport"])
-
-	if utils.Is.Empty(params["username"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "数据库用户名不能为空！"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["database"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "数据库名不能为空！"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["password"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "数据库密码不能为空！"), 400)
-		return
-	}
-
 	username := cast.ToString(params["username"])
 	database := cast.ToString(params["database"])
 	password := cast.ToString(params["password"])
 
-	// 数据库连接信息
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Local", username, password, hostname, hostport, database, charset)
+	// 构建 DSN
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Local",
+		username, password, hostname, hostport, database, charset)
 
-	// 使用mysql驱动连接数据库
+	// 连接数据库
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		this.json(ctx, nil, fmt.Sprintf("数据库连接失败：%v", err.Error()), 400)
+		this.json(ctx, nil, fmt.Sprintf("数据库连接失败：%v", err.Error()), DefaultErrorCode)
 		return
 	}
 
-	// 测试数据库连接
+	// 测试连接并关闭
 	sqlDB, err := db.DB()
 	if err != nil {
-		this.json(ctx, nil, fmt.Sprintf("数据库连接失败：%v", err.Error()), 400)
+		this.json(ctx, nil, fmt.Sprintf("数据库连接失败：%v", err.Error()), DefaultErrorCode)
 		return
 	}
 	defer func(sqlDB *sql.DB) {
-		err := sqlDB.Close()
-		if err != nil {
-			this.json(ctx, nil, fmt.Sprintf("数据库连接失败：%v", err.Error()), 400)
-			return
-		}
+		_ = sqlDB.Close()
 	}(sqlDB)
-
-	this.json(ctx, nil, facade.Lang(ctx, "好的！"), 200)
 
 	// 创建配置文件
 	utils.File().Save(strings.NewReader(utils.Replace(facade.TempDatabase, map[string]any{
@@ -174,14 +118,16 @@ func (this *Install) connectDB(ctx *gin.Context) {
 		"${mysql.password}": password,
 		"${mysql.charset}":  charset,
 		"${mysql.migrate}":  "true",
-	})), "config/database.toml")
+	})), databaseConfigFile)
+
+	this.json(ctx, nil, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
 // initDB - 初始化数据库
 func (this *Install) initDB(ctx *gin.Context) {
 	defer func() {
 		if err := recover(); err != nil {
-			this.json(ctx, nil, fmt.Sprintf("数据库初始化失败：%v", err), 500)
+			this.json(ctx, nil, fmt.Sprintf("数据库初始化失败：%v", err), DefaultInternalServerErrorCode)
 			return
 		}
 	}()
@@ -195,7 +141,7 @@ func (this *Install) initDB(ctx *gin.Context) {
 	// 自动创建内置管理员账号
 	this.createDefaultAdmin()
 
-	this.json(ctx, nil, facade.Lang(ctx, "好的！"), 200)
+	this.json(ctx, nil, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
 // createDefaultAdmin - 创建默认管理员账号
@@ -208,19 +154,17 @@ func (this *Install) createDefaultAdmin() {
 		}
 	}()
 
-	// 表数据结构体
+	// 检查表是否存在
 	table := model.Users{}
-
-	// 检查admin账号是否已存在
-	if exist := facade.DB.Model(&table).Where("account", "admin").Exist(); exist {
+	if exist := facade.DB.Model(&table).Where("account", defaultAdminAccount).Exist(); exist {
 		return
 	}
 
 	// 设置默认管理员信息
-	table.Account = "admin"
-	table.Email = "admin@admin.com"
-	table.Password = utils.Password.Create("admin123456")
-	table.Nickname = "系统管理员"
+	table.Account = defaultAdminAccount
+	table.Email = defaultAdminEmail
+	table.Password = utils.Password.Create(defaultAdminPassword)
+	table.Nickname = defaultAdminNickname
 
 	// 创建用户
 	result := facade.DB.Model(&table).Create(&table)
@@ -228,68 +172,47 @@ func (this *Install) createDefaultAdmin() {
 		facade.Log.Error(map[string]any{
 			"error": result.Error,
 		}, "创建管理员用户失败")
-		return
 	}
-
-	// 系统管理员分组会在数据库初始化时自动创建
 }
 
 // createAdmin - 创建管理员
 func (this *Install) createAdmin(ctx *gin.Context) {
-
-	// 表数据结构体
 	table := model.Users{}
-	// 请求参数
 	params := this.params(ctx)
 
 	// 验证器
-	err := validator.NewValid("users", params)
-
-	// 参数校验不通过
-	if err != nil {
-		this.json(ctx, nil, err.Error(), 400)
+	if err := validator.NewValid("users", params); err != nil {
+		this.json(ctx, nil, err.Error(), DefaultErrorCode)
 		return
 	}
 
-	// 帐号不能为空
-	if utils.Is.Empty(params["account"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "帐号不能为空"), 400)
+	// 验证必填参数
+	params, ok := this.validateRequiredParams(ctx, "account", "email", "password")
+	if !ok {
 		return
 	}
 
-	// 判断帐号是否已经注册
+	// 检查账号是否已存在
 	if exist := facade.DB.Model(&table).Where("account", params["account"]).Exist(); exist {
-		this.json(ctx, nil, facade.Lang(ctx, "该帐号已经注册"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "该账号已经注册"), DefaultErrorCode)
 		return
 	}
 
-	// 邮箱不能为空
-	if utils.Is.Empty(params["email"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "邮箱不能为空"), 400)
-		return
-	}
-
-	// 判断邮箱是否已经注册
+	// 检查邮箱是否已存在
 	if exist := facade.DB.Model(&table).Where("email", params["email"]).Exist(); exist {
-		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已经注册"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["password"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "密码"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已经注册"), DefaultErrorCode)
 		return
 	}
 
 	// 允许存储的字段
-	allow := []any{"account", "password", "email", "nickname", "avatar", "description"}
-	// 动态给结构体赋值
+	allow := []string{"account", "password", "email", "nickname", "avatar", "description"}
 	for key, val := range params {
 		// 加密密码
 		if key == "password" {
-			val = utils.Password.Create(params["password"])
+			val = utils.Password.Create(cast.ToString(val))
 		}
 		// 防止恶意传入字段
-		if utils.In.Array(key, allow) {
+		if utils.InArray(key, allow) {
 			utils.Struct.Set(&table, key, val)
 		}
 	}
@@ -310,61 +233,45 @@ func (this *Install) createAdmin(ctx *gin.Context) {
 		"token": jwt.Text,
 	}
 
-	// 往客户端写入cookie - 存储登录token
-	setToken(ctx, jwt.Text)
+	// 往客户端写入 cookie
+	this.setToken(ctx, jwt.Text)
 
-	go func() {
-
-		uids := []string{cast.ToString(table.Id)}
+	// 异步添加到管理员组
+	go func(uid string) {
+		uids := []string{uid}
 		group := facade.DB.Model(&model.AuthGroup{}).Find(1)
 		if !utils.Is.Empty(group) {
 			uids = append(uids, strings.Split(cast.ToString(group["uids"]), "|")...)
 		}
 
-		// uids 去重 去空
+		// 去重去空
 		uids = cast.ToStringSlice(utils.ArrayUnique(utils.ArrayEmpty(uids)))
 		facade.DB.Model(&model.AuthGroup{}).Where("id", 1).Update(&model.AuthGroup{
 			Uids: fmt.Sprintf("|%s|", strings.Join(uids, "|")),
 		})
-	}()
+	}(cast.ToString(table.Id))
 
-	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), 200)
+	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), DefaultSuccessCode)
 }
 
 // lock - 上锁（安装锁）
 func (this *Install) lock(ctx *gin.Context) {
-
-	if ok := utils.File().Exist("config/database.toml"); !ok {
-		this.json(ctx, nil, facade.Lang(ctx, "请先完成数据库配置！"), 400)
+	if ok := utils.File().Exist(databaseConfigFile); !ok {
+		this.json(ctx, nil, facade.Lang(ctx, "请先完成数据库配置！"), DefaultErrorCode)
 		return
 	}
 
 	// 删除安装锁
-	item := utils.File().Path("install.lock").Remove()
-
+	item := utils.File().Path(installLockFile).Remove()
 	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "解除安装锁失败：%v", item.Error.Error()), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "解除安装锁失败：%v", item.Error.Error()), DefaultErrorCode)
 		return
 	}
 
-	this.json(ctx, nil, facade.Lang(ctx, "好的！"), 200)
+	this.json(ctx, nil, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
 // check - 安装锁状态
 func (this *Install) check(ctx *gin.Context) {
-	this.json(ctx, !utils.File().Exist("install.lock"), facade.Lang(ctx, "好的！"), 200)
-}
-
-// 设置登录token到客户的cookie中
-func setToken(ctx *gin.Context, token any) {
-
-	host := ctx.Request.Host
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
-	}
-
-	expire := cast.ToInt(facade.AppToml.Get("jwt.expire", "7200"))
-	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-
-	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", host, false, false)
+	this.json(ctx, !utils.File().Exist(installLockFile), facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }

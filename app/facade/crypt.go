@@ -3,32 +3,45 @@ package facade
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
+	"time"
+
 	JWT "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"time"
+)
+
+const (
+	ConfigNameCrypt   = "crypt"
+	DefaultJwtExpire  = "7 * 24 * 60 * 60"
+	DefaultJwtIssuer  = "zhuxu"
+	DefaultJwtSubject = "inis"
 )
 
 // CryptToml - Crypt配置文件
 var CryptToml *utils.ViperResponse
 
+func init() {
+	initCryptToml()
+	initCrypt()
+
+	WatchConfigChange(CryptToml, initCrypt)
+}
+
 // initCryptToml - 初始化Crypt配置文件
 func initCryptToml() {
-
-	key := fmt.Sprintf("%v-%v", uuid.New().String(), time.Now().Unix())
+	key := fmt.Sprintf("%s-%v", uuid.New().String(), time.Now().Unix())
 	secret := fmt.Sprintf("INIS-%x", md5.Sum([]byte(key)))
 
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "crypt",
+		Path: ConfigPath,
+		Mode: ModeToml,
+		Name: ConfigNameCrypt,
 		Content: utils.Replace(TempCrypt, map[string]any{
-			"${jwt.key}": 		secret,
-			"${jwt.expire}":    "7 * 24 * 60 * 60",
-			"${jwt.issuer}" :   "chuying",
-			"${jwt.subject}":   "chuying",
+			"${jwt.key}":     secret,
+			"${jwt.expire}":  DefaultJwtExpire,
+			"${jwt.issuer}":  DefaultJwtIssuer,
+			"${jwt.subject}": DefaultJwtSubject,
 		}),
 	}).Read()
 
@@ -37,51 +50,29 @@ func initCryptToml() {
 			"error":     item.Error,
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "Crypt配置初始化错误")
-		return
+			"file_line": utils.Caller().Line}, "Crypt配置初始化错误")
 	}
 
 	CryptToml = &item
 }
 
-// 初始化加密配置
 func initCrypt() {
 
 }
 
-func init() {
-	// 初始化配置文件
-	initCryptToml()
-	// 初始化缓存
-	initCrypt()
-
-	// 监听配置文件变化
-	CryptToml.Viper.WatchConfig()
-	// 配置文件变化时，重新初始化配置文件
-	CryptToml.Viper.OnConfigChange(func(event fsnotify.Event) {
-		initCrypt()
-	})
-}
-
+// JWT相关结构体和接口
 type JwtStruct struct {
 	request  JwtRequest
 	response JwtResponse
 }
 
-// JwtRequest - JWT请求
 type JwtRequest struct {
-	// 过期时间
-	Expire  int64        `json:"expire"`
-	// 颁发者签名
-	Issuer  string       `json:"issuer"`
-	// 主题
-	Subject string       `json:"subject"`
-	// 密钥
-	Key     string       `json:"key"`
+	Expire  int64  `json:"expire"`
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+	Key     string `json:"key"`
 }
 
-// JwtResponse - JWT响应
 type JwtResponse struct {
 	Text  string         `json:"text"`
 	Data  map[string]any `json:"data"`
@@ -89,35 +80,35 @@ type JwtResponse struct {
 	Valid int64          `json:"valid"`
 }
 
-// Jwt - 入口
+type JwtClaims struct {
+	Data map[string]any `json:"data"`
+	JWT.RegisteredClaims
+}
+
+// Jwt - JWT入口函数
 func Jwt(request ...JwtRequest) *JwtStruct {
+	req := JwtRequest{}
 
-	if len(request) == 0 {
-		request = append(request, JwtRequest{})
+	if len(request) > 0 {
+		req = request[0]
 	}
 
-	// 过期时间
-	if request[0].Expire == 0 {
-		request[0].Expire = cast.ToInt64(utils.Calc(CryptToml.Get("jwt.expire", "7200")))
+	// 设置默认值
+	if req.Expire == 0 {
+		req.Expire = cast.ToInt64(utils.Calc(CryptToml.Get("jwt.expire", DefaultJwtExpire)))
 	}
-
-	// 颁发者签名
-	if utils.Is.Empty(request[0].Issuer) {
-		request[0].Issuer = cast.ToString(CryptToml.Get("jwt.issuer", "zhuxu"))
+	if utils.Is.Empty(req.Issuer) {
+		req.Issuer = cast.ToString(CryptToml.Get("jwt.issuer", DefaultJwtIssuer))
 	}
-
-	// 主题
-	if utils.Is.Empty(request[0].Subject) {
-		request[0].Subject = cast.ToString(CryptToml.Get("jwt.subject", "inis"))
+	if utils.Is.Empty(req.Subject) {
+		req.Subject = cast.ToString(CryptToml.Get("jwt.subject", DefaultJwtSubject))
 	}
-
-	// 密钥
-	if utils.Is.Empty(request[0].Key) {
-		request[0].Key = cast.ToString(CryptToml.Get("jwt.key", "inis"))
+	if utils.Is.Empty(req.Key) {
+		req.Key = cast.ToString(CryptToml.Get("jwt.key", ""))
 	}
 
 	return &JwtStruct{
-		request: request[0],
+		request: req,
 		response: JwtResponse{
 			Data: make(map[string]any),
 		},
@@ -125,45 +116,32 @@ func Jwt(request ...JwtRequest) *JwtStruct {
 }
 
 // Create - 创建JWT
-func (this *JwtStruct) Create(data map[string]any) (result JwtResponse) {
-
-	type JwtClaims struct {
-		Data map[string]any `json:"data"`
-		JWT.RegisteredClaims
-	}
-
-	IssuedAt  := JWT.NewNumericDate(time.Now())
-	ExpiresAt := JWT.NewNumericDate(time.Now().Add(time.Second * time.Duration(this.request.Expire)))
-
-	item, err := JWT.NewWithClaims(JWT.SigningMethodHS256, JwtClaims{
+func (this *JwtStruct) Create(data map[string]any) JwtResponse {
+	now := time.Now()
+	claims := JwtClaims{
 		Data: data,
 		RegisteredClaims: JWT.RegisteredClaims{
-			IssuedAt:  IssuedAt,				// 签发时间戳
-			ExpiresAt: ExpiresAt,				// 过期时间戳
-			Issuer:    this.request.Issuer,		// 颁发者签名
-			Subject:   this.request.Subject,	// 签名主题
+			IssuedAt:  JWT.NewNumericDate(now),
+			ExpiresAt: JWT.NewNumericDate(now.Add(time.Duration(this.request.Expire) * time.Second)),
+			Issuer:    this.request.Issuer,
+			Subject:   this.request.Subject,
 		},
-	}).SignedString([]byte(this.request.Key))
+	}
 
+	token, err := JWT.NewWithClaims(JWT.SigningMethodHS256, claims).SignedString([]byte(this.request.Key))
 	if err != nil {
 		this.response.Error = err
 		return this.response
 	}
 
-	this.response.Text = item
-
+	this.response.Text = token
 	return this.response
 }
 
 // Parse - 解析JWT
-func (this *JwtStruct) Parse(token any) (result JwtResponse) {
-
-	type JwtClaims struct {
-		Data map[string]any `json:"data"`
-		JWT.RegisteredClaims
-	}
-
-	item, err := JWT.ParseWithClaims(cast.ToString(token), &JwtClaims{}, func(token *JWT.Token) (any, error) {
+func (this *JwtStruct) Parse(token any) JwtResponse {
+	claims := &JwtClaims{}
+	jwtToken, err := JWT.ParseWithClaims(cast.ToString(token), claims, func(token *JWT.Token) (any, error) {
 		return []byte(this.request.Key), nil
 	})
 
@@ -172,15 +150,14 @@ func (this *JwtStruct) Parse(token any) (result JwtResponse) {
 			"error":     err,
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "JWT解析错误")
+			"file_line": utils.Caller().Line}, "JWT解析错误")
 		this.response.Error = err
 		return this.response
 	}
 
-	if key, _ := item.Claims.(*JwtClaims); item.Valid {
-		this.response.Data  = key.Data
-		this.response.Valid = key.RegisteredClaims.ExpiresAt.Time.Unix() - time.Now().Unix()
+	if jwtToken.Valid {
+		this.response.Data = claims.Data
+		this.response.Valid = claims.ExpiresAt.Time.Unix() - time.Now().Unix()
 	}
 
 	return this.response

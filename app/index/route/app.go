@@ -9,37 +9,45 @@ import (
 	"github.com/unti-io/go-utils/utils"
 )
 
-func Route(Gin *gin.Engine) {
-	// 拦截全局panic
-	defer func() {
-		if err := recover(); err != nil {
-			facade.Log.Error(map[string]any{
-				"error":     err,
-				"stack":     string(debug.Stack()),
-				"func_name": utils.Caller().FuncName,
-				"file_name": utils.Caller().FileName,
-				"file_line": utils.Caller().Line,
-			}, "首页模板渲染发生错误")
-		}
-	}()
+// 路由常量
+const (
+	templateStatusPath = "/api/template-status"
+	indexPath          = "/"
+	installLockFile    = "install.lock"
+	templateFile       = "public/index.html"
+)
 
-	// 模板状态接口（供前端轮询）
-	Gin.GET("/api/template-status", func(ctx *gin.Context) {
+// Route - 路由配置
+func Route(Gin *gin.Engine) {
+	defer handlePanic()
+
+	Gin.GET(templateStatusPath, func(ctx *gin.Context) {
+		templateExists := utils.File().Exist(templateFile)
 		ctx.JSON(200, gin.H{
-			"ok":     utils.File().Exist("public/index.html"),
+			"ok":     templateExists,
 			"msg":    "模板状态实时检测",
-			"reload": utils.File().Exist("public/index.html"),
+			"reload": templateExists,
 		})
 	})
 
-	// 首页路由：无侵入式兜底
-	Gin.GET("/", func(ctx *gin.Context) {
-		templatePath := "public/index.html"
-		if !utils.File().Exist(templatePath) {
-			ctx.String(200, `页面模板（public/index.html）不存在，请联系管理员进行处理！`)
+	Gin.GET(indexPath, func(ctx *gin.Context) {
+		if !utils.File().Exist(templateFile) {
+			ctx.String(200, "页面模板（public/index.html）不存在，请联系管理员进行处理！")
 			return
 		}
-		// 模板存在，执行原有控制器逻辑
 		controller.Index(ctx)
 	})
+}
+
+// handlePanic - 处理全局panic
+func handlePanic() {
+	if err := recover(); err != nil {
+		facade.Log.Error(map[string]any{
+			"error":     err,
+			"stack":     string(debug.Stack()),
+			"func_name": utils.Caller().FuncName,
+			"file_name": utils.Caller().FileName,
+			"file_line": utils.Caller().Line,
+		}, "首页模板渲染发生错误")
+	}
 }

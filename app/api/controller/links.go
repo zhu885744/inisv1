@@ -16,13 +16,101 @@ import (
 )
 
 type Links struct {
-	// 继承
 	base
 }
 
-// IGET - GET请求本体
+const (
+	linksAllowFields = "nickname,description,url,avatar,target,group,json,text"
+	linksAllowQuery  = "id"
+)
+
+var linksAllowFieldsSlice = []any{"nickname", "description", "url", "avatar", "target", "group", "json", "text"}
+var linksAllowQuerySlice = []any{"id"}
+
+func (this *Links) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
+	return query.
+		IWhere(params["where"]).
+		IOr(params["or"]).
+		ILike(params["like"]).
+		INot(params["not"]).
+		INull(params["null"]).
+		INotNull(params["notNull"])
+}
+
+func (this *Links) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
+	if cast.ToBool(params["onlyTrashed"]) {
+		query = query.OnlyTrashed()
+	}
+	if cast.ToBool(params["withTrashed"]) {
+		query = query.WithTrashed()
+	}
+	return query
+}
+
+func (this *Links) getFromCache(ctx *gin.Context, cacheName string) (any, bool) {
+	if !this.cache.enable(ctx) || !facade.Cache.Has(cacheName) {
+		return nil, false
+	}
+	return facade.Cache.Get(cacheName), true
+}
+
+func (this *Links) setCache(ctx *gin.Context, cacheName string, data any) {
+	if this.cache.enable(ctx) {
+		go facade.Cache.Set(cacheName, data)
+	}
+}
+
+func (this *Links) processFieldValue(val any) any {
+	switch utils.Get.Type(val) {
+	case "map":
+		return utils.Json.Encode(val)
+	case "2d slice":
+		return utils.Json.Encode(val)
+	case "slice":
+		return strings.Join(cast.ToStringSlice(val), ",")
+	}
+	return val
+}
+
+func (this *Links) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
+	msg := []string{"无数据！", ""}
+	var data any
+
+	params := this.params(ctx)
+	query := this.withTrashOptions(facade.DB.Model(&model.Links{}), params)
+	query = this.buildQuery(query, params).Order(params["order"])
+
+	ids := utils.Unity.Keys(params["ids"])
+	if !utils.Is.Empty(ids) {
+		query = query.WhereIn("id", ids)
+	}
+
+	fields := utils.Unity.Keys(params["field"])
+	if utils.Is.Empty(fields) {
+		return nil, ""
+	}
+
+	cacheName := this.cache.name(ctx)
+	if cached, ok := this.getFromCache(ctx, cacheName); ok {
+		msg[1] = "（来自缓存）"
+		data = cached
+	} else {
+		result := make(map[string]any)
+		for _, val := range fields {
+			result[cast.ToString(val)] = aggFunc(query, cast.ToString(val))
+		}
+		data = result
+		this.setCache(ctx, cacheName, data)
+	}
+
+	if !utils.Is.Empty(data) {
+		msg[0] = "数据请求成功！"
+	}
+
+	return data, facade.Lang(ctx, strings.Join(msg, ""))
+}
+
 func (this *Links) IGET(ctx *gin.Context) {
-	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -43,10 +131,7 @@ func (this *Links) IGET(ctx *gin.Context) {
 	}
 }
 
-// IPOST - POST请求本体
 func (this *Links) IPOST(ctx *gin.Context) {
-
-	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -60,13 +145,10 @@ func (this *Links) IPOST(ctx *gin.Context) {
 		return
 	}
 
-	// 删除缓存
 	go this.delCache()
 }
 
-// IPUT - PUT请求本体
 func (this *Links) IPUT(ctx *gin.Context) {
-	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -80,13 +162,10 @@ func (this *Links) IPUT(ctx *gin.Context) {
 		return
 	}
 
-	// 删除缓存
 	go this.delCache()
 }
 
-// IDEL - DELETE请求本体
 func (this *Links) IDEL(ctx *gin.Context) {
-	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -101,72 +180,47 @@ func (this *Links) IDEL(ctx *gin.Context) {
 		return
 	}
 
-	// 删除缓存
 	go this.delCache()
 }
 
-// INDEX - GET请求本体
 func (this *Links) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
 
-// 删除缓存
 func (this *Links) delCache() {
-	// 删除缓存
 	facade.Cache.DelTags([]any{"[GET]", "links"})
 }
 
-// one 获取指定数据
 func (this *Links) one(ctx *gin.Context) {
-
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
 
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"status": false,
 	})
 
-	// 表数据结构体
 	table := model.Links{}
-	// 允许查询的字段
-	allow := []any{"id"}
-	// 动态给结构体赋值
+
 	for key, val := range params {
-		// 防止恶意传入字段
-		if utils.In.Array(key, allow) {
+		if utils.In.Array(key, linksAllowQuerySlice) {
 			utils.Struct.Set(&table, key, val)
 		}
 	}
 
 	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
+	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
+		data = cached
 	} else {
-
-		mold := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
-		mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-		// 非管理员只能查看已审核的友链
+		query := this.withTrashOptions(facade.DB.Model(&table), params)
+		query = this.buildQuery(query, params)
 		if !this.meta.root(ctx) {
-			mold.Where("audit", 1)
+			query = query.Where("audit", 1)
 		}
-
-		item := mold.Where(table).Find()
-
-		// 排除字段
+		item := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
+		this.setCache(ctx, cacheName, data)
 	}
 
 	if !utils.Is.Empty(data) {
@@ -174,7 +228,6 @@ func (this *Links) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	// 如果需要检测友链状态
 	checkStatus := cast.ToBool(params["status"])
 	if checkStatus && !utils.Is.Empty(data) {
 		data = this.checkSingleLinkStatus(ctx, data)
@@ -183,7 +236,6 @@ func (this *Links) one(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-// checkSingleLinkStatus 检测单个友链的在线状态
 func (this *Links) checkSingleLinkStatus(ctx *gin.Context, data any) any {
 	item, ok := data.(map[string]any)
 	if !ok {
@@ -204,65 +256,37 @@ func (this *Links) checkSingleLinkStatus(ctx *gin.Context, data any) any {
 	return item
 }
 
-// all 获取全部数据
 func (this *Links) all(ctx *gin.Context) {
-
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
 
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"page":   1,
 		"order":  "create_time desc",
 		"status": false,
 	})
 
-	// 表数据结构体
 	table := model.Links{}
-	// 允许查询的字段
-	var allow []any
-	// 动态给结构体赋值
-	for key, val := range params {
-		// 防止恶意传入字段
-		if utils.In.Array(key, allow) {
-			utils.Struct.Set(&table, key, val)
-		}
-	}
-
 	page := cast.ToInt(params["page"])
 	limit := this.meta.limit(ctx)
 	var result []model.Links
-	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
-	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
-	// 非管理员只能查看已审核的友链
+	query := this.withTrashOptions(facade.DB.Model(&result), params)
+	query = this.buildQuery(query, params)
 	if !this.meta.root(ctx) {
-		mold.Where("audit", 1)
+		query = query.Where("audit", 1)
 	}
-
-	count := mold.Where(table).Count()
+	count := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
+	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
+		data = cached
 	} else {
-
-		// 从数据库中获取数据
-		item := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
-
-		// 排除字段
+		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
+		this.setCache(ctx, cacheName, data)
 	}
 
 	if !utils.Is.Empty(data) {
@@ -270,7 +294,6 @@ func (this *Links) all(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	// 如果需要检测友链状态
 	checkStatus := cast.ToBool(params["status"])
 	if checkStatus && !utils.Is.Empty(data) {
 		if checkedItems, ok := this.checkLinksStatus(ctx, data).([]any); ok {
@@ -285,7 +308,6 @@ func (this *Links) all(ctx *gin.Context) {
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-// checkLinksStatus 检测友链在线状态
 func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
 	items, ok := data.([]any)
 	if !ok {
@@ -378,7 +400,6 @@ func (this *Links) checkLinksStatus(ctx *gin.Context, data any) any {
 	return items
 }
 
-// cacheLinksStatus 缓存友链状态
 func (this *Links) cacheLinksStatus(items []any, statusMap map[int]map[string]any) {
 	cachedStatus := make(map[string]any)
 	for i, item := range items {
@@ -392,7 +413,6 @@ func (this *Links) cacheLinksStatus(items []any, statusMap map[int]map[string]an
 	facade.Cache.Set("links_status_cache", cachedStatus, 300)
 }
 
-// updateLinksStatusCache 异步更新友链状态缓存
 func (this *Links) updateLinksStatusCache(items []any) {
 	statusMap := make(map[int]map[string]any)
 	mu := sync.Mutex{}
@@ -428,7 +448,6 @@ func (this *Links) updateLinksStatusCache(items []any) {
 	this.cacheLinksStatus(items, statusMap)
 }
 
-// checkURLStatus 检测单个URL的在线状态和响应时间
 func (this *Links) checkURLStatus(urlStr string) (bool, int) {
 	urlStr = strings.TrimSpace(urlStr)
 	urlStr = strings.Trim(urlStr, "`")
@@ -455,7 +474,6 @@ func (this *Links) checkURLStatus(urlStr string) (bool, int) {
 	return this.tryCheckURL(urlStr, client, 1)
 }
 
-// tryCheckURL 尝试检测URL状态，支持重试和协议切换
 func (this *Links) tryCheckURL(urlStr string, client *http.Client, maxRetries int) (bool, int) {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		start := time.Now()
@@ -507,7 +525,6 @@ func (this *Links) tryCheckURL(urlStr string, client *http.Client, maxRetries in
 	return false, 0
 }
 
-// isValidStatusCode 检查状态码是否表示正常访问
 func (this *Links) isValidStatusCode(statusCode int) bool {
 	switch statusCode {
 	case 200, 201, 202, 203, 204, 205, 206:
@@ -525,42 +542,30 @@ func (this *Links) isValidStatusCode(statusCode int) bool {
 	}
 }
 
-// rand 随机获取
 func (this *Links) rand(ctx *gin.Context) {
-
-	// 请求参数
 	params := this.params(ctx, map[string]any{
 		"status": false,
 	})
 
-	// 限制最大数量
 	limit := this.meta.limit(ctx)
-
-	// 排除的 id 列表
 	except := utils.Unity.Ids(params["except"])
-
 	onlyTrashed := cast.ToBool(params["onlyTrashed"])
 	withTrashed := cast.ToBool(params["withTrashed"])
 
-	item := facade.DB.Model(&model.Links{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	query := facade.DB.Model(&model.Links{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	if !utils.Is.Empty(except) {
-		item = item.Where("id", "NOT IN", except)
+		query = query.Where("id", "NOT IN", except)
 	}
-
-	// 非管理员只能查看已审核的友链
 	if !this.meta.root(ctx) {
-		item = item.Where("audit", 1)
+		query = query.Where("audit", 1)
 	}
 
-	// 从全部的 id 中随机选取指定数量的 id
-	ids := utils.Rand.Slice(utils.Unity.Ids(item.Column("id")), limit)
+	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
 
-	// 查询条件
 	mold := facade.DB.Model(&[]model.Links{}).Where("id", "IN", ids)
-	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed).IWhere(params["where"]).IOr(params["or"])
-	mold.ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
+	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	mold = this.buildQuery(mold, params)
 
-	// 查询并打乱顺序
 	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
 
 	if utils.Is.Empty(data) {
@@ -568,7 +573,6 @@ func (this *Links) rand(ctx *gin.Context) {
 		return
 	}
 
-	// 如果需要检测友链状态
 	checkStatus := cast.ToBool(params["status"])
 	if checkStatus && !utils.Is.Empty(data) {
 		if checkedItems, ok := this.checkLinksStatus(ctx, data).([]any); ok {
@@ -579,10 +583,7 @@ func (this *Links) rand(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
 }
 
-// save 保存数据 - 包含创建和更新
 func (this *Links) save(ctx *gin.Context) {
-
-	// 获取请求参数
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
@@ -592,15 +593,10 @@ func (this *Links) save(ctx *gin.Context) {
 	}
 }
 
-// create 创建数据
 func (this *Links) create(ctx *gin.Context) {
-
-	// 获取请求参数
 	params := this.params(ctx)
-	// 验证器
 	err := validator.NewValid("links", params)
 
-	// 参数校验不通过
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
@@ -612,18 +608,14 @@ func (this *Links) create(ctx *gin.Context) {
 		return
 	}
 
-	// 表数据结构体
 	table := model.Links{Uid: uid, CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-	allow := []any{"nickname", "description", "url", "avatar", "target", "group", "json", "text"}
+	allow := linksAllowFieldsSlice
 
-	// 越权 - 增加可选字段
 	if this.meta.root(ctx) {
 		allow = append(allow, "audit", "remark")
 	}
 
-	// 动态给结构体赋值
 	for key, val := range params {
-		// 检测是否包含XSS攻击
 		if utils.Get.Type(val) == "string" {
 			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
 				if facade.Comm.DetectXSS(cast.ToString(val)) {
@@ -633,21 +625,11 @@ func (this *Links) create(ctx *gin.Context) {
 				val = facade.Comm.SanitizeHTML(cast.ToString(val))
 			}
 		}
-		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {
-			switch utils.Get.Type(val) {
-			case "map":
-				val = utils.Json.Encode(val)
-			case "2d slice":
-				val = utils.Json.Encode(val)
-			case "slice":
-				val = strings.Join(cast.ToStringSlice(val), ",")
-			}
-			utils.Struct.Set(&table, key, val)
+			utils.Struct.Set(&table, key, this.processFieldValue(val))
 		}
 	}
 
-	// 添加数据
 	tx := facade.DB.Model(&table).Create(&table)
 
 	if tx.Error != nil {
@@ -658,10 +640,7 @@ func (this *Links) create(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
-// update 更新数据
 func (this *Links) update(ctx *gin.Context) {
-
-	// 获取请求参数
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
@@ -669,30 +648,22 @@ func (this *Links) update(ctx *gin.Context) {
 		return
 	}
 
-	// 验证器
 	err := validator.NewValid("links", params)
-
-	// 参数校验不通过
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
-	// 表数据结构体
 	table := model.Links{}
-	allow := []any{"nickname", "description", "url", "avatar", "target", "group", "json", "text"}
 	async := utils.Async[map[string]any]()
-
 	root := this.meta.root(ctx)
+	allow := linksAllowFieldsSlice
 
-	// 越权 - 增加可选字段
 	if root {
 		allow = append(allow, "audit", "remark")
 	}
 
-	// 动态给结构体赋值
 	for key, val := range params {
-		// 检测是否包含XSS攻击
 		if utils.Get.Type(val) == "string" {
 			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
 				if facade.Comm.DetectXSS(cast.ToString(val)) {
@@ -702,29 +673,18 @@ func (this *Links) update(ctx *gin.Context) {
 				val = facade.Comm.SanitizeHTML(cast.ToString(val))
 			}
 		}
-		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {
-			switch utils.Get.Type(val) {
-			case "map":
-				val = utils.Json.Encode(val)
-			case "2d slice":
-				val = utils.Json.Encode(val)
-			case "slice":
-				val = strings.Join(cast.ToStringSlice(val), ",")
-			}
-			async.Set(key, val)
+			async.Set(key, this.processFieldValue(val))
 		}
 	}
 
 	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
 
-	// 越权 - 既没有管理权限，也不是自己的数据
 	if !root && cast.ToInt(item.Find()["uid"]) != this.user(ctx).Id {
 		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
 		return
 	}
 
-	// 更新数据 - Scan() 解析结构体，防止 table 拿不到数据
 	tx := item.Scan(&table).Update(async.Result())
 
 	if tx.Error != nil {
@@ -735,244 +695,67 @@ func (this *Links) update(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
-// count 统计数据
 func (this *Links) count(ctx *gin.Context) {
-
-	// 表数据结构体
-	table := model.Links{}
-	// 获取请求参数
 	params := this.params(ctx)
-
-	item := facade.DB.Model(&table)
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	this.json(ctx, item.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	query := facade.DB.Model(&model.Links{})
+	query = this.buildQuery(query, params)
+	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
 }
 
-// sum 求和
 func (this *Links) sum(ctx *gin.Context) {
-
-	code := 204
-	msg := []string{"无数据！", ""}
-	var data any
-
-	// 表数据结构体
-	var table model.Links
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
+	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Sum(field)
+	})
+	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
 		return
 	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Sum(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
-
-	if !utils.Is.Empty(data) {
-		code = 200
-		msg[0] = "数据请求成功！"
-	}
-
-	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, data, msg, 200)
 }
 
-// min 求最小值
 func (this *Links) min(ctx *gin.Context) {
-
-	code := 204
-	msg := []string{"无数据！", ""}
-	var data any
-
-	// 表数据结构体
-	var table model.Links
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
+	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Min(field)
+	})
+	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
 		return
 	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Min(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
-
-	if !utils.Is.Empty(data) {
-		code = 200
-		msg[0] = "数据请求成功！"
-	}
-
-	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, data, msg, 200)
 }
 
-// max 求最大值
 func (this *Links) max(ctx *gin.Context) {
-
-	code := 204
-	msg := []string{"无数据！", ""}
-	var data any
-
-	// 表数据结构体
-	var table model.Links
-	// 获取请求参数
-	params := this.params(ctx)
-
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
-	ids := utils.Unity.Keys(params["ids"])
-	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
-	}
-
-	// field 数组 - 参数归一化
-	fields := utils.Unity.Keys(params["field"])
-
-	if utils.Is.Empty(fields) {
+	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
+		return query.Max(field)
+	})
+	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
 		return
 	}
-
-	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
-		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
-	} else {
-
-		result := make(map[string]any)
-
-		for _, val := range fields {
-			result[cast.ToString(val)] = item.Max(val)
-		}
-
-		// 从数据库中获取数据 - 排除字段
-		data = result
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
-	}
-
-	if !utils.Is.Empty(data) {
-		code = 200
-		msg[0] = "数据请求成功！"
-	}
-
-	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, data, msg, 200)
 }
 
-// column 获取单列数据
 func (this *Links) column(ctx *gin.Context) {
-
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
 
-	// 表数据结构体
-	var table []model.Links
-	// 获取请求参数
 	params := this.params(ctx)
+	query := this.withTrashOptions(facade.DB.Model(&[]model.Links{}), params)
+	query = this.buildQuery(query, params).Order(params["order"])
 
-	item := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"])).Order(params["order"])
-	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-
-	// id 数组 - 参数归一化
 	ids := utils.Unity.Keys(params["ids"])
 	if !utils.Is.Empty(ids) {
-		item.WhereIn("id", ids)
+		query = query.WhereIn("id", ids)
 	}
 
 	cacheName := this.cache.name(ctx)
-	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
-
-		// 从缓存中获取数据
+	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
-		data = facade.Cache.Get(cacheName)
-
+		data = cached
 	} else {
-
-		// 从数据库中获取数据 - 排除字段
-		data = utils.ArrayMapWithField(item.Select(), params["field"])
-
-		// 缓存数据
-		if this.cache.enable(ctx) {
-			go facade.Cache.Set(cacheName, data)
-		}
+		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		this.setCache(ctx, cacheName, data)
 	}
 
 	if !utils.Is.Empty(data) {
@@ -983,15 +766,8 @@ func (this *Links) column(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-// remove 软删除
 func (this *Links) remove(ctx *gin.Context) {
-
-	// 表数据结构体
-	table := model.Links{}
-	// 获取请求参数
 	params := this.params(ctx)
-
-	// id 数组 - 参数归一化
 	ids := utils.Unity.Ids(params["ids"])
 
 	if utils.Is.Empty(ids) {
@@ -999,23 +775,19 @@ func (this *Links) remove(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&table)
+	item := facade.DB.Model(&model.Links{})
 
-	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	// 得到允许操作的 id 数组
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
 
-	// 无可操作数据
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	// 软删除
 	tx := item.Delete(ids)
 
 	if tx.Error != nil {
@@ -1026,15 +798,8 @@ func (this *Links) remove(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
-// delete 真实删除
 func (this *Links) delete(ctx *gin.Context) {
-
-	// 表数据结构体
-	table := model.Links{}
-	// 获取请求参数
 	params := this.params(ctx)
-
-	// id 数组 - 参数归一化
 	ids := utils.Unity.Ids(params["ids"])
 
 	if utils.Is.Empty(ids) {
@@ -1042,23 +807,19 @@ func (this *Links) delete(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&table).WithTrashed()
+	item := facade.DB.Model(&model.Links{}).WithTrashed()
 
-	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	// 得到允许操作的 id 数组
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
 
-	// 无可操作数据
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	// 真实删除
 	tx := item.Force().Delete(ids)
 
 	if tx.Error != nil {
@@ -1069,28 +830,21 @@ func (this *Links) delete(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
-// clear 清空回收站
 func (this *Links) clear(ctx *gin.Context) {
-
-	// 表数据结构体
 	table := model.Links{}
-
 	item := facade.DB.Model(&table).OnlyTrashed()
 
-	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
 	ids := utils.Unity.Ids(item.Column("id"))
 
-	// 无可操作数据
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	// 找到所有软删除的数据
 	tx := item.Force().Delete()
 
 	if tx.Error != nil {
@@ -1101,15 +855,8 @@ func (this *Links) clear(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
-// restore 恢复数据
 func (this *Links) restore(ctx *gin.Context) {
-
-	// 表数据结构体
-	table := model.Links{}
-	// 获取请求参数
 	params := this.params(ctx)
-
-	// id 数组 - 参数归一化
 	ids := utils.Unity.Ids(params["ids"])
 
 	if utils.Is.Empty(ids) {
@@ -1117,24 +864,20 @@ func (this *Links) restore(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&table).OnlyTrashed().WhereIn("id", ids)
+	item := facade.DB.Model(&model.Links{}).OnlyTrashed().WhereIn("id", ids)
 
-	// 越权 - 既没有管理权限，只能删除自己的数据
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	// 得到允许操作的 id 数组
 	ids = utils.Unity.Ids(item.Column("id"))
 
-	// 无可操作数据
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	// 还原数据
-	tx := facade.DB.Model(&table).OnlyTrashed().Restore(ids)
+	tx := facade.DB.Model(&model.Links{}).OnlyTrashed().Restore(ids)
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)

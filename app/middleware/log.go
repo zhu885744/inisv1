@@ -13,15 +13,15 @@ import (
 	"time"
 )
 
-// GinLogger 接收gin框架默认的日志
+// GinLogger - 接收gin框架默认的日志
 func GinLogger() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		ctx.Next()
-		go log(ctx)
+		go logRequest(ctx)
 	}
 }
 
-// GinRecovery recover掉项目可能出现的panic，并使用zap记录相关日志
+// GinRecovery - recover掉项目可能出现的panic，并使用zap记录相关日志
 func GinRecovery(debug ...bool) gin.HandlerFunc {
 	if len(debug) == 0 {
 		debug = append(debug, false)
@@ -34,7 +34,6 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-
 				var broken bool
 				if network, ok := err.(*net.OpError); ok {
 					if system, ok := network.Err.(*os.SyscallError); ok {
@@ -69,7 +68,6 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 					}
 				}
 
-				// 跳过首页的错误
 				if ctx.Request.URL.Path == "/" {
 					ctx.Next()
 					return
@@ -77,8 +75,8 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 
 				ctx.JSON(http.StatusInternalServerError, gin.H{
 					"code": http.StatusInternalServerError,
-					"msg" : err.(error).Error(),
-					"data":	stack,
+					"msg":  err.(error).Error(),
+					"data": stack,
 				})
 				ctx.Abort()
 				return
@@ -88,30 +86,27 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 	}
 }
 
-// 记录日志
-func log(ctx *gin.Context) {
-
+// logRequest - 记录请求日志
+func logRequest(ctx *gin.Context) {
 	start := time.Now()
 	params, _ := ctx.Get("params")
 
-	path   := ctx.Request.URL.Path
+	path := ctx.Request.URL.Path
 	method := ctx.Request.Method
 
-	// 如果是静态文件 或 / 不记录日志
 	if strings.Contains(path, ".") || path == "/" {
 		return
 	}
 
 	if cast.ToBool(facade.LogToml.Get("on", true)) {
 		facade.Log.Info(map[string]any{
-			"path":   path,
-			"method": method,
-			// "headers": ctx.Request.Header,
-			"params":     params,
-			"ip":         ctx.ClientIP(),
-			"user-agent": ctx.Request.UserAgent(),
-			"errors":     ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
-			"cost":       time.Since(start).String(),
+			"path":        path,
+			"method":      method,
+			"params":      params,
+			"ip":          ctx.ClientIP(),
+			"user-agent":  ctx.Request.UserAgent(),
+			"errors":      ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
+			"cost":        time.Since(start).String(),
 		}, "middleware")
 	}
 }

@@ -28,6 +28,9 @@ import (
 	"gopkg.in/gomail.v2"
 )
 
+// 预编译正则表达式
+var tomlVarRegex = regexp.MustCompile(`\${(.+?)}`)
+
 // Toml - 配置管理控制器
 // @Summary 配置管理API
 // @Description 提供系统配置相关的API接口，包括短信、缓存、加密、存储等配置管理
@@ -35,6 +38,25 @@ import (
 type Toml struct {
 	// 继承
 	base
+}
+
+// replaceTomlVars 替换模板变量
+func (this *Toml) replaceTomlVars(temp string, tomlData map[string]any) string {
+	matches := tomlVarRegex.FindAllStringSubmatch(temp, -1)
+	for _, match := range matches {
+		temp = strings.Replace(temp, match[0], cast.ToString(tomlData[match[1]]), -1)
+	}
+	return temp
+}
+
+// saveTomlConfig 保存配置文件
+func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, successMsg string) {
+	item := utils.File().Save(strings.NewReader(content), path)
+	if item.Error != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
+		return
+	}
+	this.json(ctx, nil, facade.Lang(ctx, successMsg), 200)
 }
 
 // IGET - 获取配置信息
@@ -356,23 +378,9 @@ func (this *Toml) putSMSDrive(ctx *gin.Context) {
 
 	temp := facade.TempSMS
 	temp = utils.Replace(temp, opts)
+	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
 
 // putSMSEmail - 修改SMS邮箱配置
@@ -420,23 +428,9 @@ func (this *Toml) putSMSEmail(ctx *gin.Context) {
 		"${email.nickname}":  params["nickname"],
 		"${email.sign_name}": params["sign_name"],
 	})
+	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
 
 // putSMSAliyun - 修改阿里云短信服务配置
@@ -478,23 +472,9 @@ func (this *Toml) putSMSAliyun(ctx *gin.Context) {
 		"${aliyun.sign_name}":         params["sign_name"],
 		"${aliyun.verify_code}":       params["verify_code"],
 	})
+	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
 
 // putSMSAliYunNumberVerify - 修改阿里云号码验证配置
@@ -538,24 +518,10 @@ func (this *Toml) putSMSAliYunNumberVerify(ctx *gin.Context) {
 		"${aliyun_number_verify.sign_name}":         params["sign_name"],
 		"${aliyun_number_verify.template_code}":     params["template_code"],
 	})
-
-	// 正则匹配出所有的 ${?} 字符串，替换为现有配置值
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
-	}
+	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
 
 	// 保存配置文件
-	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
 
 // putSMSTencent - 修改腾讯云短信服务配置
@@ -609,23 +575,9 @@ func (this *Toml) putSMSTencent(ctx *gin.Context) {
 		"${tencent.verify_code}":    params["verify_code"],
 		"${tencent.region}":         params["region"],
 	})
+	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.SMSToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/sms.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
 
 // testEmail - 测试邮件服务
@@ -984,23 +936,9 @@ func (this *Toml) putCryptJWT(ctx *gin.Context) {
 		"${jwt.issuer}":  params["issuer"],
 		"${jwt.subject}": params["subject"],
 	})
+	temp = this.replaceTomlVars(temp, facade.CryptToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.CryptToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/crypt.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/crypt.toml", "修改成功！")
 }
 
 // putCacheRedis - 修改Redis缓存配置
@@ -1035,23 +973,9 @@ func (this *Toml) putCacheRedis(ctx *gin.Context) {
 		"${redis.expire}":   params["expire"],
 		"${open}":           cast.ToBool(facade.CacheToml.Get("open")),
 	})
+	temp = this.replaceTomlVars(temp, facade.CacheToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.CacheToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/cache.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/cache.toml", "修改成功！")
 }
 
 // putCacheFile - 修改File缓存配置
@@ -1071,23 +995,9 @@ func (this *Toml) putCacheFile(ctx *gin.Context) {
 		"${file.expire}": params["expire"],
 		"${open}":        cast.ToBool(facade.CacheToml.Get("open")),
 	})
+	temp = this.replaceTomlVars(temp, facade.CacheToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.CacheToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/cache.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/cache.toml", "修改成功！")
 }
 
 // putCacheRam - 修改Ram缓存配置
@@ -1103,23 +1013,9 @@ func (this *Toml) putCacheRam(ctx *gin.Context) {
 		"${ram.expire}": params["expire"],
 		"${open}":       cast.ToBool(facade.CacheToml.Get("open")),
 	})
+	temp = this.replaceTomlVars(temp, facade.CacheToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.CacheToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/cache.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/cache.toml", "修改成功！")
 }
 
 // testRedis - 测试Redis连接
@@ -1180,23 +1076,9 @@ func (this *Toml) putCacheDefault(ctx *gin.Context) {
 		"${open}":    utils.Ternary(cast.ToBool(params["open"]), "true", "false"),
 		"${default}": params["value"],
 	})
+	temp = this.replaceTomlVars(temp, facade.CacheToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.CacheToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/cache.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/cache.toml", "修改成功！")
 }
 
 // putStorageDefault - 修改存储默认服务类型
@@ -1221,23 +1103,9 @@ func (this *Toml) putStorageDefault(ctx *gin.Context) {
 	temp = utils.Replace(temp, map[string]any{
 		"${default}": params["value"],
 	})
+	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/storage.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
 // putStorageLocal - 修改本地存储配置
@@ -1253,23 +1121,9 @@ func (this *Toml) putStorageLocal(ctx *gin.Context) {
 		"${local.domain}": params["domain"],
 		"${local.path}":   params["path"],
 	})
+	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/storage.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
 // testOSS - 测试OSS连接
@@ -1353,23 +1207,9 @@ func (this *Toml) putStorageOSS(ctx *gin.Context) {
 		"${oss.domain}":            cast.ToString(params["domain"]),
 		"${oss.path}":              cast.ToString(params["path"]),
 	})
+	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/storage.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
 // testCOS - 测试COS连接
@@ -1483,23 +1323,9 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 		"${cos.domain}":     cast.ToString(params["domain"]),
 		"${cos.path}":       cast.ToString(params["path"]),
 	})
+	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/storage.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
 // testKODO - 测试KODO连接
@@ -1581,21 +1407,7 @@ func (this *Toml) putStorageKODO(ctx *gin.Context) {
 		"${kodo.region}":     cast.ToString(params["region"]),
 		"${kodo.domain}":     cast.ToString(params["domain"]),
 	})
+	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
 
-	// 正则匹配出所有的 ${?} 字符串
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
-
-	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)
-	}
-
-	item := utils.File().Save(strings.NewReader(temp), "config/storage.toml")
-
-	if item.Error != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "修改成功！"), 200)
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }

@@ -19,6 +19,45 @@ type Upgrade struct {
 	base
 }
 
+// checkLogin 检查登录状态
+func (this *Upgrade) checkLogin(ctx *gin.Context) bool {
+	user := this.meta.user(ctx)
+	if user.Id == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return false
+	}
+	return true
+}
+
+// checkRequiredParams 检查必传参数
+func (this *Upgrade) checkRequiredParams(ctx *gin.Context, params map[string]any, fields []string) bool {
+	for _, field := range fields {
+		if utils.Is.Empty(params[field]) {
+			this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", field), 400)
+			return false
+		}
+	}
+	return true
+}
+
+// getUserInfo 获取用户信息
+func (this *Upgrade) getUserInfo(ctx *gin.Context) map[string]any {
+	user := this.meta.user(ctx)
+	json := cast.ToStringMap(utils.Json.Decode(utils.Json.Encode(user)))
+	return map[string]any{
+		"ip":    this.get(ctx, "ip"),
+		"agent": this.header(ctx, "User-Agent"),
+		"json":  utils.Map.WithField(json, []string{"id", "nickname", "email", "phone"}),
+	}
+}
+
+// buildSignatureBody 构建签名请求体
+func (this *Upgrade) buildSignatureBody(ctx *gin.Context, id any) map[string]any {
+	body := this.getUserInfo(ctx)
+	body["id"] = id
+	return body
+}
+
 // IGET - GET请求本体
 func (this *Upgrade) IGET(ctx *gin.Context) {
 	// 转小写
@@ -113,19 +152,8 @@ func (this *Upgrade) theme(ctx *gin.Context) {
 		return
 	}
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
-	}
-
-	// user 转 map
-	json := cast.ToStringMap(utils.Json.Decode(utils.Json.Encode(user)))
-	body := map[string]any{
-		"ip":    this.get(ctx, "ip"),
-		"id":    params["id"],
-		"agent": this.header(ctx, "User-Agent"),
-		"json":  utils.Map.WithField(json, []string{"id", "nickname", "email", "phone"}),
 	}
 
 	// 先尝试从本地数据库获取版本信息
@@ -140,9 +168,9 @@ func (this *Upgrade) theme(ctx *gin.Context) {
 	if utils.Is.Empty(upgrade.Url) {
 		// 如果本地没有下载地址，尝试从远程服务器获取
 		curl := utils.Curl(utils.CurlRequest{
-			Body:    body,
+			Body:    this.buildSignatureBody(ctx, params["id"]),
 			Method:  "GET",
-			Headers: facade.Comm.Signature(body),
+			Headers: facade.Comm.Signature(this.buildSignatureBody(ctx, params["id"])),
 			Url:     facade.Uri + "/sn/theme-version/download",
 		}).Send()
 
@@ -225,27 +253,16 @@ func (this *Upgrade) system(ctx *gin.Context) {
 		return
 	}
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
-	}
-
-	// user 转 map
-	json := cast.ToStringMap(utils.Json.Decode(utils.Json.Encode(user)))
-	body := map[string]any{
-		"ip":    this.get(ctx, "ip"),
-		"id":    params["id"],
-		"agent": this.header(ctx, "User-Agent"),
-		"json":  utils.Map.WithField(json, []string{"id", "nickname", "email", "phone"}),
 	}
 
 	// 获取系统版本的下载地址
 	curl := utils.Curl(utils.CurlRequest{
 		Url:     facade.Uri + "/sn/system-version/download",
 		Method:  "GET",
-		Headers: facade.Comm.Signature(body),
-		Body:    body,
+		Headers: facade.Comm.Signature(this.buildSignatureBody(ctx, params["id"])),
+		Body:    this.buildSignatureBody(ctx, params["id"]),
 	}).Send()
 
 	if curl.Error != nil {
@@ -315,29 +332,11 @@ func (this *Upgrade) create(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	if utils.Is.Empty(params["version"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "版本号"), 400)
+	if !this.checkRequiredParams(ctx, params, []string{"version", "type", "content", "url"}) {
 		return
 	}
 
-	if utils.Is.Empty(params["type"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "类型"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["content"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "更新内容"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["url"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "更新地址"), 400)
-		return
-	}
-
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
 	}
 
@@ -374,14 +373,11 @@ func (this *Upgrade) update(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	if utils.Is.Empty(params["id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "版本ID"), 400)
+	if !this.checkRequiredParams(ctx, params, []string{"id"}) {
 		return
 	}
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
 	}
 
@@ -437,14 +433,11 @@ func (this *Upgrade) delete(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	if utils.Is.Empty(params["id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "版本ID"), 400)
+	if !this.checkRequiredParams(ctx, params, []string{"id"}) {
 		return
 	}
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
 	}
 
@@ -472,9 +465,7 @@ func (this *Upgrade) list(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
 	}
 
@@ -546,14 +537,11 @@ func (this *Upgrade) detail(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	if utils.Is.Empty(params["id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "版本ID"), 400)
+	if !this.checkRequiredParams(ctx, params, []string{"id"}) {
 		return
 	}
 
-	user := this.meta.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	if !this.checkLogin(ctx) {
 		return
 	}
 

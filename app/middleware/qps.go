@@ -13,77 +13,66 @@ import (
 	"time"
 )
 
-var (
-	// QoSPoint - 单接口限流器
-	QoSPoint  = make(map[string]*rate.Limiter)
-	// QoSGlobal - 全局接口限流器
-	QoSGlobal = make(map[string]*rate.Limiter)
-	// mutex - 互斥锁
-	mutex = &sync.Mutex{}
+// QPS常量
+const (
+	qpsPointCacheName   = "config[SYSTEM_QPS]"
+	qpsBlockCacheName   = "config[SYSTEM_QPS_BLOCK]"
+	defaultPointSpeed   = 10
+	defaultGlobalSpeed  = 50
+	qpsWarnInterval     = 10 * time.Millisecond
 )
+
+// QoSPoint - 单接口限流器
+var QoSPoint = make(map[string]*rate.Limiter)
+
+// QoSGlobal - 全局接口限流器
+var QoSGlobal = make(map[string]*rate.Limiter)
+
+// qpsMutex - 互斥锁
+var qpsMutex = &sync.Mutex{}
 
 // QpsPoint - 单接口限流器
 func QpsPoint() gin.HandlerFunc {
-
 	go qpsDelete()
 	go qpsReset()
 
 	return func(ctx *gin.Context) {
-
 		var config map[string]any
 
-		// 缓存名称
-		cacheName  := "config[SYSTEM_QPS]"
-		// 是否开启了缓存
 		cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
-		// 检查缓存是否存在
-		if cacheState && facade.Cache.Has(cacheName) {
-
-			config = cast.ToStringMap(facade.Cache.Get(cacheName))
-
+		if cacheState && facade.Cache.Has(qpsPointCacheName) {
+			config = cast.ToStringMap(facade.Cache.Get(qpsPointCacheName))
 		} else {
-
 			config = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
-			// 存储到缓存中
 			if cacheState {
-				go facade.Cache.Set(cacheName, config)
+				go facade.Cache.Set(qpsPointCacheName, config)
 			}
 		}
 
-		// 如果未开启接口限流器 - 直接跳过
 		if !cast.ToBool(config["value"]) {
 			ctx.Next()
 			return
 		}
 
 		speed := cast.ToInt(cast.ToStringMap(config["json"])["point"])
-		speed = utils.Ternary[int](utils.Is.Empty(speed), 10, speed)
+		speed = utils.Ternary[int](utils.Is.Empty(speed), defaultPointSpeed, speed)
 
-		// 获取IP
 		ip := ctx.ClientIP()
-		// 获取URL路径
 		path := ctx.Request.URL.Path
-		// 获取请求方法
 		method := ctx.Request.Method
-		// 生成 IP+Path+Method Key
 		key := fmt.Sprintf("ip=%s&path=%s&method=%s", ip, path, method)
-		mutex.Lock()
-		// 从Map中获取对应的访问频率限制器
+
+		qpsMutex.Lock()
 		limit := QoSPoint[key]
-		// 如果不存在则创建一个新的访问频率限制器
 		if limit == nil {
-			limit = rate.NewLimiter(rate.Every(10 * time.Millisecond), speed)
+			limit = rate.NewLimiter(rate.Every(qpsWarnInterval), speed)
 			QoSPoint[key] = limit
 		}
-		mutex.Unlock()
+		qpsMutex.Unlock()
 
-		// 尝试获取令牌
 		if !limit.Allow() {
-
-			// 记录 QPS 警告
 			go QpsWarn(ctx)
-
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
 		}
@@ -95,52 +84,38 @@ func QpsPoint() gin.HandlerFunc {
 // QpsGlobal - 全局接口限流器
 func QpsGlobal() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-
 		var config map[string]any
 
-		cacheName  := "config[SYSTEM_QPS]"
 		cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
-		// 检查缓存是否存在
-		if cacheState && facade.Cache.Has(cacheName) {
-
-			config = cast.ToStringMap(facade.Cache.Get(cacheName))
-
+		if cacheState && facade.Cache.Has(qpsPointCacheName) {
+			config = cast.ToStringMap(facade.Cache.Get(qpsPointCacheName))
 		} else {
-
 			config = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
-			// 存储到缓存中
 			if cacheState {
-				go facade.Cache.Set(cacheName, config)
+				go facade.Cache.Set(qpsPointCacheName, config)
 			}
 		}
 
-		// 如果未开启接口限流器 - 直接跳过
 		if !cast.ToBool(config["value"]) {
 			ctx.Next()
 			return
 		}
 
 		speed := cast.ToInt(cast.ToStringMap(config["json"])["global"])
-		speed = utils.Ternary[int](utils.Is.Empty(speed), 50, speed)
+		speed = utils.Ternary[int](utils.Is.Empty(speed), defaultGlobalSpeed, speed)
 
-		// 获取IP
 		ip := ctx.ClientIP()
-		mutex.Lock()
-		// 从Map中获取对应的访问频率限制器
+		qpsMutex.Lock()
 		limit := QoSGlobal[ip]
-		// 如果不存在则创建一个新的访问频率限制器
 		if limit == nil {
-			limit = rate.NewLimiter(rate.Every(10 * time.Millisecond), speed)
+			limit = rate.NewLimiter(rate.Every(qpsWarnInterval), speed)
 			QoSGlobal[ip] = limit
 		}
-		mutex.Unlock()
-		// 尝试获取令牌
+		qpsMutex.Unlock()
+
 		if !limit.Allow() {
-
-			// 记录 QPS 警告
 			go QpsWarn(ctx)
-
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
 		}
@@ -153,7 +128,7 @@ func QpsGlobal() gin.HandlerFunc {
 func qpsDelete() {
 	for {
 		time.Sleep(time.Second)
-		mutex.Lock()
+		qpsMutex.Lock()
 		for key, item := range QoSPoint {
 			if item.Allow() {
 				delete(QoSPoint, key)
@@ -164,16 +139,15 @@ func qpsDelete() {
 				delete(QoSGlobal, key)
 			}
 		}
-		mutex.Unlock()
+		qpsMutex.Unlock()
 	}
 }
 
 // qpsReset - 重置QPSPoint和QoSGlobal的协程
 func qpsReset() {
-	// 每分钟检查一次
 	ticker := time.NewTicker(time.Minute)
 	for range ticker.C {
-		mutex.Lock()
+		qpsMutex.Lock()
 		if len(QoSPoint) == 0 {
 			for key := range QoSPoint {
 				delete(QoSPoint, key)
@@ -184,65 +158,47 @@ func qpsReset() {
 				delete(QoSGlobal, key)
 			}
 		}
-		mutex.Unlock()
+		qpsMutex.Unlock()
 	}
 }
 
 // QpsWarn - QPS警告
 func QpsWarn(ctx *gin.Context) {
-
 	var QpsBlock map[string]any
 
-	cacheName  := "config[SYSTEM_QPS_BLOCK]"
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
-	// 检查缓存是否存在
-	if cacheState && facade.Cache.Has(cacheName) {
-
-		QpsBlock = cast.ToStringMap(facade.Cache.Get(cacheName))
-
+	if cacheState && facade.Cache.Has(qpsBlockCacheName) {
+		QpsBlock = cast.ToStringMap(facade.Cache.Get(qpsBlockCacheName))
 	} else {
-
 		QpsBlock = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_BLOCK").Find()
-		// 存储到缓存中
 		if cacheState {
-			go facade.Cache.Set(cacheName, QpsBlock)
+			go facade.Cache.Set(qpsBlockCacheName, QpsBlock)
 		}
 	}
 
-	// 未初始化 - 直接跳过
 	if utils.Is.Empty(QpsBlock) {
 		return
 	}
 
-	// 如果未开启QPS警告 - 直接跳过
 	if !cast.ToBool(QpsBlock["value"]) {
 		return
 	}
 
-	// 自动拉黑配置
 	config := cast.ToStringMap(QpsBlock["json"])
-	// 获取区间时间戳
-	unix   := time.Now().Add(- cast.ToDuration(utils.Calc(config["second"])) * time.Second).Unix()
-	// 检查 QPS 上限
-	count  := facade.DB.Model(&model.QpsWarn{}).Where("ip", ctx.ClientIP()).Where("create_time", ">", unix).Count()
+	unix := time.Now().Add(-cast.ToDuration(utils.Calc(config["second"]))*time.Second).Unix()
+	count := facade.DB.Model(&model.QpsWarn{}).Where("ip", ctx.ClientIP()).Where("create_time", ">", unix).Count()
 
-	// 如果超过上限 - 自动拉黑
 	if count >= cast.ToInt64(config["count"]) {
-
 		ip := ctx.ClientIP()
-
-		// 拉黑IP
 		facade.DB.Model(&model.IpBlack{}).Where("ip", ip).Save(&model.IpBlack{
 			Ip:     ip,
 			Agent:  ctx.GetHeader("User-Agent"),
 			Cause:  "触发QPS警告上限，自动拉黑！",
 		})
-
 		return
 	}
 
-	// 往数据库中写入警告信息
 	tx := facade.DB.Model(&model.QpsWarn{}).Create(&model.QpsWarn{
 		Ip:     ctx.ClientIP(),
 		Agent:  ctx.GetHeader("User-Agent"),
@@ -257,6 +213,5 @@ func QpsWarn(ctx *gin.Context) {
 			"file_name": utils.Caller().FileName,
 			"file_line": utils.Caller().Line,
 		}, "QPS警告写入失败！")
-		return
 	}
 }
