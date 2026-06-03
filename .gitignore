@@ -4,6 +4,5 @@
 /runtime
 /frontend
 /dist
-/文档
 *.exe*
 *.conf
