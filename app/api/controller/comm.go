@@ -484,75 +484,69 @@ func (this *Comm) password(ctx *gin.Context, user map[string]any) {
 
 	drives := cast.ToStringMap(facade.SMSToml.Get("drive"))
 
-	// 驱动、社交、驱动模式
-	var drive, social, mode string
+	// 先确定模式（email 或 sms）和联系方式
+	var mode string
+	var social string
 
-	// 邮箱驱动 - 次之
-	if !utils.Is.Empty(drives["email"]) && !utils.Is.Empty(user["email"]) {
-		mode = "email"
-		drive = cast.ToString(drives["email"])
-		social = cast.ToString(user["email"])
-	}
-
-	// SMS驱动 - 优先 - 覆盖
-	if !utils.Is.Empty(drives["sms"]) && !utils.Is.Empty(user["phone"]) {
-		mode = "sms"
-		drive = cast.ToString(drives["sms"])
-		social = cast.ToString(user["phone"])
-	}
-
-	// 如果提交了 social
+	// 优先使用用户提交的 social
 	if !utils.Is.Empty(params["social"]) {
-		var unknown string
-		unknown = utils.Ternary(utils.Is.Email(params["social"]), "email", mode)
-		unknown = utils.Ternary(utils.Is.Phone(params["social"]), "sms", unknown)
-		// 如果提交的 social 是 email - 并且和数据库的 email 不一致
-		if unknown == "email" {
+		if utils.Is.Email(params["social"]) {
+			mode = "email"
+			social = cast.ToString(params["social"])
 			if !utils.Is.Empty(user["email"]) && user["email"] != params["social"] {
 				this.json(ctx, nil, facade.Lang(ctx, "提交的邮箱与注册时的邮箱不一致！"), 400)
 				return
 			}
-		}
-		// 如果提交的 social 是 phone - 并且和数据库的 phone 不一致
-		if unknown == "sms" {
+		} else if utils.Is.Phone(params["social"]) {
+			mode = "sms"
+			social = cast.ToString(params["social"])
 			if !utils.Is.Empty(user["phone"]) && user["phone"] != params["social"] {
 				this.json(ctx, nil, facade.Lang(ctx, "提交的手机号与注册时的手机号不一致！"), 400)
 				return
 			}
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "提交的联系方式格式不正确！"), 400)
+			return
 		}
-		// 如果驱动存在，且提交的 social 也存在
-		if !utils.Is.Empty(drives[mode]) && !utils.Is.Empty(unknown) {
-			mode = unknown
-			social = cast.ToString(params["social"])
-			drive = cast.ToString(drives[mode])
+	} else {
+		// 用户未提交 social，从数据库中选择可用的联系方式（SMS 优先）
+		if !utils.Is.Empty(drives["sms"]) && !utils.Is.Empty(user["phone"]) {
+			mode = "sms"
+			social = cast.ToString(user["phone"])
+		} else if !utils.Is.Empty(drives["email"]) && !utils.Is.Empty(user["email"]) {
+			mode = "email"
+			social = cast.ToString(user["email"])
 		}
 	}
 
-	// 都不满足
-	if utils.Is.Empty(drive) {
+	// 根据模式确定具体的驱动名称
+	var drive string
+	if mode == "email" {
+		drive = cast.ToString(drives["email"])
+	} else if mode == "sms" {
+		drive = cast.ToString(drives["sms"])
+	}
 
-		// 既没开启邮箱驱动，也没开启SMS驱动
+	// 驱动不可用
+	if utils.Is.Empty(drive) {
 		if utils.Is.Empty(drives["email"]) && utils.Is.Empty(drives["sms"]) {
 			this.json(ctx, nil, facade.Lang(ctx, "请联系管理员重置密码！"), 400)
 			return
 		}
-
 		if !utils.Is.Empty(user["phone"]) {
 			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启短信服务，无法发送验证码！"), 400)
 			return
 		}
-
 		if !utils.Is.Empty(user["email"]) {
 			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启邮箱服务，无法发送验证码！"), 400)
 			return
 		}
-
 		this.json(ctx, nil, facade.Lang(ctx, "请联系管理员重置密码！"), 400)
 		return
 	}
 
-	// 缓存名称
-	cacheName := fmt.Sprintf("[reset-password][%v=%v]", drive, social)
+	// 缓存名称 - 使用 mode 而非具体驱动名，确保发送和验证时 key 一致
+	cacheName := fmt.Sprintf("[reset-password][%v=%v]", mode, social)
 
 	// 验证码为空 - 发送验证码
 	if utils.Is.Empty(params["code"]) {
@@ -562,8 +556,8 @@ func (this *Comm) password(ctx *gin.Context, user map[string]any) {
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
-		// 缓存验证码 - 5分钟
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 缓存验证码 - 5分钟（同步设置，与注册逻辑一致）
+		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 
 		msg := fmt.Sprintf("验证码发送至您的%v：%s，请注意查收！", utils.Ternary(mode == "email", "邮箱", "手机"), social)
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)

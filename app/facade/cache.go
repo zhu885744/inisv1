@@ -108,6 +108,14 @@ func initCacheToml() {
 
 // initCache - 初始化缓存
 func initCache() {
+	// 重新读取配置文件，确保使用最新配置
+	if CacheToml != nil && CacheToml.Viper != nil {
+		err := CacheToml.Viper.ReadInConfig()
+		if err == nil {
+			CacheToml.Result = CacheToml.Viper.AllSettings()
+		}
+	}
+
 	// Redis 缓存
 	Redis = &RedisCacheStruct{}
 	Redis.init()

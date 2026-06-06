@@ -44,9 +44,34 @@ type Toml struct {
 func (this *Toml) replaceTomlVars(temp string, tomlData map[string]any) string {
 	matches := tomlVarRegex.FindAllStringSubmatch(temp, -1)
 	for _, match := range matches {
-		temp = strings.Replace(temp, match[0], cast.ToString(tomlData[match[1]]), -1)
+		placeholder := match[0] // ${file.path}
+		keyPath := match[1]     // file.path
+
+		// 支持嵌套 key，如 "file.path" -> tomlData["file"]["path"]
+		value := this.getNestedValue(tomlData, keyPath)
+		temp = strings.Replace(temp, placeholder, cast.ToString(value), -1)
 	}
 	return temp
+}
+
+// getNestedValue 从嵌套 map 中获取值，支持 "file.path" 这样的路径
+func (this *Toml) getNestedValue(data map[string]any, keyPath string) any {
+	parts := strings.Split(keyPath, ".")
+	var current any = data
+
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]any:
+			if val, ok := v[part]; ok {
+				current = val
+			} else {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+	return current
 }
 
 // saveTomlConfig 保存配置文件
