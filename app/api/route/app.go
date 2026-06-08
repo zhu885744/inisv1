@@ -42,6 +42,7 @@ var controllers = map[string]controller.ApiInterface{
 	"placard":       &controller.Placard{},
 	"api-keys":      &controller.ApiKeys{},
 	"ip-black":      &controller.IpBlack{},
+	"ip-white":      &controller.IpWhite{},
 	"qps-warn":      &controller.QpsWarn{},
 	"auth-group":    &controller.AuthGroup{},
 	"auth-pages":    &controller.AuthPages{},

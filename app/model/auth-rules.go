@@ -400,6 +400,12 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
+		"ip-white": {
+			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
+			"PUT":    {"update", "restore"},
+			"POST":   {"save", "create"},
+			"DELETE": {"remove", "delete", "clear"},
+		},
 		"upgrade": {
 			"GET": {
 				"path=list&type=default&name=获取版本列表",
@@ -449,6 +455,7 @@ func createAuthRules() (result []AuthRules) {
 		"upgrade":       "【升级 API】",
 		"toml":          "【服务配置 API】",
 		"ip-black":      "【IP黑名单 API】",
+		"ip-white":      "【IP白名单 API】",
 		"qps-warn":      "【QPS预警 API】",
 		"api-keys":      "【接口密钥 API】",
 		"auth-group":    "【权限分组 API】",

@@ -62,6 +62,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &EXP{}
 	case "ip-black":
 		item = &IpBlack{}
+	case "ip-white":
+		item = &IpWhite{}
 	case "qps-warn":
 		item = &QpsWarn{}
 	default:

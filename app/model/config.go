@@ -40,6 +40,10 @@ func InitConfig() {
 		{Key: "SYSTEM_QPS_BLOCK", Value: "0", Json: utils.Json.Encode(facade.H{
 			"count": 3, "second": "60 * 60",
 		}), Remark: "满足QPS阈值后自动拦截"},
+		{Key: "SYSTEM_QPS_NOTIFY", Value: "0", Json: utils.Json.Encode(facade.H{
+			"email":   "",
+			"webhook": "",
+		}), Remark: "QPS自动封禁通知（邮件/Webhook）"},
 		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
 		{Key: "ALLOW_REGISTER", Value: "1", Remark: "是否允许用户自行注册"},
 		{Key: "PAGE", Json: utils.Json.Encode(facade.H{

@@ -35,6 +35,7 @@ var qpsMutex = &sync.Mutex{}
 func QpsPoint() gin.HandlerFunc {
 	go qpsDelete()
 	go qpsReset()
+	go qpsAutoUnban() // 启动自动解封协程
 
 	return func(ctx *gin.Context) {
 		var config map[string]any
@@ -162,8 +163,45 @@ func qpsReset() {
 	}
 }
 
-// QpsWarn - QPS警告
+// qpsAutoUnban - 自动解封协程
+func qpsAutoUnban() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		// 查询所有已过期且非永久封禁的IP
+		var expiredIPs []model.IpBlack
+		now := time.Now().Unix()
+		facade.DB.Model(&model.IpBlack{}).
+			Where("is_permanent = ?", false).
+			Where("expire_time > 0").
+			Where("expire_time < ?", now).
+			Scan(&expiredIPs)
+
+		for _, ipBlack := range expiredIPs {
+			// 软删除过期记录
+			facade.DB.Model(&model.IpBlack{}).Where("id", ipBlack.Id).Delete(&model.IpBlack{})
+			facade.Log.Info(map[string]any{
+				"ip":     ipBlack.Ip,
+				"level":  ipBlack.Level,
+			}, "IP自动解封")
+		}
+
+		// 清除缓存
+		cacheState := cast.ToBool(facade.CacheToml.Get("open"))
+		if cacheState {
+			facade.Cache.Del("[GET][ip-black][column]")
+		}
+	}
+}
+
+// QpsWarn - QPS警告（支持分级封禁）
 func QpsWarn(ctx *gin.Context) {
+	ip := ctx.ClientIP()
+
+	// 白名单IP不受限制
+	if IsIpWhitelisted(ip) {
+		return
+	}
+
 	var QpsBlock map[string]any
 
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
@@ -187,20 +225,66 @@ func QpsWarn(ctx *gin.Context) {
 
 	config := cast.ToStringMap(QpsBlock["json"])
 	unix := time.Now().Add(-cast.ToDuration(utils.Calc(config["second"]))*time.Second).Unix()
-	count := facade.DB.Model(&model.QpsWarn{}).Where("ip", ctx.ClientIP()).Where("create_time", ">", unix).Count()
+	count := facade.DB.Model(&model.QpsWarn{}).Where("ip", ip).Where("create_time", ">", unix).Count()
 
+	// 达到封禁阈值
 	if count >= cast.ToInt64(config["count"]) {
-		ip := ctx.ClientIP()
-		facade.DB.Model(&model.IpBlack{}).Where("ip", ip).Save(&model.IpBlack{
-			Ip:     ip,
-			Agent:  ctx.GetHeader("User-Agent"),
-			Cause:  "触发QPS警告上限，自动拉黑！",
-		})
+		// 查询是否已在黑名单中
+		var existingBan model.IpBlack
+		facade.DB.Model(&model.IpBlack{}).Where("ip", ip).Scan(&existingBan)
+
+		var newLevel int
+		var cause string
+
+		if existingBan.Id == 0 {
+			// 新封禁，从一级开始
+			newLevel = model.BanLevel1
+			cause = "触发QPS警告上限，自动拉黑！"
+		} else {
+			// 已存在，升级封禁等级
+			newLevel = model.GetNextBanLevel(existingBan.Level)
+			cause = fmt.Sprintf("再次触发QPS警告上限，封禁等级升级为%d级！", newLevel)
+		}
+
+		// 创建或更新封禁记录
+		ipBlack := &model.IpBlack{
+			Ip:             ip,
+			Agent:          ctx.GetHeader("User-Agent"),
+			Cause:          cause,
+			ViolationCount: existingBan.ViolationCount + 1,
+		}
+		ipBlack.CalculateExpireTime(newLevel)
+
+		if existingBan.Id > 0 {
+			// 更新现有记录
+			facade.DB.Model(&model.IpBlack{}).Where("ip", ip).Update(map[string]any{
+				"level":           ipBlack.Level,
+				"duration":        ipBlack.Duration,
+				"expire_time":     ipBlack.ExpireTime,
+				"is_permanent":    ipBlack.IsPermanent,
+				"violation_count": ipBlack.ViolationCount,
+				"cause":           ipBlack.Cause,
+				"update_time":     time.Now().Unix(),
+			})
+		} else {
+			// 创建新记录
+			facade.DB.Model(&model.IpBlack{}).Create(ipBlack)
+		}
+
+		// 清除缓存
+		if cacheState {
+			facade.Cache.Del("[GET][ip-black][column]")
+		}
+
+		// 发送封禁通知
+		go sendBanNotification(ctx, ip, newLevel, ipBlack.Duration, ipBlack.IsPermanent)
+
 		return
 	}
 
+	// 记录警告
 	tx := facade.DB.Model(&model.QpsWarn{}).Create(&model.QpsWarn{
-		Ip:     ctx.ClientIP(),
+		Ip:     ip,
 		Agent:  ctx.GetHeader("User-Agent"),
 		Path:   ctx.Request.URL.Path,
 		Method: strings.ToUpper(ctx.Request.Method),
@@ -213,5 +297,61 @@ func QpsWarn(ctx *gin.Context) {
 			"file_name": utils.Caller().FileName,
 			"file_line": utils.Caller().Line,
 		}, "QPS警告写入失败！")
+	}
+}
+
+// sendBanNotification - 发送封禁通知
+func sendBanNotification(ctx *gin.Context, ip string, level int, duration int64, isPermanent bool) {
+	// 获取通知配置
+	var notifyConfig map[string]any
+	notifyCacheName := "config[SYSTEM_QPS_NOTIFY]"
+
+	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
+
+	if cacheState && facade.Cache.Has(notifyCacheName) {
+		notifyConfig = cast.ToStringMap(facade.Cache.Get(notifyCacheName))
+	} else {
+		notifyConfig = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_NOTIFY").Find()
+		if cacheState {
+			go facade.Cache.Set(notifyCacheName, notifyConfig)
+		}
+	}
+
+	if utils.Is.Empty(notifyConfig) || !cast.ToBool(notifyConfig["value"]) {
+		return
+	}
+
+	config := cast.ToStringMap(notifyConfig["json"])
+
+	// 构建通知内容
+	durationStr := "永久"
+	if !isPermanent {
+		if duration >= 24*7 {
+			durationStr = fmt.Sprintf("%d天", duration/24)
+		} else if duration >= 24 {
+			durationStr = fmt.Sprintf("%d小时", duration)
+		} else {
+			durationStr = fmt.Sprintf("%d小时", duration)
+		}
+	}
+
+	message := fmt.Sprintf("IP %s 已被封禁\n封禁等级: %d级\n封禁时长: %s\n原因: 触发QPS警告上限", ip, level, durationStr)
+
+	// 发送邮件通知
+	if !utils.Is.Empty(config["email"]) {
+		// TODO: 实现邮件发送
+		facade.Log.Info(map[string]any{
+			"email":   config["email"],
+			"message": message,
+		}, "QPS封禁邮件通知")
+	}
+
+	// 发送Webhook通知
+	if !utils.Is.Empty(config["webhook"]) {
+		// TODO: 实现Webhook发送
+		facade.Log.Info(map[string]any{
+			"webhook": config["webhook"],
+			"message": message,
+		}, "QPS封禁Webhook通知")
 	}
 }

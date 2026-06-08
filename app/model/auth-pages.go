@@ -13,14 +13,14 @@ import (
 )
 
 type AuthPages struct {
-	Id     	   int    				 `gorm:"type:int(32); comment:主键;" json:"id"`
-	Name   	   string 				 `gorm:"comment:名称;" json:"name"`
-	Path   	   string 				 `gorm:"comment:路径;" json:"path"`
-	Icon   	   string 				 `gorm:"comment:图标;" json:"icon"`
-	Svg    	   string 				 `gorm:"type:text; comment:SVG图标;" json:"svg"`
-	Size   	   string 				 `gorm:"comment:图标大小; default:'16px';" json:"size"`
-	Hash   	   string 				 `gorm:"comment:哈希值;" json:"hash"`
-	Remark 	   string 				 `gorm:"comment:备注; default:Null;" json:"remark"`
+	Id     int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Name   string `gorm:"comment:名称;" json:"name"`
+	Path   string `gorm:"comment:路径;" json:"path"`
+	Icon   string `gorm:"comment:图标;" json:"icon"`
+	Svg    string `gorm:"type:text; comment:SVG图标;" json:"svg"`
+	Size   string `gorm:"comment:图标大小; default:'16px';" json:"size"`
+	Hash   string `gorm:"comment:哈希值;" json:"hash"`
+	Remark string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -79,6 +79,7 @@ func InitAuthPages() {
 		{Name: "权限分组", Icon: "group", Path: "/admin/auth/group", Size: "14px"},
 		{Name: "接口密钥", Icon: "key", Path: "/admin/api/keys", Size: "14px"},
 		{Name: "IP黑名单", Icon: "qps", Path: "/admin/ip/black", Size: "14px"},
+		{Name: "IP白名单", Icon: "white", Path: "/admin/ip/white", Size: "14px"},
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
 		{Name: "后台页面管理", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 	}

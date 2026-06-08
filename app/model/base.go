@@ -52,6 +52,7 @@ func InitTable() {
 		{"EXP", InitEXP},
 		{"QpsWarn", InitQpsWarn},
 		{"IpBlack", InitIpBlack},
+		{"IpWhite", InitIpWhite},
 		{"Upgrade", InitUpgrade},
 	}
 

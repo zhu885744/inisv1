@@ -13,19 +13,19 @@ import (
 	"github.com/unti-io/go-utils/utils"
 )
 
-type IpBlack struct {
+type IpWhite struct {
 	base
 }
 
 const (
-	ipBlackAllowFields = "ip,cause,remark,json,text,level,duration,expire_time,is_permanent,violation_count"
-	ipBlackAllowQuery  = "id"
+	ipWhiteAllowFields = "ip,remark,json,text"
+	ipWhiteAllowQuery  = "id"
 )
 
-var ipBlackAllowFieldsSlice = []any{"ip", "cause", "remark", "json", "text", "level", "duration", "expire_time", "is_permanent", "violation_count"}
-var ipBlackAllowQuerySlice = []any{"id"}
+var ipWhiteAllowFieldsSlice = []any{"ip", "remark", "json", "text"}
+var ipWhiteAllowQuerySlice = []any{"id"}
 
-func (this *IpBlack) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
+func (this *IpWhite) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
 		IWhere(params["where"]).
 		IOr(params["or"]).
@@ -35,7 +35,7 @@ func (this *IpBlack) buildQuery(query *facade.ModelStruct, params map[string]any
 		INotNull(params["notNull"])
 }
 
-func (this *IpBlack) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
+func (this *IpWhite) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	if cast.ToBool(params["onlyTrashed"]) {
 		query = query.OnlyTrashed()
 	}
@@ -45,20 +45,20 @@ func (this *IpBlack) withTrashOptions(query *facade.ModelStruct, params map[stri
 	return query
 }
 
-func (this *IpBlack) getFromCache(ctx *gin.Context, cacheName string) (any, bool) {
+func (this *IpWhite) getFromCache(ctx *gin.Context, cacheName string) (any, bool) {
 	if !this.cache.enable(ctx) || !facade.Cache.Has(cacheName) {
 		return nil, false
 	}
 	return facade.Cache.Get(cacheName), true
 }
 
-func (this *IpBlack) setCache(ctx *gin.Context, cacheName string, data any) {
+func (this *IpWhite) setCache(ctx *gin.Context, cacheName string, data any) {
 	if this.cache.enable(ctx) {
 		go facade.Cache.Set(cacheName, data)
 	}
 }
 
-func (this *IpBlack) processFieldValue(val any) any {
+func (this *IpWhite) processFieldValue(val any) any {
 	switch utils.Get.Type(val) {
 	case "map":
 		return utils.Json.Encode(val)
@@ -70,12 +70,12 @@ func (this *IpBlack) processFieldValue(val any) any {
 	return val
 }
 
-func (this *IpBlack) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
+func (this *IpWhite) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
 	msg := []string{"无数据！", ""}
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.IpBlack{}), params)
+	query := this.withTrashOptions(facade.DB.Model(&model.IpWhite{}), params)
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	ids := utils.Unity.Keys(params["ids"])
@@ -108,7 +108,7 @@ func (this *IpBlack) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade
 	return data, facade.Lang(ctx, strings.Join(msg, ""))
 }
 
-func (this *IpBlack) IGET(ctx *gin.Context) {
+func (this *IpWhite) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -129,7 +129,7 @@ func (this *IpBlack) IGET(ctx *gin.Context) {
 	}
 }
 
-func (this *IpBlack) IPOST(ctx *gin.Context) {
+func (this *IpWhite) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -139,14 +139,14 @@ func (this *IpBlack) IPOST(ctx *gin.Context) {
 	err := this.call(allow, method, ctx)
 
 	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
+		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 400)
 		return
 	}
 
 	go this.delCache()
 }
 
-func (this *IpBlack) IPUT(ctx *gin.Context) {
+func (this *IpWhite) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -156,14 +156,14 @@ func (this *IpBlack) IPUT(ctx *gin.Context) {
 	err := this.call(allow, method, ctx)
 
 	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
+		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 400)
 		return
 	}
 
 	go this.delCache()
 }
 
-func (this *IpBlack) IDEL(ctx *gin.Context) {
+func (this *IpWhite) IDEL(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
@@ -181,24 +181,24 @@ func (this *IpBlack) IDEL(ctx *gin.Context) {
 	go this.delCache()
 }
 
-func (this *IpBlack) INDEX(ctx *gin.Context) {
+func (this *IpWhite) INDEX(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "没什么用！"), 202)
 }
 
-func (this *IpBlack) delCache() {
-	facade.Cache.DelTags([]any{"[GET]", "ip-black"})
+func (this *IpWhite) delCache() {
+	facade.Cache.DelTags([]any{"[GET]", "ip-white"})
 }
 
-func (this *IpBlack) one(ctx *gin.Context) {
+func (this *IpWhite) one(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
 
 	params := this.params(ctx)
-	table := model.IpBlack{}
+	table := model.IpWhite{}
 
 	for key, val := range params {
-		if utils.In.Array(key, ipBlackAllowQuerySlice) {
+		if utils.In.Array(key, ipWhiteAllowQuerySlice) {
 			utils.Struct.Set(&table, key, val)
 		}
 	}
@@ -223,7 +223,7 @@ func (this *IpBlack) one(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-func (this *IpBlack) all(ctx *gin.Context) {
+func (this *IpWhite) all(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
@@ -233,10 +233,10 @@ func (this *IpBlack) all(ctx *gin.Context) {
 		"order": "create_time desc",
 	})
 
-	table := model.IpBlack{}
+	table := model.IpWhite{}
 	page := cast.ToInt(params["page"])
 	limit := this.meta.limit(ctx)
-	var result []model.IpBlack
+	var result []model.IpWhite
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
@@ -264,21 +264,21 @@ func (this *IpBlack) all(ctx *gin.Context) {
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-func (this *IpBlack) rand(ctx *gin.Context) {
+func (this *IpWhite) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 	limit := this.meta.limit(ctx)
 	except := utils.Unity.Ids(params["except"])
 	onlyTrashed := cast.ToBool(params["onlyTrashed"])
 	withTrashed := cast.ToBool(params["withTrashed"])
 
-	query := facade.DB.Model(&model.IpBlack{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	query := facade.DB.Model(&model.IpWhite{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	if !utils.Is.Empty(except) {
 		query = query.Where("id", "NOT IN", except)
 	}
 
 	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
 
-	mold := facade.DB.Model(&[]model.IpBlack{}).Where("id", "IN", ids)
+	mold := facade.DB.Model(&[]model.IpWhite{}).Where("id", "IN", ids)
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
@@ -292,7 +292,7 @@ func (this *IpBlack) rand(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
 }
 
-func (this *IpBlack) save(ctx *gin.Context) {
+func (this *IpWhite) save(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
@@ -302,69 +302,21 @@ func (this *IpBlack) save(ctx *gin.Context) {
 	}
 }
 
-func (this *IpBlack) create(ctx *gin.Context) {
+func (this *IpWhite) create(ctx *gin.Context) {
 	params := this.params(ctx)
-	err := validator.NewValid("ip-black", params)
+	err := validator.NewValid("ip-white", params)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
-	table := model.IpBlack{CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-
-	// 设置默认封禁参数（如果用户未指定）
-	// 默认 level = 1，1 小时封禁；如果指定了 is_permanent = true，则永久封禁
-	userLevel := cast.ToInt(params["level"])
-	userIsPermanent := cast.ToBool(params["is_permanent"])
-	userDuration := cast.ToInt64(params["duration"])
-	userExpireTime := cast.ToInt64(params["expire_time"])
-
-	if userLevel == 0 && !userIsPermanent {
-		userLevel = 1 // 默认1级（1小时）
-	}
-
-	if userLevel > 0 {
-		table.Level = userLevel
-	}
-	if userIsPermanent {
-		table.IsPermanent = true
-		table.Duration = 0
-		table.ExpireTime = 0
-	} else {
-		table.IsPermanent = false
-		// 计算封禁时长
-		if userDuration > 0 {
-			table.Duration = userDuration
-		} else if userLevel > 0 {
-			// 根据等级设置默认时长
-			switch userLevel {
-			case 1:
-				table.Duration = 1
-			case 2:
-				table.Duration = 24
-			case 3:
-				table.Duration = 24 * 7
-			default:
-				table.Duration = 1
-			}
-		}
-		// 计算解封时间
-		if userExpireTime > 0 {
-			table.ExpireTime = userExpireTime
-		} else if table.Duration > 0 {
-			table.ExpireTime = time.Now().Unix() + table.Duration*3600
-		}
-	}
+	table := model.IpWhite{CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
 
 	for key, val := range params {
-		if utils.In.Array(key, ipBlackAllowFieldsSlice) {
+		if utils.In.Array(key, ipWhiteAllowFieldsSlice) {
 			if key == "ip" {
 				val = strings.ToUpper(cast.ToString(val))
-			}
-			// 已经处理过这些字段了，跳过
-			if key == "level" || key == "duration" || key == "expire_time" || key == "is_permanent" {
-				continue
 			}
 			utils.Struct.Set(&table, key, this.processFieldValue(val))
 		}
@@ -380,7 +332,7 @@ func (this *IpBlack) create(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
-func (this *IpBlack) update(ctx *gin.Context) {
+func (this *IpWhite) update(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	if utils.Is.Empty(params["id"]) {
@@ -388,108 +340,21 @@ func (this *IpBlack) update(ctx *gin.Context) {
 		return
 	}
 
-	err := validator.NewValid("ip-black", params)
+	err := validator.NewValid("ip-white", params)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
-	table := model.IpBlack{}
+	table := model.IpWhite{}
 	async := utils.Async[map[string]any]()
 
-	// 先查询现有记录，用于计算新的封禁参数
-	facade.DB.Model(&model.IpBlack{}).WithTrashed().Where("id", params["id"]).Scan(&table)
+	// 先查询现有记录
+	facade.DB.Model(&model.IpWhite{}).WithTrashed().Where("id", params["id"]).Scan(&table)
 
-	// 处理封禁等级和期限参数
-	userLevel := cast.ToInt(params["level"])
-	userIsPermanent := cast.ToBool(params["is_permanent"])
-	userDuration := cast.ToInt64(params["duration"])
-	userExpireTime := cast.ToInt64(params["expire_time"])
-
-	// 如果提交了 level 或 is_permanent，则重新计算
-	if userLevel > 0 || userIsPermanent {
-		newLevel := userLevel
-		if userLevel == 0 {
-			newLevel = table.Level
-		}
-		if userLevel > 0 {
-			async.Set("level", newLevel)
-		}
-
-		if userIsPermanent {
-			async.Set("is_permanent", true)
-			async.Set("duration", 0)
-			async.Set("expire_time", 0)
-		} else {
-			async.Set("is_permanent", false)
-			// 计算封禁时长
-			if userDuration > 0 {
-				async.Set("duration", userDuration)
-			} else if newLevel > 0 {
-				// 根据等级设置默认时长
-				var duration int64
-				switch newLevel {
-				case 1:
-					duration = 1
-				case 2:
-					duration = 24
-				case 3:
-					duration = 24 * 7
-				default:
-					duration = 1
-				}
-				async.Set("duration", duration)
-			} else if table.Duration > 0 {
-				async.Set("duration", table.Duration)
-			}
-
-			// 计算解封时间
-			if userExpireTime > 0 {
-				async.Set("expire_time", userExpireTime)
-			} else {
-				// 从当前时间开始计算
-				var duration int64
-				if userDuration > 0 {
-					duration = userDuration
-				} else if newLevel > 0 {
-					switch newLevel {
-					case 1:
-						duration = 1
-					case 2:
-						duration = 24
-					case 3:
-						duration = 24 * 7
-					default:
-						duration = 1
-					}
-				} else if table.Duration > 0 {
-					duration = table.Duration
-				}
-				if duration > 0 {
-					async.Set("expire_time", time.Now().Unix()+duration*3600)
-				}
-			}
-		}
-	} else if userDuration > 0 || userExpireTime > 0 {
-		// 只修改了时长或过期时间，未修改等级
-		if userDuration > 0 {
-			async.Set("duration", userDuration)
-		}
-		if userExpireTime > 0 {
-			async.Set("expire_time", userExpireTime)
-		} else if userDuration > 0 {
-			async.Set("expire_time", time.Now().Unix()+userDuration*3600)
-		}
-		async.Set("is_permanent", false)
-	}
-
-	// 处理其他字段
+	// 处理字段
 	for key, val := range params {
-		if utils.In.Array(key, ipBlackAllowFieldsSlice) {
-			// 这些字段已经在上面处理过了
-			if key == "level" || key == "duration" || key == "expire_time" || key == "is_permanent" {
-				continue
-			}
+		if utils.In.Array(key, ipWhiteAllowFieldsSlice) {
 			if key == "ip" {
 				val = strings.ToUpper(cast.ToString(val))
 			}
@@ -507,14 +372,14 @@ func (this *IpBlack) update(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
-func (this *IpBlack) count(ctx *gin.Context) {
+func (this *IpWhite) count(ctx *gin.Context) {
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.IpBlack{}), params)
+	query := this.withTrashOptions(facade.DB.Model(&model.IpWhite{}), params)
 	query = this.buildQuery(query, params)
 	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
 }
 
-func (this *IpBlack) sum(ctx *gin.Context) {
+func (this *IpWhite) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
 		return query.Sum(field)
 	})
@@ -525,7 +390,7 @@ func (this *IpBlack) sum(ctx *gin.Context) {
 	this.json(ctx, data, msg, 200)
 }
 
-func (this *IpBlack) min(ctx *gin.Context) {
+func (this *IpWhite) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
 		return query.Min(field)
 	})
@@ -536,7 +401,7 @@ func (this *IpBlack) min(ctx *gin.Context) {
 	this.json(ctx, data, msg, 200)
 }
 
-func (this *IpBlack) max(ctx *gin.Context) {
+func (this *IpWhite) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
 		return query.Max(field)
 	})
@@ -547,13 +412,13 @@ func (this *IpBlack) max(ctx *gin.Context) {
 	this.json(ctx, data, msg, 200)
 }
 
-func (this *IpBlack) column(ctx *gin.Context) {
+func (this *IpWhite) column(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&[]model.IpBlack{}), params)
+	query := this.withTrashOptions(facade.DB.Model(&[]model.IpWhite{}), params)
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	ids := utils.Unity.Keys(params["ids"])
@@ -578,7 +443,7 @@ func (this *IpBlack) column(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
-func (this *IpBlack) remove(ctx *gin.Context) {
+func (this *IpWhite) remove(ctx *gin.Context) {
 	params := this.params(ctx)
 	ids := utils.Unity.Ids(params["ids"])
 
@@ -587,7 +452,7 @@ func (this *IpBlack) remove(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.IpBlack{})
+	item := facade.DB.Model(&model.IpWhite{})
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
 
 	if utils.Is.Empty(ids) {
@@ -605,7 +470,7 @@ func (this *IpBlack) remove(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
-func (this *IpBlack) delete(ctx *gin.Context) {
+func (this *IpWhite) delete(ctx *gin.Context) {
 	params := this.params(ctx)
 	ids := utils.Unity.Ids(params["ids"])
 
@@ -614,7 +479,7 @@ func (this *IpBlack) delete(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.IpBlack{}).WithTrashed()
+	item := facade.DB.Model(&model.IpWhite{}).WithTrashed()
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
 
 	if utils.Is.Empty(ids) {
@@ -632,8 +497,8 @@ func (this *IpBlack) delete(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
 }
 
-func (this *IpBlack) clear(ctx *gin.Context) {
-	table := model.IpBlack{}
+func (this *IpWhite) clear(ctx *gin.Context) {
+	table := model.IpWhite{}
 	item := facade.DB.Model(&table).OnlyTrashed()
 
 	ids := utils.Unity.Ids(item.Column("id"))
@@ -653,7 +518,7 @@ func (this *IpBlack) clear(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
 }
 
-func (this *IpBlack) restore(ctx *gin.Context) {
+func (this *IpWhite) restore(ctx *gin.Context) {
 	params := this.params(ctx)
 	ids := utils.Unity.Ids(params["ids"])
 
@@ -662,7 +527,7 @@ func (this *IpBlack) restore(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.IpBlack{}).OnlyTrashed().WhereIn("id", ids)
+	item := facade.DB.Model(&model.IpWhite{}).OnlyTrashed().WhereIn("id", ids)
 	ids = utils.Unity.Ids(item.Column("id"))
 
 	if utils.Is.Empty(ids) {
@@ -670,7 +535,7 @@ func (this *IpBlack) restore(ctx *gin.Context) {
 		return
 	}
 
-	tx := facade.DB.Model(&model.IpBlack{}).OnlyTrashed().Restore(ids)
+	tx := facade.DB.Model(&model.IpWhite{}).OnlyTrashed().Restore(ids)
 
 	if tx.Error != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
