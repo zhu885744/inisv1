@@ -3,15 +3,16 @@ package controller
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
 )
 
 type Article struct {
@@ -19,11 +20,11 @@ type Article struct {
 }
 
 const (
-	articleAllowFields = "title,abstract,content,covers,tags,group,editor,remark,json,text,publish_time"
+	articleAllowFields = "title,abstract,content,covers,tags,group,editor,remark,json,text,publish_time,status"
 	articleAllowQuery  = "id"
 )
 
-var articleAllowFieldsSlice = []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time"}
+var articleAllowFieldsSlice = []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time", "status"}
 var articleAllowQuerySlice = []any{"id"}
 
 func (this *Article) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -292,21 +293,32 @@ func (this *Article) create(ctx *gin.Context) {
 		allowFields = append(allowFields, "top", "audit")
 	}
 
-	// 是否开启了审核
-	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-	utils.Struct.Set(&table, "audit", cast.ToInt(!audit))
+	// 获取状态：0-草稿，1-发布
+	status := cast.ToInt(params["status"])
+
+	// 如果是草稿，跳过审核检查，不设置发布时间
+	if status == 0 {
+		utils.Struct.Set(&table, "Audit", 1)
+		utils.Struct.Set(&table, "Status", 0)
+		utils.Struct.Set(&table, "PublishTime", 0)
+	} else {
+		// 是否开启了审核
+		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+		utils.Struct.Set(&table, "Audit", cast.ToInt(!audit))
+		utils.Struct.Set(&table, "Status", 1)
+
+		// 处理 publish_time，若未传则默认使用当前时间
+		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
+			utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
+		} else {
+			utils.Struct.Set(&table, "PublishTime", time.Now().Unix())
+		}
+	}
 
 	for key, val := range params {
 		if utils.In.Array(key, allowFields) {
 			utils.Struct.Set(&table, key, this.processFieldValue(val))
 		}
-	}
-
-	// 处理 publish_time，若未传则默认使用当前时间
-	if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-		utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
-	} else {
-		utils.Struct.Set(&table, "PublishTime", time.Now().Unix())
 	}
 
 	tx := facade.DB.Model(&table).Create(&table)
@@ -316,7 +328,11 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+	if status == 0 {
+		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
+	} else {
+		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+	}
 }
 
 func (this *Article) update(ctx *gin.Context) {
@@ -342,18 +358,28 @@ func (this *Article) update(ctx *gin.Context) {
 		allowFields = append(allowFields, "top", "audit")
 	}
 
-	// 是否开启了审核
-	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-	utils.Struct.Set(&table, "audit", cast.ToInt(!audit))
+	// 获取状态：0-草稿，1-发布
+	status := cast.ToInt(params["status"])
+
+	if status == 0 {
+		// 草稿：跳过审核，不设置发布时间
+		async.Set("audit", 1)
+		async.Set("status", 0)
+	} else {
+		// 发布：应用审核规则
+		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+		async.Set("audit", cast.ToInt(!audit))
+		async.Set("status", 1)
+
+		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
+			async.Set("publish_time", cast.ToInt64(publishTime))
+		}
+	}
 
 	for key, val := range params {
 		if utils.In.Array(key, allowFields) {
 			async.Set(key, this.processFieldValue(val))
 		}
-	}
-
-	if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-		async.Set("publish_time", cast.ToInt64(publishTime))
 	}
 
 	async.Set("last_update", time.Now().Unix())
@@ -372,7 +398,11 @@ func (this *Article) update(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+	if status == 0 {
+		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
+	} else {
+		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+	}
 }
 
 func (this *Article) count(ctx *gin.Context) {
