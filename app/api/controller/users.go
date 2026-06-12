@@ -157,12 +157,29 @@ func (this *Users) one(ctx *gin.Context) {
 		mold.WithoutField("password")
 
 		user := this.user(ctx)
-		// 越权 - 既没有管理权限，也不是自己的数据
-		if !this.meta.root(ctx) && (table.Id != user.Id || user.Id == 0) {
-			mold.WithoutField("account", "email", "phone")
-		}
+		isAdmin := this.meta.root(ctx)
+		isOwnData := table.Id == user.Id && user.Id != 0
 
+		// 从数据库中获取数据
 		item := mold.Where(table).Find()
+
+		// 非管理员查看他人数据时，对敏感字段进行脱敏处理
+		if !isAdmin && !isOwnData && !utils.Is.Empty(item) {
+			itemMap := cast.ToStringMap(item)
+			if email, ok := itemMap["email"].(string); ok && email != "" {
+				itemMap["email"] = facade.Comm.MaskEmail(email)
+			}
+			if phone, ok := itemMap["phone"].(string); ok && phone != "" {
+				itemMap["phone"] = facade.Comm.MaskPhone(phone)
+			}
+			if account, ok := itemMap["account"].(string); ok && account != "" {
+				accountLen := len(account)
+				if accountLen > 2 {
+					itemMap["account"] = account[:2] + strings.Repeat("*", accountLen-2)
+				}
+			}
+			item = itemMap
+		}
 
 		// 排除字段
 		data = facade.Comm.WithField(item, params["field"])
@@ -225,16 +242,35 @@ func (this *Users) all(ctx *gin.Context) {
 
 		mold.WithoutField("password")
 
-		// 越权 - 没有管理权限
-		if !this.meta.root(ctx) {
-			mold.WithoutField("account", "email", "phone")
-		}
+		isAdmin := this.meta.root(ctx)
 
 		// 从数据库中获取数据
 		item := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 
 		// 排除字段
 		data = utils.ArrayMapWithField(item, params["field"])
+
+		// 非管理员查看列表时，对数据进行脱敏处理
+		if !isAdmin {
+			dataList := cast.ToSlice(data)
+			for i, val := range dataList {
+				dataMap := cast.ToStringMap(val)
+				if email, ok := dataMap["email"].(string); ok && email != "" {
+					dataMap["email"] = facade.Comm.MaskEmail(email)
+				}
+				if phone, ok := dataMap["phone"].(string); ok && phone != "" {
+					dataMap["phone"] = facade.Comm.MaskPhone(phone)
+				}
+				if account, ok := dataMap["account"].(string); ok && account != "" {
+					accountLen := len(account)
+					if accountLen > 2 {
+						dataMap["account"] = account[:2] + strings.Repeat("*", accountLen-2)
+					}
+				}
+				dataList[i] = dataMap
+			}
+			data = dataList
+		}
 
 		// 缓存数据
 		if this.cache.enable(ctx) {
@@ -915,7 +951,7 @@ func (this *Users) email(ctx *gin.Context) {
 		// 缓存每日发送次数 - 24小时
 		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 
-		msg := fmt.Sprintf("验证码发送至您的邮箱：%s，请注意查收！", params["email"])
+		msg := fmt.Sprintf("验证码发送至您的邮箱：%s，请注意查收！", facade.Comm.MaskEmail(cast.ToString(params["email"])))
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
 		return
 	}
@@ -1017,7 +1053,7 @@ func (this *Users) phone(ctx *gin.Context) {
 		// 缓存每日发送次数 - 24小时
 		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 
-		msg := fmt.Sprintf("验证码发送至您的手机：%s，请注意查收！", params["phone"])
+		msg := fmt.Sprintf("验证码发送至您的手机：%s，请注意查收！", facade.Comm.MaskPhone(cast.ToString(params["phone"])))
 		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
 		return
 	}

@@ -123,6 +123,62 @@ func (c *CommStruct) WithField(data map[string]any, field any) map[string]any {
 	return utils.Map.WithField(data, keys)
 }
 
+// MaskEmail 邮箱脱敏处理
+func (c *CommStruct) MaskEmail(email string) string {
+	if email == "" || !utils.Is.Email(email) {
+		return email
+	}
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return email
+	}
+	prefix := parts[0]
+	domain := parts[1]
+
+	prefixLen := len(prefix)
+	if prefixLen <= 2 {
+		return email
+	}
+
+	maskedPrefix := prefix[:2] + strings.Repeat("*", prefixLen-2)
+	return maskedPrefix + "@" + domain
+}
+
+// MaskPhone 手机号脱敏处理
+func (c *CommStruct) MaskPhone(phone string) string {
+	if phone == "" {
+		return phone
+	}
+	phone = strings.ReplaceAll(strings.ReplaceAll(phone, " ", ""), "-", "")
+	if len(phone) != 11 {
+		return phone
+	}
+	return phone[:3] + "****" + phone[7:]
+}
+
+// MaskIP IP地址脱敏处理
+func (c *CommStruct) MaskIP(ip string) string {
+	if ip == "" {
+		return ip
+	}
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		return ip
+	}
+	return parts[0] + "." + parts[1] + ".*.*"
+}
+
+// MaskUA User-Agent脱敏处理
+func (c *CommStruct) MaskUA(ua string) string {
+	if ua == "" {
+		return ua
+	}
+	if len(ua) <= 50 {
+		return ua
+	}
+	return ua[:50] + "..."
+}
+
 // SanitizeHTML 彻底防御 XSS（核心方法）
 func (c *CommStruct) SanitizeHTML(input string) string {
 	if input == "" {

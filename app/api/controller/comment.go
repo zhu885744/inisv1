@@ -237,6 +237,18 @@ func (this *Comment) one(ctx *gin.Context) {
 		query = this.buildQuery(query, params)
 		item := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
+
+		if !this.meta.root(ctx) && !utils.Is.Empty(data) {
+			dataMap := cast.ToStringMap(data)
+			if ip, ok := dataMap["ip"].(string); ok && ip != "" {
+				dataMap["ip"] = facade.Comm.MaskIP(ip)
+			}
+			if agent, ok := dataMap["agent"].(string); ok && agent != "" {
+				dataMap["agent"] = facade.Comm.MaskUA(agent)
+			}
+			data = dataMap
+		}
+
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -280,6 +292,22 @@ func (this *Comment) all(ctx *gin.Context) {
 	} else {
 		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
+
+		if !this.meta.root(ctx) {
+			dataList := cast.ToSlice(data)
+			for i, val := range dataList {
+				dataMap := cast.ToStringMap(val)
+				if ip, ok := dataMap["ip"].(string); ok && ip != "" {
+					dataMap["ip"] = facade.Comm.MaskIP(ip)
+				}
+				if agent, ok := dataMap["agent"].(string); ok && agent != "" {
+					dataMap["agent"] = facade.Comm.MaskUA(agent)
+				}
+				dataList[i] = dataMap
+			}
+			data = dataList
+		}
+
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -507,7 +535,7 @@ func (this *Comment) create(ctx *gin.Context) {
 
 			userInfo := facade.DB.Model(&model.Users{}).Where("id", user.Id).Find()
 			userEmail := cast.ToString(cast.ToStringMap(userInfo)["email"])
-			facade.Log.Info(map[string]any{"user_id": user.Id, "user_email": userEmail, "user_name": cast.ToString(cast.ToStringMap(userInfo)["name"])}, "获取评论用户信息")
+			facade.Log.Info(map[string]any{"user_id": user.Id, "user_email": facade.Comm.MaskEmail(userEmail), "user_name": cast.ToString(cast.ToStringMap(userInfo)["name"])}, "获取评论用户信息")
 
 			title := ""
 			switch table.BindType {
@@ -546,7 +574,7 @@ func (this *Comment) create(ctx *gin.Context) {
 					authorId := cast.ToInt(cast.ToStringMap(article)["uid"])
 					author := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
 					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"article_id": table.BindId, "author_id": authorId, "author_email": authorEmail}, "获取文章作者信息")
+					facade.Log.Info(map[string]any{"article_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文章作者信息")
 				} else {
 					facade.Log.Warn(map[string]any{"article_id": table.BindId}, "文章不存在，跳过发送给作者")
 				}
@@ -556,7 +584,7 @@ func (this *Comment) create(ctx *gin.Context) {
 					authorId := cast.ToInt(cast.ToStringMap(page)["uid"])
 					author := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
 					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"page_id": table.BindId, "author_id": authorId, "author_email": authorEmail}, "获取页面作者信息")
+					facade.Log.Info(map[string]any{"page_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取页面作者信息")
 				} else {
 					facade.Log.Warn(map[string]any{"page_id": table.BindId}, "页面不存在，跳过发送给作者")
 				}
@@ -565,23 +593,23 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 
 			if utils.Is.Email(authorEmail) && authorEmail != userEmail {
-				facade.Log.Info(map[string]any{"recipient": authorEmail}, "开始发送邮件给作者")
+				facade.Log.Info(map[string]any{"recipient": facade.Comm.MaskEmail(authorEmail)}, "开始发送邮件给作者")
 				for i := 0; i <= retryCount; i++ {
 					sms := facade.NewSMS("email")
 					response := sms.SendCommentNotify(authorEmail, commentInfo)
 					if response.Error == nil {
-						facade.Log.Info(map[string]any{"recipient": authorEmail}, "邮件发送给作者成功")
+						facade.Log.Info(map[string]any{"recipient": facade.Comm.MaskEmail(authorEmail)}, "邮件发送给作者成功")
 						break
 					}
 					if i < retryCount {
 						facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给作者失败，准备重试")
 						time.Sleep(time.Duration(retryInterval) * time.Second)
 					} else {
-						facade.Log.Error(map[string]any{"error": response.Error, "recipient": authorEmail}, "发送文章作者邮件通知失败")
+						facade.Log.Error(map[string]any{"error": response.Error, "recipient": facade.Comm.MaskEmail(authorEmail)}, "发送文章作者邮件通知失败")
 					}
 				}
 			} else {
-				facade.Log.Warn(map[string]any{"author_email": authorEmail, "user_email": userEmail}, "作者邮箱无效或重复，跳过发送")
+				facade.Log.Warn(map[string]any{"author_email": facade.Comm.MaskEmail(authorEmail), "user_email": facade.Comm.MaskEmail(userEmail)}, "作者邮箱无效或重复，跳过发送")
 			}
 
 			if table.Pid > 0 {
@@ -591,26 +619,26 @@ func (this *Comment) create(ctx *gin.Context) {
 					parentUid := cast.ToInt(cast.ToStringMap(parentComment)["uid"])
 					parentUser := facade.DB.Model(&model.Users{}).Where("id", parentUid).Find()
 					parentEmail := cast.ToString(cast.ToStringMap(parentUser)["email"])
-					facade.Log.Info(map[string]any{"parent_comment_id": table.Pid, "parent_user_id": parentUid, "parent_email": parentEmail}, "获取被回复用户信息")
+					facade.Log.Info(map[string]any{"parent_comment_id": table.Pid, "parent_user_id": parentUid, "parent_email": facade.Comm.MaskEmail(parentEmail)}, "获取被回复用户信息")
 
 					if utils.Is.Email(parentEmail) && parentUid != user.Id {
-						facade.Log.Info(map[string]any{"recipient": parentEmail}, "开始发送邮件给被回复用户")
+						facade.Log.Info(map[string]any{"recipient": facade.Comm.MaskEmail(parentEmail)}, "开始发送邮件给被回复用户")
 						for i := 0; i <= retryCount; i++ {
 							sms := facade.NewSMS("email")
 							response := sms.SendReplyNotify(parentEmail, commentInfo)
 							if response.Error == nil {
-								facade.Log.Info(map[string]any{"recipient": parentEmail}, "邮件发送给被回复用户成功")
+								facade.Log.Info(map[string]any{"recipient": facade.Comm.MaskEmail(parentEmail)}, "邮件发送给被回复用户成功")
 								break
 							}
 							if i < retryCount {
 								facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给被回复用户失败，准备重试")
 								time.Sleep(time.Duration(retryInterval) * time.Second)
 							} else {
-								facade.Log.Error(map[string]any{"error": response.Error, "recipient": parentEmail}, "发送评论回复邮件通知失败")
+								facade.Log.Error(map[string]any{"error": response.Error, "recipient": facade.Comm.MaskEmail(parentEmail)}, "发送评论回复邮件通知失败")
 							}
 						}
 					} else {
-						facade.Log.Warn(map[string]any{"parent_email": parentEmail, "parent_uid": parentUid, "user_id": user.Id}, "被回复用户邮箱无效或为评论者本人，跳过发送")
+						facade.Log.Warn(map[string]any{"parent_email": facade.Comm.MaskEmail(parentEmail), "parent_uid": parentUid, "user_id": user.Id}, "被回复用户邮箱无效或为评论者本人，跳过发送")
 					}
 				} else {
 					facade.Log.Warn(map[string]any{"pid": table.Pid}, "父评论不存在，跳过发送给被回复用户")
