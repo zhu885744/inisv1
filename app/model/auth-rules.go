@@ -424,6 +424,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=article&type=common&name=文章搜索",
 				"path=pages&type=common&name=独立页面搜索",
 				"path=tags&type=common&name=标签搜索",
+				"path=users&type=common&name=用户搜索",
+				"path=links&type=common&name=友链搜索",
 				"path=all&type=common&name=全局搜索",
 			},
 		},
