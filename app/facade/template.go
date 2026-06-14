@@ -19,9 +19,19 @@ description = "博客简介"
 
 # socket配置
 [socket]
-debug = false          # 开启调试日志
-ping_timeout = 120    # ping超时时间(秒)
-max_message_size = 1048576  # 最大消息大小(字节)
+debug = false                    # 开启调试日志
+ping_timeout = 120              # ping超时时间(秒)
+max_message_size = 1048576      # 最大消息大小(字节)
+max_connections_per_ip = 10     # 每个IP最大连接数
+max_messages_per_minute = 100   # 每分钟最大消息数
+ack_timeout = 10                # ACK超时时间(秒)
+max_retries = 3                 # 消息重试次数
+offline_msg_ttl = 300           # 离线消息过期时间(秒)
+max_offline_msgs = 100          # 离线消息最大数量
+reconnect_timeout = 30          # 重连超时时间(秒)
+enable_ip_ban = false           # 是否启用IP临时封禁
+ip_ban_threshold = 3            # IP连续超限几次后临时封禁
+ip_ban_duration = 300           # IP临时封禁时长(秒)
 
 # CORS配置
 [system.cors]

@@ -146,9 +146,23 @@ type hub struct {
 	security             *securityConfig
 	chatSessions         map[string]*chatSession
 	messageStatuses      map[string]*messageStatus
+	// IP临时封禁相关
+	ipBanEnabled   bool
+	ipBanThreshold int
+	ipBanDuration  time.Duration
+	ipBanRecords   map[string]*ipBanRecord
+}
+
+// IP封禁记录
+type ipBanRecord struct {
+	hits       int
+	bannedAt   time.Time
+	isBanned   bool
+	expireTime time.Time
 }
 
 var Hub = func() *hub {
+	// 从 TOML 配置读取所有 socket 参数
 	return &hub{
 		notice:               make(chan []byte),
 		connect:              make(chan *client),
@@ -161,13 +175,17 @@ var Hub = func() *hub {
 		rateLimits:           make(map[string]*rateLimit),
 		chatSessions:         make(map[string]*chatSession),
 		messageStatuses:      make(map[string]*messageStatus),
-		ackTimeout:           10 * time.Second,
-		maxRetries:           3,
-		offlineMsgTTL:        5 * time.Minute,
-		maxOfflineMsgs:       100,
-		reconnectTimeout:     30 * time.Second,
-		maxConnectionsPerIP:  10,
-		maxMessagesPerMinute: 100,
+		ipBanRecords:         make(map[string]*ipBanRecord),
+		ackTimeout:           time.Duration(cast.ToInt(getSocketConfig("ack_timeout", 10))) * time.Second,
+		maxRetries:           cast.ToInt(getSocketConfig("max_retries", 3)),
+		offlineMsgTTL:        time.Duration(cast.ToInt(getSocketConfig("offline_msg_ttl", 300))) * time.Second,
+		maxOfflineMsgs:       cast.ToInt(getSocketConfig("max_offline_msgs", 100)),
+		reconnectTimeout:     time.Duration(cast.ToInt(getSocketConfig("reconnect_timeout", 30))) * time.Second,
+		maxConnectionsPerIP:  cast.ToInt(getSocketConfig("max_connections_per_ip", 10)),
+		maxMessagesPerMinute: cast.ToInt(getSocketConfig("max_messages_per_minute", 100)),
+		ipBanEnabled:         cast.ToBool(getSocketConfig("enable_ip_ban", false)),
+		ipBanThreshold:       cast.ToInt(getSocketConfig("ip_ban_threshold", 3)),
+		ipBanDuration:        time.Duration(cast.ToInt(getSocketConfig("ip_ban_duration", 300))) * time.Second,
 		stats: &stats{
 			startTime:  time.Now(),
 			minLatency: time.Hour,
@@ -176,7 +194,7 @@ var Hub = func() *hub {
 			blacklistedIPs:    make(map[string]bool),
 			allowedOrigins:    []string{},
 			enableOriginCheck: false,
-			maxMessageSize:    1024 * 1024,
+			maxMessageSize:    cast.ToInt(getSocketConfig("max_message_size", 1024*1024)),
 		},
 	}
 }()
@@ -212,11 +230,55 @@ func socketLog(format string, args ...any) {
 	}
 }
 
+// checkIPBan 检查IP是否被临时封禁
+func (hub *hub) checkIPBan(ip string) bool {
+	if !hub.ipBanEnabled {
+		return false
+	}
+	if record, ok := hub.ipBanRecords[ip]; ok && record.isBanned {
+		if time.Now().After(record.expireTime) {
+			// 封禁到期，自动解封
+			record.isBanned = false
+			record.hits = 0
+			socketLog("IP封禁到期自动解封: %s", ip)
+			return false
+		}
+		socketLog("IP处于封禁中，拒绝连接: %s, 剩余时长: %.0f秒", ip, time.Until(record.expireTime).Seconds())
+		return true
+	}
+	return false
+}
+
+// recordIPLimitHit 记录IP超限次数，达到阈值时临时封禁
+func (hub *hub) recordIPLimitHit(ip string) {
+	hub.stats.ipLimitHits++
+	if !hub.ipBanEnabled {
+		return
+	}
+	if record, ok := hub.ipBanRecords[ip]; ok {
+		record.hits++
+		if record.hits >= hub.ipBanThreshold && !record.isBanned {
+			record.isBanned = true
+			record.bannedAt = time.Now()
+			record.expireTime = time.Now().Add(hub.ipBanDuration)
+			socketLog("IP已达超限阈值，临时封禁: %s, 时长: %.0f秒", ip, hub.ipBanDuration.Seconds())
+		}
+	} else {
+		hub.ipBanRecords[ip] = &ipBanRecord{
+			hits: 1,
+		}
+	}
+}
+
 func (hub *hub) checkIPLimit(ip string) bool {
+	// 先检查是否被封禁
+	if hub.checkIPBan(ip) {
+		return false
+	}
 	if conn, ok := hub.ipConnections[ip]; ok {
 		if len(conn.clientIds) >= hub.maxConnectionsPerIP {
 			socketLog("IP连接数超限: %s, 当前连接数: %d", ip, len(conn.clientIds))
-			hub.stats.ipLimitHits++
+			hub.recordIPLimitHit(ip)
 			return false
 		}
 	}
@@ -321,10 +383,6 @@ func (hub *hub) recordLatency(latency time.Duration) {
 		}
 		hub.stats.avgLatency = total / time.Duration(len(hub.stats.messageLatency))
 	}
-}
-
-func (hub *hub) recordIPLimitHit() {
-	hub.stats.ipLimitHits++
 }
 
 func (hub *hub) GetStats() map[string]any {

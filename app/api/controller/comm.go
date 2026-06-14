@@ -413,16 +413,14 @@ func (this *Comm) register(ctx *gin.Context) {
 // 忘记密码
 func (this *Comm) resetPassword(ctx *gin.Context) {
 
-	// 表数据结构体
-	table := model.Users{}
 	// 请求参数
 	params := this.params(ctx, map[string]any{
 		"source": "default",
 	})
 
-	// 必须有一个不能为空
-	if utils.Is.Empty(params["account"]) && utils.Is.Empty(params["social"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 和 %s 必须有一个不能为空！", "account", "social"), 400)
+	// social 不能为空
+	if utils.Is.Empty(params["social"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "手机号/邮箱"), 400)
 		return
 	}
 
@@ -436,112 +434,64 @@ func (this *Comm) resetPassword(ctx *gin.Context) {
 	}
 
 	// 检查类型，邮箱或者手机号
-	var social string
-	if !utils.Is.Empty(params["social"]) {
-		social = utils.Ternary(utils.Is.Email(params["social"]), "email", social)
-		social = utils.Ternary(utils.Is.Phone(params["social"]), "phone", social)
-	}
-
-	var user map[string]any
-
-	// 账号优先
-	if !utils.Is.Empty(params["account"]) {
-
-		// 判断账号是否已经注册
-		user = facade.DB.Model(&table).Where("source", params["source"]).Where("account", params["account"]).Find()
-		if utils.Is.Empty(user) {
-			this.json(ctx, nil, facade.Lang(ctx, "该账号未注册！"), 400)
-			return
-		}
-
-		// 找回密码
-		this.password(ctx, user)
+	var socialType string
+	if utils.Is.Email(params["social"]) {
+		socialType = "email"
+	} else if utils.Is.Phone(params["social"]) {
+		socialType = "phone"
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "请输入正确的手机号或邮箱！"), 400)
 		return
 	}
 
-	// 判断是否已经注册
-	user = facade.DB.Model(&table).Where("source", params["source"]).Where(social, params["social"]).Find()
-	if utils.Is.Empty(user) {
-		switch social {
-		case "email":
-			this.json(ctx, nil, facade.Lang(ctx, "该邮箱未注册！"), 400)
-			return
-		case "phone":
-			this.json(ctx, nil, facade.Lang(ctx, "该手机号未注册！"), 400)
-			return
-		}
-	}
-
-	// 找回密码
-	this.password(ctx, user)
+	// 找回密码（不传 user，让 password 函数自己查询）
+	this.password(ctx, socialType)
 }
 
 // 忘记密码
-func (this *Comm) password(ctx *gin.Context, user map[string]any) {
+func (this *Comm) password(ctx *gin.Context, socialType string) {
 
 	// 请求参数
 	params := this.params(ctx)
 
 	drives := cast.ToStringMap(facade.SMSToml.Get("drive"))
 
-	// 先确定模式（email 或 sms）和联系方式
+	// 获取用户提交的联系方式
+	social := cast.ToString(params["social"])
+
+	// 确定模式和驱动
 	var mode string
-	var social string
-
-	// 优先使用用户提交的 social
-	if !utils.Is.Empty(params["social"]) {
-		if utils.Is.Email(params["social"]) {
-			mode = "email"
-			social = cast.ToString(params["social"])
-			if !utils.Is.Empty(user["email"]) && user["email"] != params["social"] {
-				this.json(ctx, nil, facade.Lang(ctx, "提交的邮箱与注册时的邮箱不一致！"), 400)
-				return
-			}
-		} else if utils.Is.Phone(params["social"]) {
-			mode = "sms"
-			social = cast.ToString(params["social"])
-			if !utils.Is.Empty(user["phone"]) && user["phone"] != params["social"] {
-				this.json(ctx, nil, facade.Lang(ctx, "提交的手机号与注册时的手机号不一致！"), 400)
-				return
-			}
-		} else {
-			this.json(ctx, nil, facade.Lang(ctx, "提交的联系方式格式不正确！"), 400)
-			return
-		}
-	} else {
-		// 用户未提交 social，从数据库中选择可用的联系方式（SMS 优先）
-		if !utils.Is.Empty(drives["sms"]) && !utils.Is.Empty(user["phone"]) {
-			mode = "sms"
-			social = cast.ToString(user["phone"])
-		} else if !utils.Is.Empty(drives["email"]) && !utils.Is.Empty(user["email"]) {
-			mode = "email"
-			social = cast.ToString(user["email"])
-		}
-	}
-
-	// 根据模式确定具体的驱动名称
 	var drive string
-	if mode == "email" {
+
+	if socialType == "email" {
+		mode = "email"
 		drive = cast.ToString(drives["email"])
-	} else if mode == "sms" {
+	} else if socialType == "phone" {
+		mode = "sms"
 		drive = cast.ToString(drives["sms"])
 	}
 
 	// 驱动不可用
 	if utils.Is.Empty(drive) {
-		if utils.Is.Empty(drives["email"]) && utils.Is.Empty(drives["sms"]) {
-			this.json(ctx, nil, facade.Lang(ctx, "请联系管理员重置密码！"), 400)
-			return
-		}
-		if !utils.Is.Empty(user["phone"]) {
-			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启短信服务，无法发送验证码！"), 400)
-			return
-		}
-		if !utils.Is.Empty(user["email"]) {
+		if mode == "email" {
 			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启邮箱服务，无法发送验证码！"), 400)
-			return
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启短信服务，无法发送验证码！"), 400)
 		}
-		this.json(ctx, nil, facade.Lang(ctx, "请联系管理员重置密码！"), 400)
+		return
+	}
+
+	// 通过 social 查询用户
+	var user map[string]any
+	table := model.Users{}
+	user = facade.DB.Model(&table).Where(socialType, social).Find()
+
+	if utils.Is.Empty(user) {
+		if mode == "email" {
+			this.json(ctx, nil, facade.Lang(ctx, "该邮箱未注册！"), 400)
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "该手机号未注册！"), 400)
+		}
 		return
 	}
 
@@ -551,12 +501,55 @@ func (this *Comm) password(ctx *gin.Context, user map[string]any) {
 	// 验证码为空 - 发送验证码
 	if utils.Is.Empty(params["code"]) {
 
+		// 本地频控检查（仅短信模式）
+		if drive == "sms" {
+			frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, social)
+			dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, social)
+
+			// 检查发送间隔（60秒）
+			lastSendTime := facade.Cache.Get(frequencyCacheName)
+			if !utils.Is.Empty(lastSendTime) {
+				if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+					this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+					return
+				}
+			}
+
+			// 检查每日发送限制（10次）
+			dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+			if dailyCount >= 10 {
+				this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+				return
+			}
+
+			sms := facade.NewSMS(drive).VerifyCode(social)
+			if sms.Error != nil {
+				// 处理阿里云频控错误
+				if strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL") {
+					this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+					return
+				}
+				this.json(ctx, nil, sms.Error.Error(), 400)
+				return
+			}
+			// 缓存验证码 - 5分钟
+			facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+			// 缓存发送时间 - 60秒
+			go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+			// 缓存每日发送次数 - 24小时
+			go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
+
+			msg := fmt.Sprintf("验证码发送至您的%v：%s，请注意查收！", utils.Ternary(mode == "email", "邮箱", "手机"), social)
+			this.json(ctx, nil, facade.Lang(ctx, msg), 201)
+			return
+		}
+
 		sms := facade.NewSMS(drive).VerifyCode(social)
 		if sms.Error != nil {
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
-		// 缓存验证码 - 5分钟（同步设置，与注册逻辑一致）
+		// 缓存验证码 - 5分钟
 		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
 
 		msg := fmt.Sprintf("验证码发送至您的%v：%s，请注意查收！", utils.Ternary(mode == "email", "邮箱", "手机"), social)
