@@ -73,6 +73,54 @@ func (this *Comment) processFieldValue(val any) any {
 	return val
 }
 
+func (this *Comment) maskItem(item map[string]any) {
+	if ip, ok := item["ip"].(string); ok && ip != "" {
+		item["ip"] = facade.Comm.MaskIP(ip)
+	}
+	if agent, ok := item["agent"].(string); ok && agent != "" {
+		item["agent"] = facade.Comm.MaskUA(agent)
+	}
+	if replies, ok := item["replies"]; ok {
+		switch v := replies.(type) {
+		case []map[string]any:
+			for _, r := range v {
+				this.maskItem(r)
+			}
+		case []any:
+			for _, r := range v {
+				if rm, ok := r.(map[string]any); ok {
+					this.maskItem(rm)
+				}
+			}
+		}
+	}
+}
+
+func (this *Comment) maskCommentData(ctx *gin.Context, data any) any {
+	if data == nil || this.meta.root(ctx) {
+		return data
+	}
+	switch v := data.(type) {
+	case map[string]any:
+		this.maskItem(v)
+		return v
+	case []map[string]any:
+		for i := range v {
+			this.maskItem(v[i])
+		}
+		return v
+	case []any:
+		for i := range v {
+			if m, ok := v[i].(map[string]any); ok {
+				this.maskItem(m)
+				v[i] = m
+			}
+		}
+		return v
+	}
+	return data
+}
+
 func (this *Comment) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
 	msg := []string{"无数据！", ""}
 	var data any
@@ -237,20 +285,10 @@ func (this *Comment) one(ctx *gin.Context) {
 		query = this.buildQuery(query, params)
 		item := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
-
-		if !this.meta.root(ctx) && !utils.Is.Empty(data) {
-			dataMap := cast.ToStringMap(data)
-			if ip, ok := dataMap["ip"].(string); ok && ip != "" {
-				dataMap["ip"] = facade.Comm.MaskIP(ip)
-			}
-			if agent, ok := dataMap["agent"].(string); ok && agent != "" {
-				dataMap["agent"] = facade.Comm.MaskUA(agent)
-			}
-			data = dataMap
-		}
-
 		this.setCache(ctx, cacheName, data)
 	}
+
+	data = this.maskCommentData(ctx, data)
 
 	if !utils.Is.Empty(data) {
 		code = 200
@@ -292,24 +330,10 @@ func (this *Comment) all(ctx *gin.Context) {
 	} else {
 		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
-
-		if !this.meta.root(ctx) {
-			dataList := cast.ToSlice(data)
-			for i, val := range dataList {
-				dataMap := cast.ToStringMap(val)
-				if ip, ok := dataMap["ip"].(string); ok && ip != "" {
-					dataMap["ip"] = facade.Comm.MaskIP(ip)
-				}
-				if agent, ok := dataMap["agent"].(string); ok && agent != "" {
-					dataMap["agent"] = facade.Comm.MaskUA(agent)
-				}
-				dataList[i] = dataMap
-			}
-			data = dataList
-		}
-
 		this.setCache(ctx, cacheName, data)
 	}
+
+	data = this.maskCommentData(ctx, data)
 
 	if !utils.Is.Empty(data) {
 		code = 200
@@ -337,7 +361,7 @@ func (this *Comment) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 
 	item := mold.Order("RAND()").Limit(limit).Select()
-	data := utils.ArrayMapWithField(item, params["field"])
+	data := this.maskCommentData(ctx, utils.ArrayMapWithField(item, params["field"]))
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -773,6 +797,8 @@ func (this *Comment) column(ctx *gin.Context) {
 		this.setCache(ctx, cacheName, data)
 	}
 
+	data = this.maskCommentData(ctx, data)
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -968,6 +994,8 @@ func (this *Comment) flat(ctx *gin.Context) {
 		data = list
 		this.setCache(ctx, cacheName, data)
 	}
+
+	data = this.maskCommentData(ctx, data)
 
 	if !utils.Is.Empty(data) {
 		code = 200

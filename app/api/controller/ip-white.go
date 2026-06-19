@@ -70,6 +70,37 @@ func (this *IpWhite) processFieldValue(val any) any {
 	return val
 }
 
+func (this *IpWhite) maskIPData(data any) any {
+	if data == nil {
+		return nil
+	}
+	switch v := data.(type) {
+	case map[string]any:
+		if ip, ok := v["ip"]; ok {
+			v["ip"] = facade.Comm.MaskIP(cast.ToString(ip))
+		}
+		return v
+	case []map[string]any:
+		for i, item := range v {
+			if ip, ok := item["ip"]; ok {
+				v[i]["ip"] = facade.Comm.MaskIP(cast.ToString(ip))
+			}
+		}
+		return v
+	case []any:
+		for i, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				if ip, ok2 := m["ip"]; ok2 {
+					m["ip"] = facade.Comm.MaskIP(cast.ToString(ip))
+				}
+				v[i] = m
+			}
+		}
+		return v
+	}
+	return data
+}
+
 func (this *IpWhite) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
 	msg := []string{"无数据！", ""}
 	var data any
@@ -220,7 +251,7 @@ func (this *IpWhite) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
 func (this *IpWhite) all(ctx *gin.Context) {
@@ -258,7 +289,7 @@ func (this *IpWhite) all(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{
-		"data":  data,
+		"data":  this.maskIPData(data),
 		"count": count,
 		"page":  math.Ceil(float64(count) / float64(limit)),
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
@@ -289,7 +320,7 @@ func (this *IpWhite) rand(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
+	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, "好的！"), 200)
 }
 
 func (this *IpWhite) save(ctx *gin.Context) {
@@ -440,7 +471,7 @@ func (this *IpWhite) column(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
 func (this *IpWhite) remove(ctx *gin.Context) {

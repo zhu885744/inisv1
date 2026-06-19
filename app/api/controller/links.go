@@ -410,7 +410,7 @@ func (this *Links) cacheLinksStatus(items []any, statusMap map[int]map[string]an
 			}
 		}
 	}
-	facade.Cache.Set("links_status_cache", cachedStatus, 300)
+	facade.Cache.Set("links_status_cache", cachedStatus, 86400)
 }
 
 func (this *Links) updateLinksStatusCache(items []any) {
