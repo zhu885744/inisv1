@@ -53,7 +53,6 @@ func initApp() {
 
 }
 
-
 // WatchConfigChange - 监听配置文件变化（导出函数，供包内其他文件使用）
 func WatchConfigChange(config *utils.ViperResponse, callback func()) {
 	if config == nil || config.Viper == nil {
