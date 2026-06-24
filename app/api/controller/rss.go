@@ -17,17 +17,7 @@ type Rss struct {
 }
 
 func (this *Rss) IGET(ctx *gin.Context) {
-	method := strings.ToLower(ctx.Param("method"))
-
-	allow := map[string]any{
-		"index": this.index,
-	}
-	err := this.call(allow, method, ctx)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
-		return
-	}
+	this.json(ctx, nil, facade.Lang(ctx, "不支持此请求路径，请使用 /api/rss"), 405)
 }
 
 func (this *Rss) IPOST(ctx *gin.Context) {

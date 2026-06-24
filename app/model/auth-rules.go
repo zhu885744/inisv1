@@ -432,7 +432,6 @@ func createAuthRules() (result []AuthRules) {
 		"rss": {
 			"GET": {
 				"path=&type=common&name=RSS订阅源",
-				"path=index&type=common&name=RSS订阅源",
 			},
 		},
 	}
