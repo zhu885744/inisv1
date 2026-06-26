@@ -113,15 +113,17 @@ func (this *EXP) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":    this.one,
-		"all":    this.all,
-		"sum":    this.sum,
-		"min":    this.min,
-		"max":    this.max,
-		"rand":   this.rand,
-		"count":  this.count,
-		"column": this.column,
-		"active": this.active,
+		"one":             this.one,
+		"all":             this.all,
+		"sum":             this.sum,
+		"min":             this.min,
+		"max":             this.max,
+		"rand":            this.rand,
+		"count":           this.count,
+		"column":          this.column,
+		"active":          this.active,
+		"check-in-status": this.checkInStatus,
+		"check-in-rank":   this.checkInRank,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -571,6 +573,126 @@ func (this *EXP) restore(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
+}
+
+func (this *EXP) checkInStatus(ctx *gin.Context) {
+	user := this.user(ctx)
+	if user.Id == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	checked := facade.DB.Model(&model.EXP{}).Where([]any{
+		[]any{"uid", "=", user.Id},
+		[]any{"type", "=", "check-in"},
+		[]any{"create_time", ">=", today.Unix()},
+	}).Exist()
+
+	var value int
+	var checkInTime int64
+
+	if checked {
+		item := facade.DB.Model(&model.EXP{}).Where([]any{
+			[]any{"uid", "=", user.Id},
+			[]any{"type", "=", "check-in"},
+			[]any{"create_time", ">=", today.Unix()},
+		}).Order("create_time desc").Find()
+		value = cast.ToInt(item["value"])
+		checkInTime = cast.ToInt64(item["create_time"])
+	}
+
+	streak := 0
+	if checked {
+		for i := 0; i < 365; i++ {
+			dayStart := today.AddDate(0, 0, -i)
+			dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
+			has := facade.DB.Model(&model.EXP{}).Where([]any{
+				[]any{"uid", "=", user.Id},
+				[]any{"type", "=", "check-in"},
+				[]any{"create_time", ">=", dayStart.Unix()},
+				[]any{"create_time", "<=", dayEnd.Unix()},
+			}).Exist()
+			if has {
+				streak++
+			} else {
+				break
+			}
+		}
+	}
+
+	this.json(ctx, gin.H{
+		"checked":       checked,
+		"value":         value,
+		"check_in_time": checkInTime,
+		"streak":        streak,
+		"today":         today.Unix(),
+	}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+func (this *EXP) checkInRank(ctx *gin.Context) {
+	code := 204
+	msg := []string{"无数据！", ""}
+	var data any
+
+	params := this.params(ctx)
+
+	now := time.Now()
+	year, month, _ := now.Date()
+	start := time.Date(year, month, 1, 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+
+	if !utils.Is.Empty(params["start"]) {
+		start = time.Unix(cast.ToInt64(params["start"]), 0)
+	}
+	if !utils.Is.Empty(params["end"]) {
+		end = time.Unix(cast.ToInt64(params["end"]), 0)
+	}
+
+	var table []model.EXP
+
+	sql := "SELECT uid, COUNT(id) as check_in_count, SUM(value) AS total_exp FROM inis_exp WHERE type = 'check-in' AND create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY check_in_count DESC, total_exp DESC LIMIT ?"
+	total := facade.DB.Model(&table).Query(sql, start.Unix(), end.Unix(), this.meta.limit(ctx)).Column("uid", "check_in_count", "total_exp")
+	list := cast.ToSlice(total)
+
+	cacheName := this.cache.name(ctx)
+	if cached, ok := this.getFromCache(ctx, cacheName); ok {
+		msg[1] = "（来自缓存）"
+		data = cached
+	} else {
+		result := make([]any, len(list))
+
+		wg := sync.WaitGroup{}
+
+		for key, val := range list {
+			wg.Add(1)
+			go func(key int, val any) {
+				defer wg.Done()
+				value := cast.ToStringMap(val)
+				field := []string{"id", "nickname", "avatar", "description", "title", "gender", "result"}
+				author := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
+				item := facade.Comm.WithField(author, field)
+				item["check_in_count"] = cast.ToInt(value["check_in_count"])
+				item["total_exp"] = cast.ToInt(value["total_exp"])
+				item["rank"] = key + 1
+				result[key] = item
+			}(key, val)
+		}
+
+		wg.Wait()
+
+		data = result
+		this.setCache(ctx, cacheName, data)
+	}
+
+	if !utils.Is.Empty(data) {
+		code = 200
+		msg[0] = "数据请求成功！"
+	}
+
+	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
 func (this *EXP) checkIn(ctx *gin.Context) {
