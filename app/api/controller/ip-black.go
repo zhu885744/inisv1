@@ -70,9 +70,9 @@ func (this *IpBlack) processFieldValue(val any) any {
 	return val
 }
 
-func (this *IpBlack) maskIPData(data any) any {
-	if data == nil {
-		return nil
+func (this *IpBlack) maskIPData(ctx *gin.Context, data any) any {
+	if data == nil || this.meta.root(ctx) {
+		return data
 	}
 	switch v := data.(type) {
 	case map[string]any:
@@ -251,7 +251,7 @@ func (this *IpBlack) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, this.maskIPData(ctx, data), facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
 func (this *IpBlack) all(ctx *gin.Context) {
@@ -289,7 +289,7 @@ func (this *IpBlack) all(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{
-		"data":  this.maskIPData(data),
+		"data":  this.maskIPData(ctx, data),
 		"count": count,
 		"page":  math.Ceil(float64(count) / float64(limit)),
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
@@ -320,7 +320,7 @@ func (this *IpBlack) rand(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, "好的！"), 200)
+	this.json(ctx, this.maskIPData(ctx, data), facade.Lang(ctx, "好的！"), 200)
 }
 
 func (this *IpBlack) save(ctx *gin.Context) {
@@ -606,7 +606,7 @@ func (this *IpBlack) column(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	this.json(ctx, this.maskIPData(data), facade.Lang(ctx, strings.Join(msg, "")), code)
+	this.json(ctx, this.maskIPData(ctx, data), facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
 func (this *IpBlack) remove(ctx *gin.Context) {
