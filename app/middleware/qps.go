@@ -31,11 +31,16 @@ var QoSGlobal = make(map[string]*rate.Limiter)
 // qpsMutex - 互斥锁
 var qpsMutex = &sync.Mutex{}
 
+// qpsOnce - 确保后台协程只启动一次
+var qpsOnce = &sync.Once{}
+
 // QpsPoint - 单接口限流器
 func QpsPoint() gin.HandlerFunc {
-	go qpsDelete()
-	go qpsReset()
-	go qpsAutoUnban() // 启动自动解封协程
+	qpsOnce.Do(func() {
+		go qpsDelete()
+		go qpsReset()
+		go qpsAutoUnban()
+	})
 
 	return func(ctx *gin.Context) {
 		var config map[string]any
@@ -167,7 +172,10 @@ func qpsReset() {
 func qpsAutoUnban() {
 	ticker := time.NewTicker(5 * time.Minute)
 	for range ticker.C {
-		// 查询所有已过期且非永久封禁的IP
+		if facade.DB == nil {
+			continue
+		}
+
 		var expiredIPs []model.IpBlack
 		now := time.Now().Unix()
 		facade.DB.Model(&model.IpBlack{}).
@@ -177,7 +185,6 @@ func qpsAutoUnban() {
 			Scan(&expiredIPs)
 
 		for _, ipBlack := range expiredIPs {
-			// 软删除过期记录
 			facade.DB.Model(&model.IpBlack{}).Where("id", ipBlack.Id).Delete(&model.IpBlack{})
 			facade.Log.Info(map[string]any{
 				"ip":     ipBlack.Ip,
@@ -185,7 +192,6 @@ func qpsAutoUnban() {
 			}, "IP自动解封")
 		}
 
-		// 清除缓存
 		cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 		if cacheState {
 			facade.Cache.Del("[GET][ip-black][column]")

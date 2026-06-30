@@ -983,13 +983,11 @@ func (this *ModelStruct) Save(data ...any) (tx *gorm.DB) {
 		return this.model
 	}
 
-	// 查询是否存在 - 存在则更新，不存在则创建
 	tx = this.model.First(&this.dest)
 	if tx.Error != nil {
-		return NewDB(DBModeMySql).Model(&this.dest).Create(data[0])
+		return this.model.Session(&gorm.Session{}).Create(data[0])
 	}
 
-	// 更新
 	return this.model.Updates(data[0])
 }
 

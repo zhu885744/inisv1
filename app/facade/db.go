@@ -203,8 +203,10 @@ func initDBToml() {
 // InitDB - 初始化数据库
 func InitDB() {
 
-	MySQL = &MySqlStruct{}
-	MySQL.init()
+	newMySQL := &MySqlStruct{}
+	newMySQL.init()
+
+	MySQL = newMySQL
 
 	switch cast.ToString(DBToml.Get("default")) {
 	case "mysql":

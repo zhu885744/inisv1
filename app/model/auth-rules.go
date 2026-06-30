@@ -540,6 +540,15 @@ func createAuthRules() (result []AuthRules) {
 
 // saveAuthRules 保存权限规则
 func saveAuthRules(item AuthRules) {
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{
+				"error": err,
+				"route": item.Route,
+				"name":  item.Name,
+			}, "保存权限规则时发生panic")
+		}
+	}()
 
 	method := strings.ToUpper(cast.ToString(item.Method))
 	hash := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, item.Route))

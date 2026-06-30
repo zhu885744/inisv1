@@ -11,6 +11,9 @@ set "p4_goos=windows"&set "p4_goarch=arm64"&set "p4_out=inis_windows_arm64.exe"&
 set "p5_goos=darwin"&set "p5_goarch=amd64"&set "p5_out=inis_darwin_amd64"&set "p5_desc=macOS x86_64 (Intel)"
 set "p6_goos=darwin"&set "p6_goarch=arm64"&set "p6_out=inis_darwin_arm64"&set "p6_desc=macOS M1/M2"
 
+:: 平台总数
+set "PLATFORM_COUNT=6"
+
 :: 默认输出目录
 set "DEFAULT_OUTPUT_DIR=./dist"
 :: UPX压缩默认等级
@@ -27,15 +30,16 @@ echo 3 - %p3_desc%
 echo 4 - %p4_desc%
 echo 5 - %p5_desc%
 echo 6 - %p6_desc%
+echo 7 - 所有平台（批量编译）
 echo.
 
 :: ======================== 输入选择（极简校验） ========================
 set "sel="
 :input_loop
-set /p "sel=请输入平台编号（1-6）："
+set /p "sel=请输入平台编号（1-7）："
 if "!sel!"=="" goto input_loop
 if !sel! lss 1 goto input_loop
-if !sel! gtr 6 goto input_loop
+if !sel! gtr 7 goto input_loop
 goto input_ok
 :input_ok
 
@@ -98,7 +102,7 @@ if errorlevel 1 (
 echo.
 
 :: ======================== 环境检查 ========================
-echo [1/3] 检查Go环境...
+echo [检查] Go环境...
 go version > nul 2>&1
 if errorlevel 1 (
     echo [错误] 未安装Go环境！
@@ -108,103 +112,173 @@ if errorlevel 1 (
 echo [成功] Go环境正常
 echo.
 
-echo [2/3] 下载依赖...
+echo [下载] 依赖...
 go mod tidy > nul 2>&1
 echo [成功] 依赖下载完成
 echo.
 
-:: ======================== 核心编译（修复无效参数） ========================
-echo [3/3] 开始编译...
-set "goos=!p%sel%_goos!"
-set "goarch=!p%sel%_goarch!"
-set "out=!p%sel%_out!"
-set "desc=!p%sel%_desc!"
-set "output_file=!OUTPUT_DIR!\!out!"
-
-echo 编译目标：!desc!
-set CGO_ENABLED=0
-:: 移除无效的 asmflags 和 gcflags 非法参数，保留安全的优化参数
-go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
-
-if errorlevel 1 (
-    echo [失败] 编译失败！
-    pause
-    exit /b 1
-) else (
-    echo [成功] 编译完成：!output_file!
-)
-
-:: ======================== 显示编译后文件大小 ========================
-for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
-    set "size_before=%%f"
-    :: 转换单位
-    if !size_before! gtr 1048576 (
-        set /a "size_mb=!size_before! / 1048576"
-        set /a "size_mb_remain=!size_before! %% 1048576"
-        set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
-        if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
-        echo [信息] 压缩前文件大小：!size_mb!.!size_mb_decimal! MB
-    ) else if !size_before! gtr 1024 (
-        set /a "size_kb=!size_before! / 1024"
-        set /a "size_kb_remain=!size_before! %% 1024"
-        set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
-        if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
-        echo [信息] 压缩前文件大小：!size_kb!.!size_kb_decimal! KB
-    ) else (
-        echo [信息] 压缩前文件大小：!size_before! 字节
-    )
-)
-
-:: ======================== UPX压缩（新增跳过逻辑） ========================
-:: 多条件判断：UPX启用 + 未选择跳过 + 非macOS平台
-if "!COMPRESS_ENABLE!"=="true" (
-    if "!SKIP_COMPRESS!"=="false" (
-        if not "!goos!"=="darwin" (
-            echo.
-            echo [开始] UPX压缩（等级：!COMPRESS_LEVEL!）...
-            upx -!COMPRESS_LEVEL! --best --lzma --strip-relocs=0 --compress-exports=0 --compress-icons=0 "!output_file!" > nul 2>&1
-            if errorlevel 1 (
-                echo [警告] 压缩失败！
-            ) else (
-                echo [成功] 压缩完成：!output_file!
-                :: 显示压缩后文件大小
-                for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
-                    set "size_after=%%f"
-                    :: 计算压缩率
-                    set /a "compress_rate=(!size_before! - !size_after!) * 100 / !size_before!"
-                    :: 转换单位
-                    if !size_after! gtr 1048576 (
-                        set /a "size_mb=!size_after! / 1048576"
-                        set /a "size_mb_remain=!size_after! %% 1048576"
-                        set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
-                        if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
-                        echo [信息] 压缩后文件大小：!size_mb!.!size_mb_decimal! MB（压缩率：!compress_rate!%%）
-                    ) else if !size_after! gtr 1024 (
-                        set /a "size_kb=!size_after! / 1024"
-                        set /a "size_kb_remain=!size_after! %% 1024"
-                        set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
-                        if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
-                        echo [信息] 压缩后文件大小：!size_kb!.!size_kb_decimal! KB（压缩率：!compress_rate!%%）
+:: ======================== 编译逻辑 ========================
+if "!sel!"=="7" (
+    :: ======================== 批量编译所有平台 ========================
+    echo ======================== 开始批量编译所有平台 ========================
+    echo.
+    
+    set "total_success=0"
+    set "total_fail=0"
+    
+    for /l %%i in (1,1,!PLATFORM_COUNT!) do (
+        set "goos=!p%%i_goos!"
+        set "goarch=!p%%i_goarch!"
+        set "out=!p%%i_out!"
+        set "desc=!p%%i_desc!"
+        set "output_file=!OUTPUT_DIR!\!out!"
+        
+        echo [%%i/!PLATFORM_COUNT!] 正在编译：!desc!
+        set CGO_ENABLED=0
+        go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
+        
+        if errorlevel 1 (
+            echo [失败] 编译失败：!desc!
+            set /a total_fail+=1
+        ) else (
+            echo [成功] 编译完成：!output_file!
+            set /a total_success+=1
+            
+            :: 获取文件大小
+            for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
+                set "size_before=%%f"
+                if !size_before! gtr 1048576 (
+                    set /a "size_mb=!size_before! / 1048576"
+                    set /a "size_mb_remain=!size_before! %% 1048576"
+                    set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
+                    if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
+                    echo [信息] 压缩前大小：!size_mb!.!size_mb_decimal! MB
+                ) else if !size_before! gtr 1024 (
+                    set /a "size_kb=!size_before! / 1024"
+                    echo [信息] 压缩前大小：!size_kb! KB
+                ) else (
+                    echo [信息] 压缩前大小：!size_before! 字节
+                )
+            )
+            
+            :: UPX压缩
+            if "!COMPRESS_ENABLE!"=="true" (
+                if "!SKIP_COMPRESS!"=="false" (
+                    if not "!goos!"=="darwin" (
+                        echo [压缩] 正在压缩...
+                        upx -!COMPRESS_LEVEL! --best --lzma --strip-relocs=0 --compress-exports=0 --compress-icons=0 "!output_file!" > nul 2>&1
+                        if errorlevel 1 (
+                            echo [警告] 压缩失败！
+                        ) else (
+                            echo [成功] 压缩完成！
+                        )
                     ) else (
-                        echo [信息] 压缩后文件大小：!size_after! 字节（压缩率：!compress_rate!%%）
+                        echo [跳过] macOS平台跳过压缩
                     )
                 )
             )
-        ) else (
-            :: 仅当是macOS平台时才提示
-            echo.
-            echo [提示] macOS平台跳过UPX压缩（避免程序运行异常）。
         )
-    ) else (
         echo.
-        echo [信息] 已手动跳过UPX压缩步骤
+    )
+    
+    :: 总结
+    echo ======================== 批量编译完成 ========================
+    echo [统计] 成功：!total_success! 个，失败：!total_fail! 个
+    echo [目录] 所有文件位于：!OUTPUT_DIR!
+    
+) else (
+    :: ======================== 单平台编译 ========================
+    echo [编译] 开始编译...
+    set "goos=!p%sel%_goos!"
+    set "goarch=!p%sel%_goarch!"
+    set "out=!p%sel%_out!"
+    set "desc=!p%sel%_desc!"
+    set "output_file=!OUTPUT_DIR!\!out!"
+
+    echo 编译目标：!desc!
+    set CGO_ENABLED=0
+    go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
+
+    if errorlevel 1 (
+        echo [失败] 编译失败！
+        pause
+        exit /b 1
+    ) else (
+        echo [成功] 编译完成：!output_file!
+    )
+
+    :: 显示编译后文件大小
+    for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
+        set "size_before=%%f"
+        if !size_before! gtr 1048576 (
+            set /a "size_mb=!size_before! / 1048576"
+            set /a "size_mb_remain=!size_before! %% 1048576"
+            set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
+            if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
+            echo [信息] 压缩前文件大小：!size_mb!.!size_mb_decimal! MB
+        ) else if !size_before! gtr 1024 (
+            set /a "size_kb=!size_before! / 1024"
+            set /a "size_kb_remain=!size_before! %% 1024"
+            set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
+            if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
+            echo [信息] 压缩前文件大小：!size_kb!.!size_kb_decimal! KB
+        ) else (
+            echo [信息] 压缩前文件大小：!size_before! 字节
+        )
+    )
+
+    :: UPX压缩
+    if "!COMPRESS_ENABLE!"=="true" (
+        if "!SKIP_COMPRESS!"=="false" (
+            if not "!goos!"=="darwin" (
+                echo.
+                echo [开始] UPX压缩（等级：!COMPRESS_LEVEL!）...
+                upx -!COMPRESS_LEVEL! --best --lzma --strip-relocs=0 --compress-exports=0 --compress-icons=0 "!output_file!" > nul 2>&1
+                if errorlevel 1 (
+                    echo [警告] 压缩失败！
+                ) else (
+                    echo [成功] 压缩完成：!output_file!
+                    :: 显示压缩后文件大小
+                    for /f "tokens=3" %%f in ('dir /-c "!output_file!" ^| findstr /i "!out!"') do (
+                        set "size_after=%%f"
+                        :: 计算压缩率
+                        set /a "compress_rate=(!size_before! - !size_after!) * 100 / !size_before!"
+                        if !size_after! gtr 1048576 (
+                            set /a "size_mb=!size_after! / 1048576"
+                            set /a "size_mb_remain=!size_after! %% 1048576"
+                            set /a "size_mb_decimal=!size_mb_remain! * 100 / 1048576"
+                            if !size_mb_decimal! lss 10 set "size_mb_decimal=0!size_mb_decimal!"
+                            echo [信息] 压缩后文件大小：!size_mb!.!size_mb_decimal! MB（压缩率：!compress_rate!%%）
+                        ) else if !size_after! gtr 1024 (
+                            set /a "size_kb=!size_after! / 1024"
+                            set /a "size_kb_remain=!size_after! %% 1024"
+                            set /a "size_kb_decimal=!size_kb_remain! * 100 / 1024"
+                            if !size_kb_decimal! lss 10 set "size_kb_decimal=0!size_kb_decimal!"
+                            echo [信息] 压缩后文件大小：!size_kb!.!size_kb_decimal! KB（压缩率：!compress_rate!%%）
+                        ) else (
+                            echo [信息] 压缩后文件大小：!size_after! 字节（压缩率：!compress_rate!%%）
+                        )
+                    )
+                )
+            ) else (
+                echo.
+                echo [提示] macOS平台跳过UPX压缩（避免程序运行异常）。
+            )
+        ) else (
+            echo.
+            echo [信息] 已手动跳过UPX压缩步骤
+        )
     )
 )
 
 :: ======================== 完成 ========================
 echo.
 echo ======================== 操作完成 ========================
-echo [成功] 最终文件：!output_file!
+if "!sel!"=="7" (
+    echo [成功] 已编译所有平台，文件位于：!OUTPUT_DIR!
+) else (
+    echo [成功] 最终文件：!output_file!
+)
 echo 按任意键退出...
 pause > nul
 exit /b 0
