@@ -5,6 +5,7 @@ import (
 	"inis/app/facade"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -60,10 +61,18 @@ func InitAuthRules() {
 		return
 	}
 
+	wg := sync.WaitGroup{}
+
 	// 动态生成规则
 	for _, item := range createAuthRules() {
-		go saveAuthRules(item)
+		wg.Add(1)
+		go func(item AuthRules, wg *sync.WaitGroup) {
+			defer wg.Done()
+			saveAuthRules(item)
+		}(item, &wg)
 	}
+
+	wg.Wait()
 }
 
 // createAuthRules - 生成规则
@@ -436,6 +445,23 @@ func createAuthRules() (result []AuthRules) {
 				"path=&type=common&name=RSS订阅源",
 			},
 		},
+		"moments": {
+			"GET": {
+				"path=one&type=common",
+				"path=all&type=common",
+				"path=sum&type=common",
+				"path=min&type=common",
+				"path=max&type=common",
+				"path=rand&type=common",
+				"path=count&type=common",
+				"path=column&type=common",
+				"path=comment&type=common",
+				"path=comment_count&type=common",
+			},
+			"PUT":    {"update", "restore"},
+			"POST":   {"save", "create"},
+			"DELETE": {"remove", "delete", "clear"},
+		},
 	}
 
 	// 接口名称
@@ -468,6 +494,7 @@ func createAuthRules() (result []AuthRules) {
 		"article-group": "【文章分类 API】",
 		"search":        "【搜索 API】",
 		"rss":           "【RSS订阅 API】",
+		"moments":       "【动态 API】",
 	}
 
 	// 基础方法
@@ -562,15 +589,11 @@ func saveAuthRules(item AuthRules) {
 		Route:  cast.ToString(item.Route),
 	}
 
-	// 查询条件
-	query := facade.DB.Model(&item).Where("hash", hash)
-
-	// 如果存在，就不要再添加了
-	if exist := query.Exist(); exist {
+	if exist := facade.DB.Model(&AuthRules{}).Where("hash", hash).Exist(); exist {
 		return
 	}
 
-	tx := query.Save(&table)
+	tx := facade.DB.Model(&AuthRules{}).Create(&table)
 	if tx.Error != nil {
 		if strings.Contains(tx.Error.Error(), "已存在") {
 			return

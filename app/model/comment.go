@@ -52,17 +52,19 @@ func (this *Comment) AfterFind(tx *gorm.DB) (err error) {
 // syncResult - 同步返回结果
 func (this *Comment) syncResult() (result map[string]any) {
 
-	var page, author, article any
+	var page, author, article, moments any
 
 	// 同步调用，避免协程开销
 	this.pageSync(&page)
 	this.authorSync(&author)
 	this.articleSync(&article)
+	this.momentsSync(&moments)
 
 	return map[string]any{
 		"page":    page,
 		"author":  author,
 		"article": article,
+		"moments": moments,
 	}
 }
 
@@ -89,6 +91,15 @@ func (this *Comment) pageSync(result *any) {
 	}
 
 	*result = utils.Map.WithField(facade.DB.Model(&Pages{}).Find(this.BindId), []string{"id", "key", "title"})
+}
+
+// momentsSync - 同步解析动态信息
+func (this *Comment) momentsSync(result *any) {
+	if this.BindType != "moments" {
+		return
+	}
+
+	*result = utils.Map.WithField(facade.DB.Model(&Moments{}).Find(this.BindId), []string{"id", "content"})
 }
 
 // author - 解析作者信息（保留原有方法，兼容可能的其他调用）

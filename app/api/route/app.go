@@ -51,6 +51,7 @@ var controllers = map[string]controller.ApiInterface{
 	"article-group": &controller.ArticleGroup{},
 	"search":        &controller.Search{},
 	"rss":           &controller.Rss{},
+	"moments":       &controller.Moments{},
 }
 
 // registerRoutes 注册路由

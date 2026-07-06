@@ -720,7 +720,7 @@ func (this *EXP) share(ctx *gin.Context) {
 		"bind_type": "article",
 	})
 
-	allow := []any{"article", "page"}
+	allow := []any{"article", "page", "moments"}
 
 	if !utils.In.Array(params["bind_type"], allow) {
 		this.json(ctx, nil, facade.Lang(ctx, "不存在的分享类型！"), 400)
@@ -747,6 +747,11 @@ func (this *EXP) share(ctx *gin.Context) {
 	case "page":
 		if exist := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist(); !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
+			return
+		}
+	case "moments":
+		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
 	}
@@ -778,7 +783,7 @@ func (this *EXP) collect(ctx *gin.Context) {
 		return
 	}
 
-	allow := []any{"article", "page"}
+	allow := []any{"article", "page", "moments"}
 
 	if !utils.In.Array(params["bind_type"], allow) {
 		this.json(ctx, nil, facade.Lang(ctx, "不存在的收藏类型！"), 400)
@@ -805,6 +810,11 @@ func (this *EXP) collect(ctx *gin.Context) {
 	case "page":
 		if exist := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist(); !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
+			return
+		}
+	case "moments":
+		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
 	}
@@ -878,7 +888,7 @@ func (this *EXP) like(ctx *gin.Context) {
 		return
 	}
 
-	allow := []any{"article", "page", "comment"}
+	allow := []any{"article", "page", "comment", "moments"}
 
 	if !utils.In.Array(params["bind_type"], allow) {
 		this.json(ctx, nil, facade.Lang(ctx, "不存在的点赞类型！"), 400)
@@ -910,6 +920,11 @@ func (this *EXP) like(ctx *gin.Context) {
 	case "comment":
 		if exist := facade.DB.Model(&model.Comment{}).Where("id", params["bind_id"]).Exist(); !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的评论！"), 400)
+			return
+		}
+	case "moments":
+		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
 	}

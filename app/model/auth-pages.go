@@ -43,7 +43,7 @@ func (this *AuthPages) AfterFind(tx *gorm.DB) (err error) {
 func (this *AuthPages) BeforeCreate(tx *gorm.DB) (err error) {
 
 	// 检查 hash 是否存在
-	if exist := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
+	if exist := facade.DB.Model(&AuthPages{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
 		return fmt.Errorf("hash: %s 已存在", this.Hash)
 	}
 
@@ -82,11 +82,11 @@ func InitAuthPages() {
 		{Name: "IP白名单", Icon: "white", Path: "/admin/ip/white", Size: "14px"},
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
 		{Name: "后台页面管理", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
+		{Name: "动态管理", Icon: "article", Path: "/admin/moments", Size: "14px"},
 	}
 
 	wg := sync.WaitGroup{}
 
-	// 检查规则是否存在，不存在则添加
 	for _, item := range pages {
 		wg.Add(1)
 		go func(item AuthPages, wg *sync.WaitGroup) {
@@ -94,14 +94,11 @@ func InitAuthPages() {
 
 			hash := utils.Hash.Sum32(item.Path)
 
-			tx := facade.DB.Model(&item).Where("hash", hash)
-
-			// 如果存在，就不要再添加了
-			if exist := tx.Exist(); exist {
+			if exist := facade.DB.Model(&AuthPages{}).Where("hash", hash).Exist(); exist {
 				return
 			}
 
-			res := tx.Save(&AuthPages{
+			res := facade.DB.Model(&AuthPages{}).Create(&AuthPages{
 				Hash: hash,
 				Name: cast.ToString(item.Name),
 				Path: cast.ToString(item.Path),

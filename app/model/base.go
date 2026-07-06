@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"inis/app/facade"
 
+	"time"
+
 	"github.com/jasonlvhit/gocron"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"time"
 )
 
 // 公共常量
@@ -54,6 +55,7 @@ func InitTable() {
 		{"IpBlack", InitIpBlack},
 		{"IpWhite", InitIpWhite},
 		{"Upgrade", InitUpgrade},
+		{"Moments", InitMoments},
 	}
 
 	for _, item := range allow {
@@ -86,6 +88,11 @@ func init() {
 		return
 	}
 	gocron.Start()
+
+	facade.WatchDB(true)
+	if cast.ToBool(facade.NewToml(facade.TomlDb).Get("mysql.migrate")) {
+		go InitTable()
+	}
 }
 
 // DomainTemp1 - 域名模板替换（查询时）

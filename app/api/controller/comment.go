@@ -419,6 +419,13 @@ func (this *Comment) create(ctx *gin.Context) {
 			return
 		}
 		comment = cast.ToStringMap(cast.ToStringMap(page["json"])["comment"])
+	case "moments":
+		moments := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Find()
+		if utils.Is.Empty(moments) {
+			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
+			return
+		}
+		comment = this.config("moments", "comment")
 	default:
 		comment = this.config("comment")
 	}
@@ -1017,6 +1024,8 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 	if len(key) > 0 && cast.ToString(key[0]) == "comment" {
 		configKey = "COMMENT"
 		isCommentConfig = true
+	} else if len(key) > 0 && cast.ToString(key[0]) == "moments" {
+		configKey = "MOMENTS"
 	}
 
 	cacheName := "config[" + configKey + "]"
@@ -1040,6 +1049,10 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 
 	if isCommentConfig {
 		return cast.ToStringMap(config["json"])
+	}
+
+	if len(key) > 1 {
+		return cast.ToStringMap(cast.ToStringMap(config["json"])[cast.ToString(key[1])])
 	}
 
 	if len(key) > 0 {

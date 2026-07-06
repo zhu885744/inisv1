@@ -52,7 +52,11 @@ func InitConfig() {
 		{Key: "ARTICLE", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 		}), Remark: "主题配置"},
+		{Key: "MOMENTS", Json: utils.Json.Encode(facade.H{
+			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
+		}), Remark: "动态配置"},
 		{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
+			"allow":            1,
 			"rate_limit":       facade.H{"enabled": 1, "max_count": 5, "time_window": 60},
 			"max_length":       500,
 			"require_chinese":  1,
