@@ -174,6 +174,11 @@ func (this *Article) one(ctx *gin.Context) {
 	} else {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
+
+		if !this.meta.root(ctx) {
+			query = query.Where("audit", 1)
+		}
+
 		item := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
@@ -209,6 +214,11 @@ func (this *Article) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
+
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", 1)
+	}
+
 	count := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
@@ -245,9 +255,13 @@ func (this *Article) rand(ctx *gin.Context) {
 		query = query.Where("id", "NOT IN", except)
 	}
 
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", 1)
+	}
+
 	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
 
-	mold := facade.DB.Model(&[]model.Article{}).Where("id", "IN", ids).WithoutField("content")
+	mold := facade.DB.Model(&[]model.Article{}).Where("id", "IN", ids)
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
@@ -492,6 +506,10 @@ func (this *Article) column(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.withTrashOptions(facade.DB.Model(&[]model.Article{}), params)
 	query = this.buildQuery(query, params).Order(params["order"])
+
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", 1)
+	}
 
 	ids := utils.Unity.Keys(params["ids"])
 	if !utils.Is.Empty(ids) {

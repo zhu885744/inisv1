@@ -227,9 +227,13 @@ func (this *Pages) one(ctx *gin.Context) {
 	} else {
 		mold := this.withTrashOptions(facade.DB.Model(&table), params)
 		mold = this.buildQuery(mold, params)
+
+		if !this.meta.root(ctx) {
+			mold = mold.Where("audit", 1)
+		}
+
 		item := mold.Where(table).Find()
 
-		// 排除字段
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -280,8 +284,13 @@ func (this *Pages) all(ctx *gin.Context) {
 	page := cast.ToInt(params["page"])
 	limit := this.meta.limit(ctx)
 	var result []model.Pages
-	mold := this.withTrashOptions(facade.DB.Model(&result).WithoutField("content"), params)
+	mold := this.withTrashOptions(facade.DB.Model(&result), params)
 	mold = this.buildQuery(mold, params)
+
+	if !this.meta.root(ctx) {
+		mold = mold.Where("audit", 1)
+	}
+
 	count := mold.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
@@ -319,9 +328,13 @@ func (this *Pages) rand(ctx *gin.Context) {
 		item = item.Where("id", "NOT IN", except)
 	}
 
+	if !this.meta.root(ctx) {
+		item = item.Where("audit", 1)
+	}
+
 	ids := utils.Rand.Slice(utils.Unity.Ids(item.Column("id")), limit)
 
-	mold := facade.DB.Model(&[]model.Pages{}).Where("id", "IN", ids).WithoutField("content")
+	mold := facade.DB.Model(&[]model.Pages{}).Where("id", "IN", ids)
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
@@ -501,6 +514,10 @@ func (this *Pages) column(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.withTrashOptions(facade.DB.Model(&[]model.Pages{}), params)
 	query = this.buildQuery(query, params).Order(params["order"])
+
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", 1)
+	}
 
 	ids := utils.Unity.Keys(params["ids"])
 	if !utils.Is.Empty(ids) {
