@@ -125,6 +125,18 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 				"audit":       link.Audit,
 			})
 		}
+	case []model.Moments:
+		for _, moment := range v {
+			data = append(data, map[string]any{
+				"id":          moment.Id,
+				"content":     moment.Content,
+				"images":      moment.Images,
+				"location":    moment.Location,
+				"create_time": moment.CreateTime,
+				"audit":       moment.Audit,
+				"status":      moment.Status,
+			})
+		}
 	}
 
 	return map[string]interface{}{
@@ -146,6 +158,7 @@ func (this *Search) IGET(ctx *gin.Context) {
 		"tags":    this.tags,
 		"users":   this.users,
 		"links":   this.links,
+		"moments": this.moments,
 		"all":     this.all,
 	}
 	err := this.call(allow, method, ctx)
@@ -183,6 +196,7 @@ func (this *Search) INDEX(ctx *gin.Context) {
 			"tags":    "/api/search/tags?keyword=关键词",
 			"users":   "/api/search/users?keyword=关键词",
 			"links":   "/api/search/links?keyword=关键词",
+			"moments": "/api/search/moments?keyword=关键词",
 		},
 	}, facade.Lang(ctx, "搜索控制器首页"), 200)
 }
@@ -337,6 +351,36 @@ func (this *Search) links(ctx *gin.Context) {
 	this.json(ctx, result, facade.Lang(ctx, "搜索成功！"), 200)
 }
 
+// moments - 动态搜索
+func (this *Search) moments(ctx *gin.Context) {
+	// 获取请求参数
+	params := this.params(ctx, map[string]any{
+		"keyword": "",
+		"page":    1,
+		"limit":   10,
+	})
+
+	keyword := cast.ToString(params["keyword"])
+	if keyword == "" {
+		this.json(ctx, nil, facade.Lang(ctx, "搜索关键词不能为空！"), 400)
+		return
+	}
+
+	page := cast.ToInt(params["page"])
+	limit := cast.ToInt(params["limit"])
+
+	// 执行实际的动态搜索
+	result := this.searchMoments(keyword, page, limit)
+	result["keyword"] = keyword
+
+	// 如果没有搜索到结果，返回空数据
+	if result["count"] == int64(0) {
+		result["data"] = []map[string]any{}
+	}
+
+	this.json(ctx, result, facade.Lang(ctx, "搜索成功！"), 200)
+}
+
 // all - 全局搜索
 func (this *Search) all(ctx *gin.Context) {
 	// 获取请求参数
@@ -472,6 +516,28 @@ func (this *Search) searchLinks(keyword string, page, limit int) map[string]inte
 	return this.processSearchResult(links, count, limit, "links")
 }
 
+// searchMoments - 搜索动态
+func (this *Search) searchMoments(keyword string, page, limit int) map[string]interface{} {
+	searchTerm := "%" + keyword + "%"
+
+	// 使用数据库级别的 LIKE 查询，提高性能
+	db := facade.DB.Drive()
+
+	// 构建搜索查询 - 搜索内容、位置，只搜索审核通过的动态
+	var moments []model.Moments
+	query := db.Model(&moments).Where("(content LIKE ? OR location LIKE ?) AND audit = ?", searchTerm, searchTerm, 1)
+
+	// 统计总数
+	var count int64
+	query.Count(&count)
+
+	// 分页查询
+	offset := (page - 1) * limit
+	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&moments)
+
+	return this.processSearchResult(moments, count, limit, "moments")
+}
+
 // searchAll - 全局搜索
 func (this *Search) searchAll(keyword string, page, limit int) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
@@ -480,7 +546,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	db := facade.DB.Drive()
 
 	// 计算每个类型的 limit
-	perTypeLimit := limit / 5
+	perTypeLimit := limit / 6
 	if perTypeLimit < 1 {
 		perTypeLimit = 1
 	}
@@ -525,13 +591,22 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 	linksQuery.Limit(perTypeLimit).Order("create_time desc").Find(&links)
 	linksResult := this.processSearchResult(links, linksCount, perTypeLimit, "links")
 
+	// 搜索动态 - 只搜索审核通过的动态
+	var moments []model.Moments
+	momentsQuery := db.Model(&moments).Where("(content LIKE ? OR location LIKE ?) AND audit = ?", searchTerm, searchTerm, 1)
+	var momentsCount int64
+	momentsQuery.Count(&momentsCount)
+	momentsQuery.Limit(perTypeLimit).Order("create_time desc").Find(&moments)
+	momentsResult := this.processSearchResult(moments, momentsCount, perTypeLimit, "moments")
+
 	return map[string]interface{}{
 		"article": articleResult,
 		"pages":   pagesResult,
 		"tags":    tagsResult,
 		"users":   usersResult,
 		"links":   linksResult,
-		"total":   articleCount + pagesCount + tagsCount + usersCount + linksCount,
+		"moments": momentsResult,
+		"total":   articleCount + pagesCount + tagsCount + usersCount + linksCount + momentsCount,
 		"type":    "all",
 	}
 }

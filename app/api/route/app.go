@@ -36,7 +36,6 @@ var controllers = map[string]controller.ApiInterface{
 	"level":         &controller.Level{},
 	"banner":        &controller.Banner{},
 	"config":        &controller.Config{},
-	"upgrade":       &controller.Upgrade{},
 	"article":       &controller.Article{},
 	"comment":       &controller.Comment{},
 	"placard":       &controller.Placard{},
