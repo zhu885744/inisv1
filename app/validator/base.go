@@ -66,6 +66,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &IpWhite{}
 	case "qps-warn":
 		item = &QpsWarn{}
+	case "attachment":
+		item = &Attachment{}
 	default:
 		return errors.New("未知的验证器！")
 	}

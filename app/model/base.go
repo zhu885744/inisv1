@@ -55,6 +55,7 @@ func InitTable() {
 		{"IpBlack", InitIpBlack},
 		{"IpWhite", InitIpWhite},
 		{"Moments", InitMoments},
+		{"Attachment", InitAttachment},
 	}
 
 	for _, item := range allow {

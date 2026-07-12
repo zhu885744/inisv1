@@ -83,6 +83,7 @@ func InitAuthPages() {
 		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
 		{Name: "后台页面管理", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
 		{Name: "动态管理", Icon: "article", Path: "/admin/moments", Size: "14px"},
+		{Name: "附件管理", Icon: "file", Path: "/admin/attachment", Size: "14px"},
 	}
 
 	wg := sync.WaitGroup{}

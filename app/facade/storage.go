@@ -4,6 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/fsnotify/fsnotify"
 	"github.com/qiniu/go-sdk/v7/auth/qbox"
@@ -11,12 +19,6 @@ import (
 	"github.com/spf13/cast"
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/unti-io/go-utils/utils"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
 )
 
 func init() {
@@ -38,11 +40,11 @@ const (
 	// StorageModeLocal - 本地存储
 	StorageModeLocal = "local"
 	// StorageModeOSS - OSS存储
-	StorageModeOSS   = "oss"
+	StorageModeOSS = "oss"
 	// StorageModeCOS - COS存储
-	StorageModeCOS   = "cos"
+	StorageModeCOS = "cos"
 	// StorageModeKODO - KODO存储
-	StorageModeKODO  = "kodo"
+	StorageModeKODO = "kodo"
 )
 
 // NewStorage - 创建Storage实例
@@ -79,27 +81,27 @@ func initStorageToml() {
 		Mode: "toml",
 		Name: "storage",
 		Content: utils.Replace(TempStorage, map[string]any{
-			"${default}": "local",
-			"${local.domain}": "storage",
-			"${local.path}": "storage",
-			"${oss.access_key_id}": "",
+			"${default}":               "local",
+			"${local.domain}":          "storage",
+			"${local.path}":            "storage",
+			"${oss.access_key_id}":     "",
 			"${oss.access_key_secret}": "",
-			"${oss.endpoint}": "",
-			"${oss.bucket}": "inis-oss",
-			"${oss.domain}": "",
-			"${oss.path}": "inis",
-			"${cos.app_id}": "",
-			"${cos.secret_id}": "",
-			"${cos.secret_key}": "",
-			"${cos.bucket}": "inis-cos",
-			"${cos.region}": "ap-guangzhou",
-			"${cos.domain}": "",
-			"${cos.path}": "inis",
-			"${kodo.access_key}": "",
-			"${kodo.secret_key}": "",
-			"${kodo.bucket}": "inis-kodo",
-			"${kodo.region}": "z2",
-			"${kodo.domain}": "",
+			"${oss.endpoint}":          "",
+			"${oss.bucket}":            "inis-oss",
+			"${oss.domain}":            "",
+			"${oss.path}":              "inis",
+			"${cos.app_id}":            "",
+			"${cos.secret_id}":         "",
+			"${cos.secret_key}":        "",
+			"${cos.bucket}":            "inis-cos",
+			"${cos.region}":            "ap-guangzhou",
+			"${cos.domain}":            "",
+			"${cos.path}":              "inis",
+			"${kodo.access_key}":       "",
+			"${kodo.secret_key}":       "",
+			"${kodo.bucket}":           "inis-kodo",
+			"${kodo.region}":           "z2",
+			"${kodo.domain}":           "",
 		}),
 	}).Read()
 
@@ -170,6 +172,7 @@ type StorageResponse struct {
 
 type StorageInterface interface {
 	Upload(key string, reader io.Reader) *StorageResponse
+	Delete(key string) error
 	Path() string
 }
 
@@ -199,7 +202,7 @@ func (this *LocalStorageStruct) Upload(path string, reader io.Reader) (result *S
 
 // Path - 本地存储位置 - 生成文件路径
 func (this *LocalStorageStruct) Path() string {
-	// 生成年月日目录 - 如：2023-04/10
+	// 生成年月日目录 - 如：2006-01/02/
 	dir := time.Now().Format("2006-01/02/")
 	// 生成文件名 - 年月日+毫秒时间戳
 	name := cast.ToString(time.Now().UnixNano() / 1e6)
@@ -208,6 +211,15 @@ func (this *LocalStorageStruct) Path() string {
 		path += "/"
 	}
 	return "public/" + path + dir + name
+}
+
+// Delete - 删除文件
+func (this *LocalStorageStruct) Delete(key string) error {
+	path := strings.TrimPrefix(key, "/")
+	if !strings.HasPrefix(path, "public/") {
+		path = "public/" + path
+	}
+	return os.Remove(path)
 }
 
 // ================================== 阿里云对象存储 - 开始 ==================================
@@ -313,7 +325,7 @@ func (this *OSSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 // Path - OSS存储位置 - 生成文件路径
 func (this *OSSStruct) Path() string {
 	// 生成年月日目录 - 如：2023-04/10
-	dir  := time.Now().Format("2006-01/02/")
+	dir := time.Now().Format("2006-01/02/")
 	// 生成文件名 - 年月日+毫秒时间戳
 	name := cast.ToString(time.Now().UnixNano() / 1e6)
 	path := cast.ToString(StorageToml.Get("oss.path"))
@@ -321,6 +333,12 @@ func (this *OSSStruct) Path() string {
 		path += "/"
 	}
 	return path + dir + name
+}
+
+// Delete - 删除文件
+func (this *OSSStruct) Delete(key string) error {
+	key = strings.TrimPrefix(key, "/")
+	return this.Bucket().DeleteObject(key)
 }
 
 // ================================== 腾讯云对象存储 - 开始 ==================================
@@ -440,6 +458,13 @@ func (this *COSStruct) Path() string {
 		path += "/"
 	}
 	return path + dir + name
+}
+
+// Delete - 删除文件
+func (this *COSStruct) Delete(key string) error {
+	key = strings.TrimPrefix(key, "/")
+	_, err := this.Object().Delete(context.Background(), key)
+	return err
 }
 
 // ================================== 七牛云对象存储 - 开始 ==================================
@@ -573,4 +598,21 @@ func (this *KODOStruct) Path() string {
 	// 生成文件名 - 年月日+毫秒时间戳
 	name := cast.ToString(time.Now().UnixNano() / 1e6)
 	return "storage/" + dir + name
+}
+
+// Delete - 删除文件
+func (this *KODOStruct) Delete(key string) error {
+	key = strings.TrimPrefix(key, "/")
+	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
+	regionName := cast.ToString(StorageToml.Get("kodo.region"))
+
+	config := storage.Config{
+		UseHTTPS: true,
+	}
+	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
+		config.Region = &region
+	}
+
+	bucket := storage.NewBucketManager(this.Client, &config)
+	return bucket.Delete(bucketName, key)
 }

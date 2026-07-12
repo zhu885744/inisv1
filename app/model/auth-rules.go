@@ -95,13 +95,6 @@ func createAuthRules() (result []AuthRules) {
 			"PATCH":  {"path=&name=代理 PATCH 请求&type=login"},
 			"DELETE": {"path=&name=代理 DELETE 请求&type=login"},
 		},
-		"file": {
-			"GET": {
-				"path=rand&name=随机图&type=common",
-				"path=to-base64&name=网络图片转base64&type=common",
-			},
-			"POST": {"path=upload&name=简单上传&type=login"},
-		},
 		"comm": {
 			"POST": {
 				"path=login&name=传统和加密登录&type=common",
@@ -450,26 +443,54 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
+		"attachment": {
+			"GET": {
+				"path=one&type=common&name=获取指定附件",
+				"path=all&type=common&name=获取附件列表",
+				"path=sum&type=common&name=求和",
+				"path=min&type=common&name=最小值",
+				"path=max&type=common&name=最大值",
+				"path=rand&type=common&name=随机获取",
+				"path=count&type=common&name=查询数量",
+				"path=column&type=common&name=列查询",
+				"path=list&type=login&name=获取我的附件",
+			},
+			"POST": {
+				"path=save&type=login&name=保存数据",
+				"path=create&type=login&name=添加数据",
+				"path=upload&type=login&name=上传附件",
+				"path=batch&type=login&name=批量上传附件",
+			},
+			"PUT": {
+				"path=update&type=login&name=更新数据",
+				"path=restore&type=login&name=恢复数据",
+				"path=bind&type=login&name=绑定业务类型",
+			},
+			"DELETE": {
+				"path=remove&type=login&name=软删除",
+				"path=delete&type=login&name=彻底删除",
+				"path=clear&type=login&name=清空回收站",
+			},
+		},
 	}
 
 	// 接口名称
 	names := map[string]string{
-		"exp":     "【经验值 API】",
-		"test":    "【测试 API】",
-		"proxy":   "【代理 API】",
-		"file":    "【文件 API】",
-		"comm":    "【公共 API】",
-		"tags":    "【标签 API】",
-		"level":   "【等级 API】",
-		"pages":   "【独立页面 API】",
-		"users":   "【用户 API】",
-		"links":   "【友链 API】",
-		"banner":  "【轮播 API】",
-		"article": "【文章 API】",
-		"comment": "【评论 API】",
-		"placard": "【公告 API】",
-		"config":  "【配置 API】",
+		"exp":   "【经验值 API】",
+		"test":  "【测试 API】",
+		"proxy": "【代理 API】",
 
+		"comm":          "【公共 API】",
+		"tags":          "【标签 API】",
+		"level":         "【等级 API】",
+		"pages":         "【独立页面 API】",
+		"users":         "【用户 API】",
+		"links":         "【友链 API】",
+		"banner":        "【轮播 API】",
+		"article":       "【文章 API】",
+		"comment":       "【评论 API】",
+		"placard":       "【公告 API】",
+		"config":        "【配置 API】",
 		"toml":          "【服务配置 API】",
 		"ip-black":      "【IP黑名单 API】",
 		"ip-white":      "【IP白名单 API】",
@@ -483,6 +504,7 @@ func createAuthRules() (result []AuthRules) {
 		"search":        "【搜索 API】",
 		"rss":           "【RSS订阅 API】",
 		"moments":       "【动态 API】",
+		"attachment":    "【附件 API】",
 	}
 
 	// 基础方法
