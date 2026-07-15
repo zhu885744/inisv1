@@ -3,7 +3,7 @@ package model
 import (
 	"fmt"
 	"inis/app/facade"
-
+	"strings"
 	"time"
 
 	"github.com/jasonlvhit/gocron"
@@ -102,8 +102,9 @@ func DomainTemp1() (replace map[string]any) {
 	storage := []string{"oss", "cos", "kodo"}
 
 	for _, val := range storage {
-		if !utils.Is.Empty(toml.Get(val + ".domain")) {
-			replace["{{"+val+"}}"] = cast.ToString(toml.Get(val + ".domain"))
+		domain := cast.ToString(toml.Get(val + ".domain"))
+		if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
+			replace["{{"+val+"}}"] = domain
 			continue
 		}
 		if utils.In.Array(val, []any{"oss", "cos"}) {

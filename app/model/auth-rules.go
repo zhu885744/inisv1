@@ -129,6 +129,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=storage-oss&name=修改OSS存储配置",
 				"path=storage-cos&name=修改COS存储配置",
 				"path=storage-kodo&name=修改KODO存储配置",
+				"path=storage-attachment&name=修改附件配置",
 			},
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",

@@ -81,27 +81,35 @@ func initStorageToml() {
 		Mode: "toml",
 		Name: "storage",
 		Content: utils.Replace(TempStorage, map[string]any{
-			"${default}":               "local",
-			"${local.domain}":          "storage",
-			"${local.path}":            "storage",
-			"${oss.access_key_id}":     "",
-			"${oss.access_key_secret}": "",
-			"${oss.endpoint}":          "",
-			"${oss.bucket}":            "inis-oss",
-			"${oss.domain}":            "",
-			"${oss.path}":              "inis",
-			"${cos.app_id}":            "",
-			"${cos.secret_id}":         "",
-			"${cos.secret_key}":        "",
-			"${cos.bucket}":            "inis-cos",
-			"${cos.region}":            "ap-guangzhou",
-			"${cos.domain}":            "",
-			"${cos.path}":              "inis",
-			"${kodo.access_key}":       "",
-			"${kodo.secret_key}":       "",
-			"${kodo.bucket}":           "inis-kodo",
-			"${kodo.region}":           "z2",
-			"${kodo.domain}":           "",
+			"${default}":                     "local",
+			"${local.domain}":                "storage",
+			"${local.path}":                  "storage",
+			"${oss.access_key_id}":           "",
+			"${oss.access_key_secret}":       "",
+			"${oss.endpoint}":                "",
+			"${oss.bucket}":                  "inis-oss",
+			"${oss.domain}":                  "",
+			"${oss.path}":                    "inis",
+			"${cos.app_id}":                  "",
+			"${cos.secret_id}":               "",
+			"${cos.secret_key}":              "",
+			"${cos.bucket}":                  "inis-cos",
+			"${cos.region}":                  "ap-guangzhou",
+			"${cos.domain}":                  "",
+			"${cos.path}":                    "inis",
+			"${kodo.access_key}":             "",
+			"${kodo.secret_key}":             "",
+			"${kodo.bucket}":                 "inis-kodo",
+			"${kodo.region}":                 "z2",
+			"${kodo.domain}":                 "",
+			"${attachment.allow_extensions}": "jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md",
+			"${attachment.max_file_size}":    51200,
+			"${attachment.concurrent_limit}": 5,
+			"${attachment.limit_per_minute}": 60,
+			"${attachment.limit_per_hour}":   500,
+			"${attachment.limit_per_day}":    1000,
+			"${attachment.limit_per_week}":   5000,
+			"${attachment.limit_per_month}":  20000,
 		}),
 	}).Read()
 
@@ -116,6 +124,28 @@ func initStorageToml() {
 	}
 
 	StorageToml = &item
+}
+
+// ReloadStorageToml - 重新读取存储配置文件
+func ReloadStorageToml() {
+	item := utils.Viper(utils.ViperModel{
+		Path: "config",
+		Mode: "toml",
+		Name: "storage",
+	}).Read()
+
+	if item.Error != nil {
+		Log.Error(map[string]any{
+			"error":     item.Error,
+			"func_name": utils.Caller().FuncName,
+			"file_name": utils.Caller().FileName,
+			"file_line": utils.Caller().Line,
+		}, "重新读取存储配置文件错误")
+		return
+	}
+
+	StorageToml = &item
+	initStorage()
 }
 
 // 初始化缓存
@@ -150,6 +180,9 @@ func initStorage() {
 	default:
 		Storage = LocalStorage
 	}
+
+	// 初始化附件配置
+	InitAttachmentConfig()
 }
 
 // Storage - Storage实例
@@ -164,6 +197,68 @@ var OSS *OSSStruct
 var COS *COSStruct
 var KODO *KODOStruct
 
+// =================================== 附件配置 - 开始 ===================================
+
+// AttachmentConfig - 附件配置
+type AttachmentConfig struct {
+	AllowExtensions []string // 允许的文件扩展名
+	MaxFileSize     int64    // 单个文件最大大小（KB）
+	ConcurrentLimit int      // 并发上传限制
+	LimitPerMinute  int      // 每分钟上传限制（0为不限制）
+	LimitPerHour    int      // 每小时上传限制（0为不限制）
+	LimitPerDay     int      // 每天上传限制（0为不限制）
+	LimitPerWeek    int      // 每周上传限制（0为不限制）
+	LimitPerMonth   int      // 每月上传限制（0为不限制）
+}
+
+// AttachmentConfigInstance - 附件配置实例
+var AttachmentConfigInstance *AttachmentConfig
+
+// InitAttachmentConfig - 初始化附件配置
+func InitAttachmentConfig() {
+	AttachmentConfigInstance = &AttachmentConfig{
+		AllowExtensions: parseExtensions(cast.ToString(StorageToml.Get("attachment.allow_extensions"))),
+		MaxFileSize:     cast.ToInt64(StorageToml.Get("attachment.max_file_size")),
+		ConcurrentLimit: cast.ToInt(StorageToml.Get("attachment.concurrent_limit")),
+		LimitPerMinute:  cast.ToInt(StorageToml.Get("attachment.limit_per_minute")),
+		LimitPerHour:    cast.ToInt(StorageToml.Get("attachment.limit_per_hour")),
+		LimitPerDay:     cast.ToInt(StorageToml.Get("attachment.limit_per_day")),
+		LimitPerWeek:    cast.ToInt(StorageToml.Get("attachment.limit_per_week")),
+		LimitPerMonth:   cast.ToInt(StorageToml.Get("attachment.limit_per_month")),
+	}
+}
+
+// parseExtensions - 解析扩展名字符串
+func parseExtensions(extensions string) []string {
+	if extensions == "" {
+		return []string{}
+	}
+	parts := strings.Split(extensions, ",")
+	for i, part := range parts {
+		parts[i] = strings.TrimSpace(strings.ToLower(part))
+	}
+	return parts
+}
+
+// IsExtensionAllowed - 检查扩展名是否允许
+func (this *AttachmentConfig) IsExtensionAllowed(ext string) bool {
+	if len(this.AllowExtensions) == 0 {
+		return true
+	}
+	ext = strings.ToLower(ext)
+	for _, allowed := range this.AllowExtensions {
+		if allowed == ext {
+			return true
+		}
+	}
+	return false
+}
+
+// GetMaxFileSizeBytes - 获取最大文件大小（字节）
+func (this *AttachmentConfig) GetMaxFileSizeBytes() int64 {
+	return this.MaxFileSize * 1024
+}
+
 type StorageResponse struct {
 	Error  error
 	Path   string
@@ -173,6 +268,7 @@ type StorageResponse struct {
 type StorageInterface interface {
 	Upload(key string, reader io.Reader) *StorageResponse
 	Delete(key string) error
+	DeleteMulti(keys []string) error
 	Path() string
 }
 
@@ -220,6 +316,19 @@ func (this *LocalStorageStruct) Delete(key string) error {
 		path = "public/" + path
 	}
 	return os.Remove(path)
+}
+
+// DeleteMulti - 批量删除文件
+func (this *LocalStorageStruct) DeleteMulti(keys []string) error {
+	for _, key := range keys {
+		if err := this.Delete(key); err != nil {
+			Log.Error(map[string]any{
+				"error": err,
+				"key":   key,
+			}, "本地存储批量删除文件失败")
+		}
+	}
+	return nil
 }
 
 // ================================== 阿里云对象存储 - 开始 ==================================
@@ -311,10 +420,11 @@ func (this *OSSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 		return
 	}
 
-	if utils.Is.Empty(StorageToml.Get("oss.domain")) {
-		result.Domain = "https://" + cast.ToString(StorageToml.Get("oss.bucket")) + "." + cast.ToString(StorageToml.Get("oss.endpoint"))
+	domain := cast.ToString(StorageToml.Get("oss.domain"))
+	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
+		result.Domain = domain
 	} else {
-		result.Domain = cast.ToString(StorageToml.Get("oss.domain"))
+		result.Domain = "{{oss}}"
 	}
 
 	result.Path = "/" + key
@@ -339,6 +449,15 @@ func (this *OSSStruct) Path() string {
 func (this *OSSStruct) Delete(key string) error {
 	key = strings.TrimPrefix(key, "/")
 	return this.Bucket().DeleteObject(key)
+}
+
+// DeleteMulti - 批量删除文件
+func (this *OSSStruct) DeleteMulti(keys []string) error {
+	for i := range keys {
+		keys[i] = strings.TrimPrefix(keys[i], "/")
+	}
+	_, err := this.Bucket().DeleteObjects(keys)
+	return err
 }
 
 // ================================== 腾讯云对象存储 - 开始 ==================================
@@ -432,14 +551,11 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 		return
 	}
 
-	if utils.Is.Empty(StorageToml.Get("cos.domain")) {
-		result.Domain = fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com",
-			cast.ToString(StorageToml.Get("cos.bucket")),
-			cast.ToString(StorageToml.Get("cos.app_id")),
-			cast.ToString(StorageToml.Get("cos.region")),
-		)
+	domain := cast.ToString(StorageToml.Get("cos.domain"))
+	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
+		result.Domain = domain
 	} else {
-		result.Domain = cast.ToString(StorageToml.Get("cos.domain"))
+		result.Domain = "{{cos}}"
 	}
 
 	result.Path = "/" + key
@@ -464,6 +580,20 @@ func (this *COSStruct) Path() string {
 func (this *COSStruct) Delete(key string) error {
 	key = strings.TrimPrefix(key, "/")
 	_, err := this.Object().Delete(context.Background(), key)
+	return err
+}
+
+// DeleteMulti - 批量删除文件
+func (this *COSStruct) DeleteMulti(keys []string) error {
+	objects := make([]cos.Object, 0, len(keys))
+	for _, key := range keys {
+		key = strings.TrimPrefix(key, "/")
+		objects = append(objects, cos.Object{Key: key})
+	}
+	_, _, err := this.Object().DeleteMulti(context.Background(), &cos.ObjectDeleteMultiOptions{
+		Quiet:   false,
+		Objects: objects,
+	})
 	return err
 }
 
@@ -584,8 +714,10 @@ func (this *KODOStruct) Upload(key string, reader io.Reader) (result *StorageRes
 	result.Path = "/" + key
 
 	domain := cast.ToString(StorageToml.Get("kodo.domain"))
-	if !utils.Is.Empty(domain) {
-		result.Domain = cast.ToString(StorageToml.Get("kodo.domain"))
+	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
+		result.Domain = domain
+	} else {
+		result.Domain = "{{kodo}}"
 	}
 
 	return
@@ -615,4 +747,29 @@ func (this *KODOStruct) Delete(key string) error {
 
 	bucket := storage.NewBucketManager(this.Client, &config)
 	return bucket.Delete(bucketName, key)
+}
+
+// DeleteMulti - 批量删除文件
+func (this *KODOStruct) DeleteMulti(keys []string) error {
+	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
+	regionName := cast.ToString(StorageToml.Get("kodo.region"))
+
+	config := storage.Config{
+		UseHTTPS: true,
+	}
+	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
+		config.Region = &region
+	}
+
+	bucket := storage.NewBucketManager(this.Client, &config)
+	for _, key := range keys {
+		key = strings.TrimPrefix(key, "/")
+		if err := bucket.Delete(bucketName, key); err != nil {
+			Log.Error(map[string]any{
+				"error": err,
+				"key":   key,
+			}, "KODO批量删除文件失败")
+		}
+	}
+	return nil
 }

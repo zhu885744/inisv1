@@ -74,6 +74,117 @@ func (this *Toml) getNestedValue(data map[string]any, keyPath string) any {
 	return current
 }
 
+// storageConfigToReplaceMap 将存储配置转换为 replaceMap
+func (this *Toml) storageConfigToReplaceMap() map[string]any {
+	result := make(map[string]any)
+	data := facade.StorageToml.Result
+
+	if v, ok := data["default"]; ok {
+		result["${default}"] = v
+	}
+
+	if local, ok := data["local"].(map[string]any); ok {
+		if v, ok := local["domain"]; ok {
+			result["${local.domain}"] = v
+		}
+		if v, ok := local["path"]; ok {
+			result["${local.path}"] = v
+		}
+	}
+
+	if oss, ok := data["oss"].(map[string]any); ok {
+		if v, ok := oss["access_key_id"]; ok {
+			result["${oss.access_key_id}"] = v
+		}
+		if v, ok := oss["access_key_secret"]; ok {
+			result["${oss.access_key_secret}"] = v
+		}
+		if v, ok := oss["endpoint"]; ok {
+			result["${oss.endpoint}"] = v
+		}
+		if v, ok := oss["bucket"]; ok {
+			result["${oss.bucket}"] = v
+		}
+		if v, ok := oss["domain"]; ok {
+			result["${oss.domain}"] = v
+		}
+		if v, ok := oss["path"]; ok {
+			result["${oss.path}"] = v
+		}
+	}
+
+	if cos, ok := data["cos"].(map[string]any); ok {
+		if v, ok := cos["secret_id"]; ok {
+			result["${cos.secret_id}"] = v
+		}
+		if v, ok := cos["secret_key"]; ok {
+			result["${cos.secret_key}"] = v
+		}
+		if v, ok := cos["app_id"]; ok {
+			result["${cos.app_id}"] = v
+		}
+		if v, ok := cos["bucket"]; ok {
+			result["${cos.bucket}"] = v
+		}
+		if v, ok := cos["region"]; ok {
+			result["${cos.region}"] = v
+		}
+		if v, ok := cos["domain"]; ok {
+			result["${cos.domain}"] = v
+		}
+		if v, ok := cos["path"]; ok {
+			result["${cos.path}"] = v
+		}
+	}
+
+	if kodo, ok := data["kodo"].(map[string]any); ok {
+		if v, ok := kodo["access_key"]; ok {
+			result["${kodo.access_key}"] = v
+		}
+		if v, ok := kodo["secret_key"]; ok {
+			result["${kodo.secret_key}"] = v
+		}
+		if v, ok := kodo["bucket"]; ok {
+			result["${kodo.bucket}"] = v
+		}
+		if v, ok := kodo["region"]; ok {
+			result["${kodo.region}"] = v
+		}
+		if v, ok := kodo["domain"]; ok {
+			result["${kodo.domain}"] = v
+		}
+	}
+
+	if attachment, ok := data["attachment"].(map[string]any); ok {
+		if v, ok := attachment["allow_extensions"]; ok {
+			result["${attachment.allow_extensions}"] = v
+		}
+		if v, ok := attachment["max_file_size"]; ok {
+			result["${attachment.max_file_size}"] = v
+		}
+		if v, ok := attachment["concurrent_limit"]; ok {
+			result["${attachment.concurrent_limit}"] = v
+		}
+		if v, ok := attachment["limit_per_minute"]; ok {
+			result["${attachment.limit_per_minute}"] = v
+		}
+		if v, ok := attachment["limit_per_hour"]; ok {
+			result["${attachment.limit_per_hour}"] = v
+		}
+		if v, ok := attachment["limit_per_day"]; ok {
+			result["${attachment.limit_per_day}"] = v
+		}
+		if v, ok := attachment["limit_per_week"]; ok {
+			result["${attachment.limit_per_week}"] = v
+		}
+		if v, ok := attachment["limit_per_month"]; ok {
+			result["${attachment.limit_per_month}"] = v
+		}
+	}
+
+	return result
+}
+
 // saveTomlConfig 保存配置文件
 func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, successMsg string) {
 	item := utils.File().Save(strings.NewReader(content), path)
@@ -81,6 +192,11 @@ func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, 
 		this.json(ctx, nil, facade.Lang(ctx, "修改失败！"), 400)
 		return
 	}
+
+	if path == "config/storage.toml" {
+		go facade.ReloadStorageToml()
+	}
+
 	this.json(ctx, nil, facade.Lang(ctx, successMsg), 200)
 }
 
@@ -151,11 +267,13 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"cache-redis":              this.putCacheRedis,
 		"cache-file":               this.putCacheFile,
 		"cache-ram":                this.putCacheRam,
+		"storage":                  this.putStorage,
 		"storage-default":          this.putStorageDefault,
 		"storage-local":            this.putStorageLocal,
 		"storage-oss":              this.putStorageOSS,
 		"storage-cos":              this.putStorageCOS,
 		"storage-kodo":             this.putStorageKODO,
+		"storage-attachment":       this.putStorageAttachment,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -327,7 +445,7 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	// 允许的查询范围
-	field := []any{"local", "oss", "cos", "kodo"}
+	field := []any{"local", "oss", "cos", "kodo", "attachment"}
 
 	item := facade.StorageToml
 	if item.Error != nil {
@@ -1124,11 +1242,11 @@ func (this *Toml) putStorageDefault(ctx *gin.Context) {
 		return
 	}
 
+	replaceMap := this.storageConfigToReplaceMap()
+	replaceMap["${default}"] = params["value"]
+
 	temp := facade.TempStorage
-	temp = utils.Replace(temp, map[string]any{
-		"${default}": params["value"],
-	})
-	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
+	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
@@ -1141,12 +1259,16 @@ func (this *Toml) putStorageLocal(ctx *gin.Context) {
 		"domain": this.get(ctx, "domain"),
 	})
 
+	replaceMap := this.storageConfigToReplaceMap()
+	if v, ok := params["domain"]; ok {
+		replaceMap["${local.domain}"] = v
+	}
+	if v, ok := params["path"]; ok {
+		replaceMap["${local.path}"] = v
+	}
+
 	temp := facade.TempStorage
-	temp = utils.Replace(temp, map[string]any{
-		"${local.domain}": params["domain"],
-		"${local.path}":   params["path"],
-	})
-	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
+	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
@@ -1223,16 +1345,20 @@ func (this *Toml) putStorageOSS(ctx *gin.Context) {
 		return
 	}
 
+	replaceMap := this.storageConfigToReplaceMap()
+	replaceMap["${oss.access_key_id}"] = cast.ToString(params["access_key_id"])
+	replaceMap["${oss.access_key_secret}"] = cast.ToString(params["access_key_secret"])
+	replaceMap["${oss.endpoint}"] = cast.ToString(params["endpoint"])
+	replaceMap["${oss.bucket}"] = cast.ToString(params["bucket"])
+	if v, ok := params["domain"]; ok {
+		replaceMap["${oss.domain}"] = cast.ToString(v)
+	}
+	if v, ok := params["path"]; ok {
+		replaceMap["${oss.path}"] = cast.ToString(v)
+	}
+
 	temp := facade.TempStorage
-	temp = utils.Replace(temp, map[string]any{
-		"${oss.access_key_id}":     cast.ToString(params["access_key_id"]),
-		"${oss.access_key_secret}": cast.ToString(params["access_key_secret"]),
-		"${oss.endpoint}":          cast.ToString(params["endpoint"]),
-		"${oss.bucket}":            cast.ToString(params["bucket"]),
-		"${oss.domain}":            cast.ToString(params["domain"]),
-		"${oss.path}":              cast.ToString(params["path"]),
-	})
-	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
+	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
@@ -1338,17 +1464,21 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 		return
 	}
 
+	replaceMap := this.storageConfigToReplaceMap()
+	replaceMap["${cos.secret_id}"] = cast.ToString(params["secret_id"])
+	replaceMap["${cos.secret_key}"] = cast.ToString(params["secret_key"])
+	replaceMap["${cos.app_id}"] = cast.ToString(params["app_id"])
+	replaceMap["${cos.bucket}"] = cast.ToString(params["bucket"])
+	replaceMap["${cos.region}"] = cast.ToString(params["region"])
+	if v, ok := params["domain"]; ok {
+		replaceMap["${cos.domain}"] = cast.ToString(v)
+	}
+	if v, ok := params["path"]; ok {
+		replaceMap["${cos.path}"] = cast.ToString(v)
+	}
+
 	temp := facade.TempStorage
-	temp = utils.Replace(temp, map[string]any{
-		"${cos.secret_id}":  cast.ToString(params["secret_id"]),
-		"${cos.secret_key}": cast.ToString(params["secret_key"]),
-		"${cos.app_id}":     cast.ToString(params["app_id"]),
-		"${cos.bucket}":     cast.ToString(params["bucket"]),
-		"${cos.region}":     cast.ToString(params["region"]),
-		"${cos.domain}":     cast.ToString(params["domain"]),
-		"${cos.path}":       cast.ToString(params["path"]),
-	})
-	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
+	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
@@ -1424,15 +1554,175 @@ func (this *Toml) putStorageKODO(ctx *gin.Context) {
 		return
 	}
 
+	replaceMap := this.storageConfigToReplaceMap()
+	replaceMap["${kodo.access_key}"] = cast.ToString(params["access_key"])
+	replaceMap["${kodo.secret_key}"] = cast.ToString(params["secret_key"])
+	replaceMap["${kodo.bucket}"] = cast.ToString(params["bucket"])
+	replaceMap["${kodo.region}"] = cast.ToString(params["region"])
+	replaceMap["${kodo.domain}"] = cast.ToString(params["domain"])
+
 	temp := facade.TempStorage
-	temp = utils.Replace(temp, map[string]any{
-		"${kodo.access_key}": cast.ToString(params["access_key"]),
-		"${kodo.secret_key}": cast.ToString(params["secret_key"]),
-		"${kodo.bucket}":     cast.ToString(params["bucket"]),
-		"${kodo.region}":     cast.ToString(params["region"]),
-		"${kodo.domain}":     cast.ToString(params["domain"]),
-	})
-	temp = this.replaceTomlVars(temp, facade.StorageToml.Result)
+	temp = utils.Replace(temp, replaceMap)
+
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
+}
+
+// putStorageAttachment - 修改附件配置
+func (this *Toml) putStorageAttachment(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	allowFields := map[string]string{
+		"allow_extensions": "${attachment.allow_extensions}",
+		"max_file_size":    "${attachment.max_file_size}",
+		"concurrent_limit": "${attachment.concurrent_limit}",
+		"limit_per_minute": "${attachment.limit_per_minute}",
+		"limit_per_hour":   "${attachment.limit_per_hour}",
+		"limit_per_day":    "${attachment.limit_per_day}",
+		"limit_per_week":   "${attachment.limit_per_week}",
+		"limit_per_month":  "${attachment.limit_per_month}",
+	}
+
+	replaceMap := this.storageConfigToReplaceMap()
+	hasUpdate := false
+	for field, placeholder := range allowFields {
+		if val, ok := params[field]; ok {
+			replaceMap[placeholder] = val
+			hasUpdate = true
+		}
+	}
+
+	if !hasUpdate {
+		this.json(ctx, nil, facade.Lang(ctx, "请提供要修改的配置参数！"), 400)
+		return
+	}
+
+	temp := facade.TempStorage
+	temp = utils.Replace(temp, replaceMap)
+
+	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
+
+	go func() {
+		facade.InitAttachmentConfig()
+	}()
+}
+
+// putStorage - 统一修改存储配置
+func (this *Toml) putStorage(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	replaceMap := this.storageConfigToReplaceMap()
+
+	if val, ok := params["default"]; ok {
+		allow := []any{"local", "oss", "cos", "kodo"}
+		if !utils.In.Array(val, allow) {
+			this.json(ctx, nil, facade.Lang(ctx, "default 只允许是 local、oss、cos、kodo 其中一个！"), 400)
+			return
+		}
+		replaceMap["${default}"] = val
+	}
+
+	if local, ok := params["local"].(map[string]any); ok {
+		if v, ok := local["domain"]; ok {
+			replaceMap["${local.domain}"] = v
+		}
+		if v, ok := local["path"]; ok {
+			replaceMap["${local.path}"] = v
+		}
+	}
+
+	if oss, ok := params["oss"].(map[string]any); ok {
+		if v, ok := oss["access_key_id"]; ok {
+			replaceMap["${oss.access_key_id}"] = v
+		}
+		if v, ok := oss["access_key_secret"]; ok {
+			replaceMap["${oss.access_key_secret}"] = v
+		}
+		if v, ok := oss["endpoint"]; ok {
+			replaceMap["${oss.endpoint}"] = v
+		}
+		if v, ok := oss["bucket"]; ok {
+			replaceMap["${oss.bucket}"] = v
+		}
+		if v, ok := oss["domain"]; ok {
+			replaceMap["${oss.domain}"] = v
+		}
+		if v, ok := oss["path"]; ok {
+			replaceMap["${oss.path}"] = v
+		}
+	}
+
+	if cos, ok := params["cos"].(map[string]any); ok {
+		if v, ok := cos["secret_id"]; ok {
+			replaceMap["${cos.secret_id}"] = v
+		}
+		if v, ok := cos["secret_key"]; ok {
+			replaceMap["${cos.secret_key}"] = v
+		}
+		if v, ok := cos["app_id"]; ok {
+			replaceMap["${cos.app_id}"] = v
+		}
+		if v, ok := cos["bucket"]; ok {
+			replaceMap["${cos.bucket}"] = v
+		}
+		if v, ok := cos["region"]; ok {
+			replaceMap["${cos.region}"] = v
+		}
+		if v, ok := cos["domain"]; ok {
+			replaceMap["${cos.domain}"] = v
+		}
+		if v, ok := cos["path"]; ok {
+			replaceMap["${cos.path}"] = v
+		}
+	}
+
+	if kodo, ok := params["kodo"].(map[string]any); ok {
+		if v, ok := kodo["access_key"]; ok {
+			replaceMap["${kodo.access_key}"] = v
+		}
+		if v, ok := kodo["secret_key"]; ok {
+			replaceMap["${kodo.secret_key}"] = v
+		}
+		if v, ok := kodo["bucket"]; ok {
+			replaceMap["${kodo.bucket}"] = v
+		}
+		if v, ok := kodo["region"]; ok {
+			replaceMap["${kodo.region}"] = v
+		}
+		if v, ok := kodo["domain"]; ok {
+			replaceMap["${kodo.domain}"] = v
+		}
+	}
+
+	if attachment, ok := params["attachment"].(map[string]any); ok {
+		if v, ok := attachment["allow_extensions"]; ok {
+			replaceMap["${attachment.allow_extensions}"] = v
+		}
+		if v, ok := attachment["max_file_size"]; ok {
+			replaceMap["${attachment.max_file_size}"] = v
+		}
+		if v, ok := attachment["concurrent_limit"]; ok {
+			replaceMap["${attachment.concurrent_limit}"] = v
+		}
+		if v, ok := attachment["limit_per_minute"]; ok {
+			replaceMap["${attachment.limit_per_minute}"] = v
+		}
+		if v, ok := attachment["limit_per_hour"]; ok {
+			replaceMap["${attachment.limit_per_hour}"] = v
+		}
+		if v, ok := attachment["limit_per_day"]; ok {
+			replaceMap["${attachment.limit_per_day}"] = v
+		}
+		if v, ok := attachment["limit_per_week"]; ok {
+			replaceMap["${attachment.limit_per_week}"] = v
+		}
+		if v, ok := attachment["limit_per_month"]; ok {
+			replaceMap["${attachment.limit_per_month}"] = v
+		}
+	}
+
+	temp := facade.TempStorage
+	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }

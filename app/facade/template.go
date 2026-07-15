@@ -267,6 +267,17 @@ bucket            = "${kodo.bucket}"
 region            = "${kodo.region}"
 # KODO 外网域名 - 用于访问 - 这里必须填写
 domain            = "${kodo.domain}"
+
+
+# ======== 附件管理配置 ========
+[attachment]
+# 允许的文件类型，多个用逗号分隔（小写）
+# 常用类型：jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md
+allow_extensions = "${attachment.allow_extensions}"
+# 单个文件最大大小（KB），默认50MB=51200KB
+max_file_size = ${attachment.max_file_size}
+# 并发上传限制（同时上传的最大文件数）
+concurrent_limit = ${attachment.concurrent_limit}
 `
 
 const TempCrypt = `# ======== 加密配置 ========

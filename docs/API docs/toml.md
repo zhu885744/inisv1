@@ -10,8 +10,15 @@
 | :--- | :--- |
 | **GET 接口** | log、sms、cache、crypt、storage - 获取配置信息 |
 | **POST 接口** | 测试各类服务连接 |
-| **PUT 接口** | 更新各类配置 |
+| **PUT 接口** | 更新各类配置，新增统一存储配置接口 `storage` |
 | **DELETE 接口** | 暂不支持 |
+
+### 新增接口说明
+
+| 接口 | 方法 | 说明 |
+| :--- | :--- | :--- |
+| `/api/toml/storage` | PUT | 统一更新存储配置，支持同时修改 default、local、oss、cos、kodo、attachment 配置 |
+| `/api/toml/storage-attachment` | PUT | 更新附件管理配置 |
 
 ---
 
@@ -121,7 +128,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `name` | string | 否 | 指定配置项：local、oss、cos、kodo |
+| `name` | string | 否 | 指定配置项：local、oss、cos、kodo、attachment |
 
 **成功响应** (200):
 ```json
@@ -133,6 +140,7 @@
         "oss": {},
         "cos": {},
         "kodo": {},
+        "attachment": {},
         "default": "local"
     }
 }
@@ -610,7 +618,105 @@
 }
 ```
 
-#### 3.11 更新存储默认配置
+#### 3.11 统一更新存储配置
+
+- **路径**: `/api/toml/storage`
+- **方法**: `PUT`
+- **描述**: 统一更新存储配置，支持同时修改多个存储配置段
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `default` | string | 否 | 默认存储类型：local、oss、cos、kodo |
+| `local` | object | 否 | 本地存储配置 |
+| `oss` | object | 否 | OSS存储配置 |
+| `cos` | object | 否 | COS存储配置 |
+| `kodo` | object | 否 | KODO存储配置 |
+| `attachment` | object | 否 | 附件配置 |
+
+**local 配置项**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `domain` | string | 否 | 域名 |
+| `path` | string | 否 | 存储路径 |
+
+**oss 配置项**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `access_key_id` | string | 否 | AccessKey ID |
+| `access_key_secret` | string | 否 | AccessKey Secret |
+| `endpoint` | string | 否 | 端点地址 |
+| `bucket` | string | 否 | Bucket 名称 |
+| `domain` | string | 否 | 域名 |
+| `path` | string | 否 | 存储路径 |
+
+**cos 配置项**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `secret_id` | string | 否 | Secret ID |
+| `secret_key` | string | 否 | Secret Key |
+| `app_id` | string | 否 | App ID |
+| `bucket` | string | 否 | Bucket 名称 |
+| `region` | string | 否 | 地域 |
+| `domain` | string | 否 | 域名 |
+| `path` | string | 否 | 存储路径 |
+
+**kodo 配置项**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `access_key` | string | 否 | Access Key |
+| `secret_key` | string | 否 | Secret Key |
+| `bucket` | string | 否 | Bucket 名称 |
+| `region` | string | 否 | 地域 |
+| `domain` | string | 否 | 域名 |
+
+**attachment 配置项**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `allow_extensions` | string | 否 | 允许的文件扩展名，多个用逗号分隔 |
+| `max_file_size` | int | 否 | 单个文件最大大小（KB） |
+| `concurrent_limit` | int | 否 | 并发上传限制 |
+
+**请求示例**:
+```json
+{
+    "default": "oss",
+    "local": {
+        "domain": "storage",
+        "path": "storage"
+    },
+    "oss": {
+        "access_key_id": "your-access-key-id",
+        "access_key_secret": "your-access-key-secret",
+        "endpoint": "oss-cn-hangzhou.aliyuncs.com",
+        "bucket": "your-bucket",
+        "domain": "https://oss.example.com",
+        "path": "uploads"
+    },
+    "attachment": {
+        "max_file_size": 10240,
+        "limit_per_day": 50,
+        "concurrent_limit": 5
+    }
+}
+```
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "修改成功！",
+    "data": null
+}
+```
+
+#### 3.12 更新存储默认配置
 
 - **路径**: `/api/toml/storage-default`
 - **方法**: `PUT`
@@ -631,7 +737,7 @@
 }
 ```
 
-#### 3.12 更新本地存储配置
+#### 3.13 更新本地存储配置
 
 - **路径**: `/api/toml/storage-local`
 - **方法**: `PUT`
@@ -653,7 +759,7 @@
 }
 ```
 
-#### 3.13 更新 OSS 存储配置
+#### 3.14 更新 OSS 存储配置
 
 - **路径**: `/api/toml/storage-oss`
 - **方法**: `PUT`
@@ -679,7 +785,7 @@
 }
 ```
 
-#### 3.14 更新 COS 存储配置
+#### 3.15 更新 COS 存储配置
 
 - **路径**: `/api/toml/storage-cos`
 - **方法**: `PUT`
@@ -706,7 +812,7 @@
 }
 ```
 
-#### 3.15 更新 KODO 存储配置
+#### 3.16 更新 KODO 存储配置
 
 - **路径**: `/api/toml/storage-kodo`
 - **方法**: `PUT`
@@ -721,6 +827,45 @@
 | `bucket` | string | **是** | Bucket 名称 |
 | `region` | string | **是** | 地域 |
 | `domain` | string | **是** | 域名 |
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "修改成功！",
+    "data": null
+}
+```
+
+#### 3.17 更新附件配置
+
+- **路径**: `/api/toml/storage-attachment`
+- **方法**: `PUT`
+- **描述**: 更新附件管理配置
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `allow_extensions` | string | 否 | 允许的文件扩展名，多个用逗号分隔 |
+| `max_file_size` | int | 否 | 单个文件最大大小（KB） |
+| `concurrent_limit` | int | 否 | 并发上传限制 |
+| `limit_per_minute` | int | 否 | 每分钟上传限制（0为不限制） |
+| `limit_per_hour` | int | 否 | 每小时上传限制（0为不限制） |
+| `limit_per_day` | int | 否 | 每天上传限制（0为不限制） |
+| `limit_per_week` | int | 否 | 每周上传限制（0为不限制） |
+| `limit_per_month` | int | 否 | 每月上传限制（0为不限制） |
+
+**请求示例**:
+```json
+{
+    "allow_extensions": "jpg,png,gif,webp,pdf",
+    "max_file_size": 10240,
+    "concurrent_limit": 5,
+    "limit_per_day": 50,
+    "limit_per_month": 1000
+}
+```
 
 **成功响应** (200):
 ```json

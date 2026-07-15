@@ -1,36 +1,36 @@
 package model
 
 import (
+	"inis/app/facade"
+
 	"github.com/google/uuid"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
 )
 
 type Attachment struct {
-	Id            uint                     `gorm:"type:int(32); primaryKey; autoIncrement; comment:主键;" json:"id"`
-	Uuid          string                   `gorm:"size:36; unique; comment:唯一标识;" json:"uuid"`
-	OriginalName  string                   `gorm:"size:256; comment:原始文件名;" json:"original_name"`
-	SaveName      string                   `gorm:"size:256; comment:存储文件名;" json:"save_name"`
-	SavePath      string                   `gorm:"comment:存储相对路径;" json:"save_path"`
-	FullUrl       string                   `gorm:"comment:完整访问URL;" json:"full_url"`
-	FileSize      int64                    `gorm:"type:int(64); comment:文件大小（字节）;" json:"file_size"`
-	MimeType      string                   `gorm:"size:128; comment:MIME类型;" json:"mime_type"`
-	FileExt       string                   `gorm:"size:32; comment:文件扩展名;" json:"file_ext"`
-	StorageDriver string                   `gorm:"size:32; comment:存储驱动;" json:"storage_driver"`
-	UploaderId    uint                     `gorm:"type:int(32); index; comment:上传者ID;" json:"uploader_id"`
-	TargetType    string                   `gorm:"size:32; index; comment:关联业务类型;" json:"target_type"`
-	TargetId      uint                     `gorm:"type:int(32); index; comment:关联业务ID;" json:"target_id"`
-	IsPublic      bool                     `gorm:"default:true; comment:是否公开;" json:"is_public"`
-	FileHash      string                   `gorm:"size:32; index; comment:文件MD5值;" json:"file_hash"`
-	Status        int8                     `gorm:"type:tinyint; default:1; comment:状态 1正常 0禁用;" json:"status"`
-	Width         int                      `gorm:"type:int(12); default:0; comment:图片宽度;" json:"width"`
-	Height        int                      `gorm:"type:int(12); default:0; comment:图片高度;" json:"height"`
-	CreateTime    int64                    `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-	UpdateTime    int64                    `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
-	DeleteTime    soft_delete.DeletedAt    `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+	Id            uint                  `gorm:"type:int(32); primaryKey; autoIncrement; comment:主键;" json:"id"`
+	Uuid          string                `gorm:"size:36; unique; comment:唯一标识;" json:"uuid"`
+	OriginalName  string                `gorm:"size:256; comment:原始文件名;" json:"original_name"`
+	SaveName      string                `gorm:"size:256; comment:存储文件名;" json:"save_name"`
+	SavePath      string                `gorm:"comment:存储相对路径;" json:"save_path"`
+	FullUrl       string                `gorm:"comment:完整访问URL;" json:"full_url"`
+	FileSize      int64                 `gorm:"type:int(64); comment:文件大小（字节）;" json:"file_size"`
+	MimeType      string                `gorm:"size:128; comment:MIME类型;" json:"mime_type"`
+	FileExt       string                `gorm:"size:32; comment:文件扩展名;" json:"file_ext"`
+	StorageDriver string                `gorm:"size:32; comment:存储驱动;" json:"storage_driver"`
+	UploaderId    uint                  `gorm:"type:int(32); index; comment:上传者ID;" json:"uploader_id"`
+	TargetType    string                `gorm:"size:32; index; comment:关联业务类型;" json:"target_type"`
+	TargetId      uint                  `gorm:"type:int(32); index; comment:关联业务ID;" json:"target_id"`
+	IsPublic      bool                  `gorm:"default:true; comment:是否公开;" json:"is_public"`
+	FileHash      string                `gorm:"size:32; index; comment:文件MD5值;" json:"file_hash"`
+	Width         int                   `gorm:"type:int(12); default:0; comment:图片宽度;" json:"width"`
+	Height        int                   `gorm:"type:int(12); default:0; comment:图片高度;" json:"height"`
+	CreateTime    int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime    int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+	DeleteTime    soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
 func InitAttachment() {
@@ -48,8 +48,8 @@ func (this *Attachment) AfterFind(tx *gorm.DB) (err error) {
 
 func (this *Attachment) AfterSave(tx *gorm.DB) (err error) {
 	go func() {
-		this.FullUrl = utils.Replace(this.FullUrl, DomainTemp2())
-		tx.Model(this).UpdateColumn("full_url", this.FullUrl)
+		fullUrl := utils.Replace(this.FullUrl, DomainTemp2())
+		tx.Model(this).UpdateColumn("full_url", fullUrl)
 	}()
 	return
 }
