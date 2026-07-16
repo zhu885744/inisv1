@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -18,15 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 )
-
-var imageExtensions = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true,
-}
 
 var uploadConcurrentCounter int
 var uploadCounterMutex sync.Mutex
@@ -87,17 +81,6 @@ func (this *Attachment) safeDeleteFile(path string) {
 		}()
 		facade.Storage.Delete(path)
 	}()
-}
-
-func (this *Attachment) getImageSize(fileBytes []byte, suffix string) (int, int) {
-	if !imageExtensions[suffix] {
-		return 0, 0
-	}
-	img, err := imaging.Decode(bytes.NewReader(fileBytes))
-	if err != nil {
-		return 0, 0
-	}
-	return img.Bounds().Dx(), img.Bounds().Dy()
 }
 
 func (this *Attachment) verifyFileContent(headerBytes []byte, fileExt string) bool {
@@ -280,7 +263,6 @@ func (this *Attachment) IPOST(ctx *gin.Context) {
 	allow := map[string]any{
 		"save":   this.save,
 		"create": this.create,
-		"upload": this.upload,
 		"batch":  this.batch,
 	}
 	err := this.call(allow, method, ctx)
@@ -296,7 +278,6 @@ func (this *Attachment) IPUT(ctx *gin.Context) {
 	allow := map[string]any{
 		"update":  this.update,
 		"restore": this.restore,
-		"bind":    this.bind,
 	}
 	err := this.call(allow, method, ctx)
 	if err != nil {
@@ -744,7 +725,6 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 	}
 
 	fullUrl := item.Domain + item.Path
-	width, height := this.getImageSize(headerBytes, suffix)
 	attachment := model.Attachment{
 		Uuid: (&model.Attachment{}).GenerateUUID(), OriginalName: fileName, SaveName: saveName,
 		SavePath: item.Path, FullUrl: fullUrl, FileSize: fileHeader.Size,
@@ -752,7 +732,6 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		StorageDriver: cast.ToString(facade.StorageToml.Get("default")), UploaderId: userId,
 		TargetType: cast.ToString(params["target_type"]), TargetId: cast.ToUint(params["target_id"]),
 		FileHash: fileHash,
-		Width:    width, Height: height,
 	}
 	tx := facade.DB.Model(&attachment).Create(&attachment)
 	if tx.Error != nil {
@@ -764,50 +743,6 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 	result.Attachment = &attachment
 	result.IsSuccess = true
 	return result
-}
-
-func (this *Attachment) upload(ctx *gin.Context) {
-	userId := this.meta.user(ctx).Id
-	if userId == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
-
-	if !this.checkUploadLimit(ctx, uint(userId), 1) {
-		return
-	}
-
-	defer this.decrementUploadCounter(1)
-
-	fileHeader, err := ctx.FormFile("file")
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "获取文件失败：%v", err.Error()), 400)
-		return
-	}
-
-	result := this.uploadSingleFile(ctx, fileHeader, uint(userId), this.params(ctx))
-
-	if result.Error != nil {
-		this.json(ctx, nil, result.Error.Error(), 400)
-		return
-	}
-
-	if result.IsExist {
-		this.json(ctx, map[string]any{
-			"id": result.Existing["id"], "uuid": result.Existing["uuid"], "original_name": result.Existing["original_name"],
-			"full_url": utils.Replace(cast.ToString(result.Existing["full_url"]), model.DomainTemp1()), "file_size": result.Existing["file_size"],
-			"mime_type": result.Existing["mime_type"], "file_ext": result.Existing["file_ext"],
-		}, facade.Lang(ctx, "文件已存在（秒传）！"), 200)
-		return
-	}
-
-	facade.Log.Info(map[string]any{"user_id": userId, "file_name": result.Attachment.OriginalName, "file_size": result.Attachment.FileSize, "storage_driver": result.Attachment.StorageDriver}, "附件上传成功")
-	this.json(ctx, map[string]any{
-		"id": result.Attachment.Id, "uuid": result.Attachment.Uuid, "original_name": result.Attachment.OriginalName,
-		"full_url": utils.Replace(result.Attachment.FullUrl, model.DomainTemp1()), "file_size": result.Attachment.FileSize,
-		"mime_type": result.Attachment.MimeType, "file_ext": result.Attachment.FileExt,
-		"width": result.Attachment.Width, "height": result.Attachment.Height,
-	}, facade.Lang(ctx, "上传成功！"), 200)
 }
 
 func (this *Attachment) batch(ctx *gin.Context) {
@@ -823,12 +758,22 @@ func (this *Attachment) batch(ctx *gin.Context) {
 		return
 	}
 
+	var files []*multipart.FileHeader
+
 	form, err := ctx.MultipartForm()
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "获取表单失败：%v", err.Error()), 400)
 		return
 	}
-	files := form.File["files"]
+
+	if formFiles, ok := form.File["files"]; ok && len(formFiles) > 0 {
+		files = formFiles
+	} else {
+		if fileHeader, err := ctx.FormFile("file"); err == nil {
+			files = []*multipart.FileHeader{fileHeader}
+		}
+	}
+
 	if len(files) == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "请选择要上传的文件！"), 400)
 		return
@@ -871,8 +816,7 @@ func (this *Attachment) batch(ctx *gin.Context) {
 				"original_name": result.Attachment.OriginalName,
 				"full_url":      utils.Replace(result.Attachment.FullUrl, model.DomainTemp1()),
 				"file_size":     result.Attachment.FileSize,
-				"width":         result.Attachment.Width, "height": result.Attachment.Height,
-				"status": "success",
+				"status":        "success",
 			})
 			successCount++
 		} else {
@@ -880,7 +824,7 @@ func (this *Attachment) batch(ctx *gin.Context) {
 		}
 	}
 	facade.Log.Info(map[string]any{"user_id": userId, "success_count": successCount, "fail_count": failCount}, "批量上传附件")
-	this.json(ctx, gin.H{"results": results, "success": successCount, "fail": failCount}, facade.Lang(ctx, "批量上传完成！"), 200)
+	this.json(ctx, gin.H{"results": results, "success": successCount, "fail": failCount}, facade.Lang(ctx, "上传完成！"), 200)
 }
 
 func (this *Attachment) update(ctx *gin.Context) {
@@ -933,105 +877,6 @@ func (this *Attachment) update(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"id": item["id"], "uuid": item["uuid"]}, facade.Lang(ctx, "更新成功！"), 200)
-}
-
-func (this *Attachment) bind(ctx *gin.Context) {
-	params := this.params(ctx)
-	if utils.Is.Empty(params["ids"]) && utils.Is.Empty(params["uuids"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids/uuids"), 400)
-		return
-	}
-	if utils.Is.Empty(params["target_type"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_type"), 400)
-		return
-	}
-	if utils.Is.Empty(params["target_id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_id"), 400)
-		return
-	}
-
-	isCover := cast.ToBool(params["is_cover"])
-	targetType := cast.ToString(params["target_type"])
-	targetId := cast.ToUint(params["target_id"])
-
-	var ids []any
-	var query *facade.ModelStruct
-	if !utils.Is.Empty(params["uuids"]) {
-		ids = utils.Unity.Keys(params["uuids"])
-		query = facade.DB.Model(&model.Attachment{}).WhereIn("uuid", ids)
-	} else {
-		ids = utils.Unity.Ids(params["ids"])
-		query = facade.DB.Model(&model.Attachment{}).WhereIn("id", ids)
-	}
-
-	if !this.meta.root(ctx) {
-		query = query.Where("uploader_id", this.meta.user(ctx).Id)
-	}
-
-	items := query.Select()
-
-	attachmentMap := make(map[any]map[string]any)
-	for _, item := range items {
-		if _, ok := params["uuids"]; ok {
-			attachmentMap[item["uuid"]] = item
-		} else {
-			attachmentMap[item["id"]] = item
-		}
-	}
-
-	var successIds []any
-	var failedIds []any
-	var errors = make(map[string]string)
-
-	for _, id := range ids {
-		attachment, ok := attachmentMap[id]
-		if !ok {
-			failedIds = append(failedIds, id)
-			errors[cast.ToString(id)] = "附件不存在或无权限操作"
-			continue
-		}
-
-		existingTargetType := cast.ToString(attachment["target_type"])
-		existingTargetId := cast.ToUint(attachment["target_id"])
-		if existingTargetType != "" && existingTargetId > 0 {
-			if existingTargetType != targetType || existingTargetId != targetId {
-				if !isCover {
-					failedIds = append(failedIds, id)
-					errors[cast.ToString(id)] = fmt.Sprintf("附件已绑定到其他业务(%s:%d)，请设置 is_cover=true 允许覆盖", existingTargetType, existingTargetId)
-					continue
-				}
-			}
-		}
-
-		successIds = append(successIds, id)
-	}
-
-	if len(successIds) == 0 {
-		this.json(ctx, gin.H{"success_ids": []any{}, "failed_ids": failedIds, "errors": errors}, facade.Lang(ctx, "绑定失败！"), 400)
-		return
-	}
-
-	if _, ok := params["uuids"]; ok {
-		query = facade.DB.Model(&model.Attachment{}).WhereIn("uuid", successIds)
-	} else {
-		query = facade.DB.Model(&model.Attachment{}).WhereIn("id", successIds)
-	}
-
-	if !this.meta.root(ctx) {
-		query = query.Where("uploader_id", this.meta.user(ctx).Id)
-	}
-
-	tx := query.Update(map[string]any{"target_type": targetType, "target_id": targetId})
-	if tx.Error != nil {
-		this.json(ctx, nil, "绑定失败", 400)
-		return
-	}
-
-	if len(failedIds) == 0 {
-		this.json(ctx, gin.H{"success_ids": successIds, "failed_ids": []any{}, "errors": map[string]string{}}, facade.Lang(ctx, "绑定成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"success_ids": successIds, "failed_ids": failedIds, "errors": errors}, facade.Lang(ctx, "部分绑定成功！"), 207)
-	}
 }
 
 func getStorageDriver(driver string) facade.StorageInterface {
