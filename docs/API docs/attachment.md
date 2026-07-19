@@ -9,7 +9,7 @@
 | 接口类型 | 说明 |
 | :--- | :--- |
 | **基础接口** | 支持15个基础接口：one、all、rand、count、sum、min、max、column、remove、delete、clear、restore、save、create、update |
-| **特殊接口** | 文件上传、获取我的附件列表 |
+| **特殊接口** | 文件上传、文件类型检查、获取我的附件列表 |
 
 > **接口规范说明**：`save` 接口为内部兼容接口，无ID时新增，有ID时更新。**推荐外部调用使用 `create`（新增）和 `update`（更新）**，语义更清晰。
 
@@ -436,7 +436,119 @@
 **结果状态说明**:
 - `success`：上传成功
 - `exist`：文件已存在（秒传）
-- 无状态：上传失败（未在results中）
+- `fail`：上传失败，包含错误信息
+
+**失败响应** (400):
+```json
+{
+    "code": 400,
+    "msg": "所有文件上传失败！",
+    "data": {
+        "results": [
+            {
+                "original_name": "invalid.exe",
+                "status": "fail",
+                "error": "不允许上传该类型的文件！"
+            }
+        ],
+        "success": 0,
+        "fail": 1
+    }
+}
+```
+
+**部分成功响应** (207):
+```json
+{
+    "code": 207,
+    "msg": "部分文件上传成功！",
+    "data": {
+        "results": [
+            {
+                "id": 1,
+                "uuid": "xxx",
+                "original_name": "valid.jpg",
+                "full_url": "...",
+                "file_size": 102400,
+                "status": "success"
+            },
+            {
+                "original_name": "invalid.exe",
+                "status": "fail",
+                "error": "不允许上传该类型的文件！"
+            }
+        ],
+        "success": 1,
+        "fail": 1
+    }
+}
+```
+
+**权限说明**: 需要用户登录
+
+#### 2.4 检查文件类型 [特殊接口]
+
+- **路径**: `/api/attachment/checkType`
+- **方法**: `POST`
+- **描述**: 检查文件类型是否允许上传，支持批量检查
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `file_names` | string[] | 是 | 文件名列表，如 ["test.jpg", "document.pdf"] |
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "检查完成！",
+    "data": {
+        "results": [
+            {
+                "file_name": "test.jpg",
+                "file_ext": "jpg",
+                "is_allowed": true,
+                "message": "文件类型允许上传"
+            },
+            {
+                "file_name": "document.pdf",
+                "file_ext": "pdf",
+                "is_allowed": true,
+                "message": "文件类型允许上传"
+            },
+            {
+                "file_name": "malware.exe",
+                "file_ext": "exe",
+                "is_allowed": false,
+                "message": "不允许上传该类型的文件"
+            }
+        ],
+        "allowed_count": 2,
+        "disallowed_count": 1,
+        "allow_extensions": ["jpg", "png", "gif", "webp", "bmp", "svg", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z", "txt", "md"],
+        "max_file_size": 51200,
+        "max_file_size_kb": 51200,
+        "max_file_size_mb": 50
+    }
+}
+```
+
+**返回字段说明**:
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `results` | array | 文件检查结果列表 |
+| `results[].file_name` | string | 文件名 |
+| `results[].file_ext` | string | 文件扩展名 |
+| `results[].is_allowed` | bool | 是否允许上传 |
+| `results[].message` | string | 检查结果提示 |
+| `allowed_count` | int | 允许上传的文件数量 |
+| `disallowed_count` | int | 不允许上传的文件数量 |
+| `allow_extensions` | array | 允许上传的文件扩展名列表 |
+| `max_file_size` | int | 单个文件最大大小（KB） |
+| `max_file_size_kb` | int | 单个文件最大大小（KB） |
+| `max_file_size_mb` | float | 单个文件最大大小（MB） |
 
 **权限说明**: 需要用户登录
 

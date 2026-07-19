@@ -261,16 +261,19 @@ func (this *Attachment) IGET(ctx *gin.Context) {
 func (this *Attachment) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 	allow := map[string]any{
-		"save":   this.save,
-		"create": this.create,
-		"batch":  this.batch,
+		"save":      this.save,
+		"create":    this.create,
+		"batch":     this.batch,
+		"checktype": this.checkType,
 	}
 	err := this.call(allow, method, ctx)
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "方法调用错误：%v", err.Error()), 405)
 		return
 	}
-	go this.delCache()
+	if method != "checktype" {
+		go this.delCache()
+	}
 }
 
 func (this *Attachment) IPUT(ctx *gin.Context) {
@@ -745,6 +748,55 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 	return result
 }
 
+func (this *Attachment) checkType(ctx *gin.Context) {
+	params := this.params(ctx)
+	fileNames, ok := params["file_names"].([]any)
+	if !ok || len(fileNames) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请提供文件名列表！"), 400)
+		return
+	}
+
+	config := facade.AttachmentConfigInstance
+	if config == nil {
+		this.json(ctx, nil, facade.Lang(ctx, "附件配置未初始化！"), 500)
+		return
+	}
+
+	var results []map[string]any
+	for _, fileName := range fileNames {
+		name := cast.ToString(fileName)
+		fileExt := ""
+		if lastIndex := strings.LastIndex(name, "."); lastIndex > 0 {
+			fileExt = strings.ToLower(name[lastIndex+1:])
+		}
+
+		isAllowed := config.IsExtensionAllowed(fileExt)
+		results = append(results, map[string]any{
+			"file_name":  name,
+			"file_ext":   fileExt,
+			"is_allowed": isAllowed,
+			"message":    utils.Ternary(isAllowed, "文件类型允许上传", "不允许上传该类型的文件"),
+		})
+	}
+
+	allowedCount := 0
+	for _, r := range results {
+		if cast.ToBool(r["is_allowed"]) {
+			allowedCount++
+		}
+	}
+
+	this.json(ctx, gin.H{
+		"results":          results,
+		"allowed_count":    allowedCount,
+		"disallowed_count": len(results) - allowedCount,
+		"allow_extensions": config.AllowExtensions,
+		"max_file_size":    config.MaxFileSize,
+		"max_file_size_kb": config.MaxFileSize,
+		"max_file_size_mb": float64(config.MaxFileSize) / 1024,
+	}, facade.Lang(ctx, "检查完成！"), 200)
+}
+
 func (this *Attachment) batch(ctx *gin.Context) {
 	userId := this.meta.user(ctx).Id
 	if userId == 0 {
@@ -797,6 +849,11 @@ func (this *Attachment) batch(ctx *gin.Context) {
 
 		if result.Error != nil {
 			failCount++
+			results = append(results, map[string]any{
+				"original_name": fileHeader.Filename,
+				"status":        "fail",
+				"error":         result.Error.Error(),
+			})
 			continue
 		}
 
@@ -821,10 +878,30 @@ func (this *Attachment) batch(ctx *gin.Context) {
 			successCount++
 		} else {
 			failCount++
+			results = append(results, map[string]any{
+				"original_name": fileHeader.Filename,
+				"status":        "fail",
+				"error":         "上传失败",
+			})
 		}
 	}
 	facade.Log.Info(map[string]any{"user_id": userId, "success_count": successCount, "fail_count": failCount}, "批量上传附件")
-	this.json(ctx, gin.H{"results": results, "success": successCount, "fail": failCount}, facade.Lang(ctx, "上传完成！"), 200)
+
+	msg := "上传完成！"
+	if successCount == 0 && failCount > 0 {
+		msg = "所有文件上传失败！"
+	} else if successCount > 0 && failCount > 0 {
+		msg = "部分文件上传成功！"
+	}
+
+	code := 200
+	if successCount == 0 && failCount > 0 {
+		code = 400
+	} else if successCount > 0 && failCount > 0 {
+		code = 207
+	}
+
+	this.json(ctx, gin.H{"results": results, "success": successCount, "fail": failCount}, facade.Lang(ctx, msg), code)
 }
 
 func (this *Attachment) update(ctx *gin.Context) {

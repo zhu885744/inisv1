@@ -461,6 +461,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=create&type=login&name=添加数据",
 				"path=upload&type=login&name=上传附件",
 				"path=batch&type=login&name=批量上传附件",
+				"path=checkType&type=login&name=检查文件类型",
 			},
 			"PUT": {
 				"path=update&type=login&name=更新数据",
