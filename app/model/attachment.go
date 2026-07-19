@@ -68,7 +68,7 @@ func (this *Attachment) GetByTarget(targetType string, targetId uint) []map[stri
 }
 
 func (this *Attachment) GetByUploader(uploaderId uint, page, limit int) ([]map[string]any, int64) {
-	query := facade.DB.Model(&[]Attachment{}).Where("uploader_id", uploaderId).Where("status", 1)
+	query := facade.DB.Model(&[]Attachment{}).Where("uploader_id", uploaderId)
 	count := query.Count()
 	data := query.Limit(limit).Page(page).Order("create_time desc").Select()
 	return data, count
