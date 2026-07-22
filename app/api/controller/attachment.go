@@ -335,7 +335,7 @@ func (this *Attachment) one(ctx *gin.Context) {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
 
-		item := query.Where(table).Find()
+		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -373,14 +373,14 @@ func (this *Attachment) all(ctx *gin.Context) {
 		query = query.Where("uploader_id", this.meta.user(ctx).Id)
 	}
 
-	count := query.Where(table).Count()
+	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -435,7 +435,8 @@ func (this *Attachment) rand(ctx *gin.Context) {
 
 	query = this.buildQuery(query, params).Order("RAND()").Limit(limit)
 
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(query.Select()), params["field"])
+	items, _ := query.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -454,7 +455,8 @@ func (this *Attachment) count(ctx *gin.Context) {
 		query = query.Where("uploader_id", this.meta.user(ctx).Id)
 	}
 
-	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := query.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *Attachment) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
@@ -502,7 +504,8 @@ func (this *Attachment) aggregateQuery(ctx *gin.Context, aggFunc func(query *fac
 
 func (this *Attachment) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -513,7 +516,8 @@ func (this *Attachment) sum(ctx *gin.Context) {
 
 func (this *Attachment) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -524,7 +528,8 @@ func (this *Attachment) min(ctx *gin.Context) {
 
 func (this *Attachment) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -571,7 +576,8 @@ func (this *Attachment) column(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		items, _ := query.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -613,10 +619,10 @@ func (this *Attachment) create(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err := facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -736,8 +742,8 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		TargetType: cast.ToString(params["target_type"]), TargetId: cast.ToUint(params["target_id"]),
 		FileHash: fileHash,
 	}
-	tx := facade.DB.Model(&attachment).Create(&attachment)
-	if tx.Error != nil {
+	_, err = facade.DB.Model(&attachment).Create(&attachment)
+	if err != nil {
 		this.safeDeleteFile(item.Path)
 		result.Error = fmt.Errorf("保存附件记录失败")
 		return result
@@ -921,7 +927,7 @@ func (this *Attachment) update(ctx *gin.Context) {
 		query = facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
 	}
 
-	item := query.Find()
+	item, _ := query.Find()
 	if utils.Is.Empty(item) {
 		this.json(ctx, nil, facade.Lang(ctx, "附件不存在！"), 204)
 		return
@@ -946,10 +952,10 @@ func (this *Attachment) update(ctx *gin.Context) {
 		return
 	}
 
-	tx := query.Update(async.Result())
+	_, err := query.Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -1007,10 +1013,10 @@ func (this *Attachment) remove(ctx *gin.Context) {
 		return
 	}
 
-	tx := facade.DB.Model(&model.Attachment{}).Delete(successIds)
+	_, err := facade.DB.Model(&model.Attachment{}).Delete(successIds)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -1037,7 +1043,7 @@ func (this *Attachment) delete(ctx *gin.Context) {
 		return
 	}
 
-	items := facade.DB.Model(&model.Attachment{}).WithTrashed().WhereIn("id", ids).Select()
+	items, _ := facade.DB.Model(&model.Attachment{}).WithTrashed().WhereIn("id", ids).Select()
 
 	validIdSet := make(map[any]bool)
 	for _, item := range items {
@@ -1089,10 +1095,10 @@ func (this *Attachment) delete(ctx *gin.Context) {
 		}
 	}(filesByDriver)
 
-	tx := facade.DB.Model(&model.Attachment{}).WithTrashed().Force().Delete(successIds)
+	_, err := facade.DB.Model(&model.Attachment{}).WithTrashed().Force().Delete(successIds)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -1112,14 +1118,15 @@ func (this *Attachment) clear(ctx *gin.Context) {
 	}
 
 	item := facade.DB.Model(&model.Attachment{}).OnlyTrashed()
-	ids := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids := utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	items := facade.DB.Model(&model.Attachment{}).OnlyTrashed().WhereIn("id", ids).Select()
+	items, _ := facade.DB.Model(&model.Attachment{}).OnlyTrashed().WhereIn("id", ids).Select()
 
 	filesByDriver := make(map[string][]string)
 	for _, item := range items {
@@ -1148,9 +1155,9 @@ func (this *Attachment) clear(ctx *gin.Context) {
 		}
 	}(filesByDriver)
 
-	tx := item.Force().Delete()
+	_, err := item.Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -1173,7 +1180,8 @@ func (this *Attachment) restore(ctx *gin.Context) {
 		item = item.Where("uploader_id", this.meta.user(ctx).Id)
 	}
 
-	validIds := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	validIds := utils.Unity.Ids(columnData)
 	validIdSet := make(map[any]bool)
 	for _, id := range validIds {
 		validIdSet[id] = true
@@ -1197,10 +1205,10 @@ func (this *Attachment) restore(ctx *gin.Context) {
 		return
 	}
 
-	tx := facade.DB.Model(&model.Attachment{}).OnlyTrashed().Restore(successIds)
+	_, err := facade.DB.Model(&model.Attachment{}).OnlyTrashed().Restore(successIds)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 

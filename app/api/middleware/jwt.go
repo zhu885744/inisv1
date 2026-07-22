@@ -54,7 +54,7 @@ func getUserInfoWithCache(uid any, jwtValid int64) (map[string]any, error) {
 		return cast.ToStringMap(facade.Cache.Get(cacheName)), nil
 	}
 
-	user := facade.DB.Model(&model.Users{}).Find(uid)
+	user, _ := facade.DB.Model(&model.Users{}).Find(uid)
 	if utils.Is.Empty(user) {
 		return nil, fmt.Errorf("用户不存在！")
 	}

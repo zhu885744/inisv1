@@ -33,8 +33,7 @@ func InitIpWhite() {
 // BeforeCreate - 创建前的Hook
 func (this *IpWhite) BeforeCreate(tx *gorm.DB) (err error) {
 
-	// 检查是否已存在
-	exist := facade.DB.Model(&IpWhite{}).Where("ip", this.Ip).Exist()
+	exist, _ := facade.DB.Model(&IpWhite{}).Where("ip", this.Ip).Exist()
 	if exist {
 		return fmt.Errorf("ip: %s 已存在白名单中", this.Ip)
 	}

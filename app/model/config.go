@@ -67,10 +67,11 @@ func InitConfig() {
 	}
 
 	for _, item := range configs {
-		if facade.DB.Model(&Config{}).Where("key", item.Key).Exist() {
+		exist, _ := facade.DB.Model(&Config{}).Where("key", item.Key).Exist()
+		if exist {
 			continue
 		}
-		facade.DB.Model(&item).Create(&item)
+		_, _ = facade.DB.Model(&item).Create(&item)
 	}
 }
 

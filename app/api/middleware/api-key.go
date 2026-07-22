@@ -23,7 +23,7 @@ func getConfigValue(key string) any {
 		return facade.Cache.Get(cacheName)
 	}
 
-	item := facade.DB.Model(&model.Config{}).Where("key", key).Find()
+	item, _ := facade.DB.Model(&model.Config{}).Where("key", key).Find()
 	value := item["value"]
 
 	if cacheState {
@@ -33,7 +33,6 @@ func getConfigValue(key string) any {
 	return value
 }
 
-// getApiKeys 获取所有API密钥（带缓存）
 func getApiKeys() []string {
 	cacheName := cacheApiKeyPrefix + "[value]"
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
@@ -42,7 +41,8 @@ func getApiKeys() []string {
 		return cast.ToStringSlice(facade.Cache.Get(cacheName))
 	}
 
-	keys := cast.ToStringSlice(facade.DB.Model(&model.ApiKeys{}).Column("value"))
+	columnData, _ := facade.DB.Model(&model.ApiKeys{}).Column("value")
+	keys := cast.ToStringSlice(columnData)
 
 	if cacheState {
 		go facade.Cache.Set(cacheName, keys)

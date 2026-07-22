@@ -45,7 +45,7 @@ func (this *Moments) AfterFind(tx *gorm.DB) (err error) {
 func (this *Moments) result() (result map[string]any) {
 	author := make(map[string]any)
 	allow := []string{"id", "nickname", "avatar", "description", "result", "title"}
-	user := facade.DB.Model(&Users{}).Find(this.Uid)
+	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
 
 	if !utils.Is.Empty(user) {
 		author = utils.Map.WithField(user, allow)

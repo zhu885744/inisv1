@@ -154,23 +154,21 @@ func (this *Install) createDefaultAdmin() {
 		}
 	}()
 
-	// 检查表是否存在
 	table := model.Users{}
-	if exist := facade.DB.Model(&table).Where("account", defaultAdminAccount).Exist(); exist {
+	exist, _ := facade.DB.Model(&table).Where("account", defaultAdminAccount).Exist()
+	if exist {
 		return
 	}
 
-	// 设置默认管理员信息
 	table.Account = defaultAdminAccount
 	table.Email = defaultAdminEmail
 	table.Password = utils.Password.Create(defaultAdminPassword)
 	table.Nickname = defaultAdminNickname
 
-	// 创建用户
-	result := facade.DB.Model(&table).Create(&table)
-	if result.Error != nil {
+	_, err := facade.DB.Model(&table).Create(&table)
+	if err != nil {
 		facade.Log.Error(map[string]any{
-			"error": result.Error,
+			"error": err,
 		}, "创建管理员用户失败")
 	}
 }
@@ -192,14 +190,14 @@ func (this *Install) createAdmin(ctx *gin.Context) {
 		return
 	}
 
-	// 检查账号是否已存在
-	if exist := facade.DB.Model(&table).Where("account", params["account"]).Exist(); exist {
+	exist, _ := facade.DB.Model(&table).Where("account", params["account"]).Exist()
+	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "该账号已经注册"), DefaultErrorCode)
 		return
 	}
 
-	// 检查邮箱是否已存在
-	if exist := facade.DB.Model(&table).Where("email", params["email"]).Exist(); exist {
+	exist, _ = facade.DB.Model(&table).Where("email", params["email"]).Exist()
+	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已经注册"), DefaultErrorCode)
 		return
 	}
@@ -239,7 +237,7 @@ func (this *Install) createAdmin(ctx *gin.Context) {
 	// 异步添加到管理员组
 	go func(uid string) {
 		uids := []string{uid}
-		group := facade.DB.Model(&model.AuthGroup{}).Find(1)
+		group, _ := facade.DB.Model(&model.AuthGroup{}).Find(1)
 		if !utils.Is.Empty(group) {
 			uids = append(uids, strings.Split(cast.ToString(group["uids"]), "|")...)
 		}

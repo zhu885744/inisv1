@@ -1,39 +1,40 @@
 package model
 
 import (
+	"inis/app/facade"
+	"strings"
+	"sync"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
-	"strings"
-	"sync"
 )
 
 type Article struct {
-	Id         int     				 `gorm:"type:int(32); comment:主键;" json:"id"`
-	Uid		   int     				 `gorm:"type:int(32); comment:用户ID; default:0;" json:"uid"`
-	Title      string  				 `gorm:"size:256; comment:标题; default:Null;" json:"title"`
-	Abstract   string  				 `gorm:"size:512; comment:摘要; default:Null;" json:"abstract"`
-	Content    string  				 `gorm:"type:longtext; comment:内容; default:Null;" json:"content"`
-	Covers     string  				 `gorm:"type:text; comment:封面; default:Null;" json:"covers"`
-	Top 	   int     				 `gorm:"type:int(12); comment:置顶; default:0;" json:"top"`
-	Views	   int     				 `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
-	Tags 	   string  				 `gorm:"comment:标签; default:Null;" json:"tags"`
-	Group	   string  				 `gorm:"comment:分类; default:Null;" json:"group"`
-	Remark     string  				 `gorm:"comment:备注; default:Null;" json:"remark"`
-	Editor     string  				 `gorm:"comment:编辑器; default:'vditor';" json:"editor"`
-	Audit	   int    				 `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
-	Status     int    				 `gorm:"type:int(12); comment:状态 0-草稿 1-发布; default:1;" json:"status"`
-	LastUpdate int64   				 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
+	Id         int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Uid        int    `gorm:"type:int(32); comment:用户ID; default:0;" json:"uid"`
+	Title      string `gorm:"size:256; comment:标题; default:Null;" json:"title"`
+	Abstract   string `gorm:"size:512; comment:摘要; default:Null;" json:"abstract"`
+	Content    string `gorm:"type:longtext; comment:内容; default:Null;" json:"content"`
+	Covers     string `gorm:"type:text; comment:封面; default:Null;" json:"covers"`
+	Top        int    `gorm:"type:int(12); comment:置顶; default:0;" json:"top"`
+	Views      int    `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
+	Tags       string `gorm:"comment:标签; default:Null;" json:"tags"`
+	Group      string `gorm:"comment:分类; default:Null;" json:"group"`
+	Remark     string `gorm:"comment:备注; default:Null;" json:"remark"`
+	Editor     string `gorm:"comment:编辑器; default:'vditor';" json:"editor"`
+	Audit      int    `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
+	Status     int    `gorm:"type:int(12); comment:状态 0-草稿 1-发布; default:1;" json:"status"`
+	LastUpdate int64  `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	// 以下为公共字段
-	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
-	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
-	Result     any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
-	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-	PublishTime int64                `gorm:"comment:发布时间; default:0;" json:"publish_time"`
-	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
-	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text        any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	Result      any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	CreateTime  int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	PublishTime int64                 `gorm:"comment:发布时间; default:0;" json:"publish_time"`
+	UpdateTime  int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+	DeleteTime  soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
 // InitArticle - 初始化Article表
@@ -50,8 +51,8 @@ func InitArticle() {
 func (this *Article) AfterFind(tx *gorm.DB) (err error) {
 
 	this.Result = this.result()
-	this.Text   = cast.ToString(this.Text)
-	this.Json   = utils.Json.Decode(this.Json)
+	this.Text = cast.ToString(this.Text)
+	this.Json = utils.Json.Decode(this.Json)
 
 	return
 }
@@ -73,8 +74,7 @@ func (this *Article) config(key ...any) (json map[string]any) {
 
 	} else {
 
-		config = facade.DB.Model(&Config{}).Where("key", "ARTICLE").Find()
-		// 存储到缓存中
+		config, _ = facade.DB.Model(&Config{}).Where("key", "ARTICLE").Find()
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)
 		}
@@ -111,55 +111,50 @@ func (this *Article) result() (result map[string]any) {
 	wg.Wait()
 
 	return map[string]any{
-		"like"   : like,
-		"share"  : share,
+		"like":    like,
+		"share":   share,
 		"collect": collect,
-		"tags"   : tags,
-		"group"  : group,
-		"author" : author,
+		"tags":    tags,
+		"group":   group,
+		"author":  author,
 		"comment": comment,
 	}
 }
 
-// exp - 从EXP表中获取数据
 func (this *Article) exp(wg *sync.WaitGroup, result *any, where []any, field any) {
 
 	defer wg.Done()
 
-	ids := facade.DB.Model(&EXP{}).Where(where).Where("type", field).Column("uid")
+	ids, _ := facade.DB.Model(&EXP{}).Where(where).Where("type", field).Column("uid")
 
 	*result = cast.ToIntSlice(ids)
 }
 
-// group - 分类
 func (this *Article) group(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 分类信息
 	group := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Group, "|")))
-	*result = facade.DB.Model(&[]ArticleGroup{}).WhereIn("id", group).Column("id", "pid", "name", "avatar", "description")
+	columns, _ := facade.DB.Model(&[]ArticleGroup{}).WhereIn("id", group).Column("id", "pid", "name", "avatar", "description")
+	*result = columns
 }
 
-// tags - 标签
 func (this *Article) tags(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 标签信息
-	tags  := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Tags, "|")))
-	*result = facade.DB.Model(&[]Tags{}).WhereIn("id", tags).Column("id", "name", "avatar", "description")
+	tags := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Tags, "|")))
+	columns, _ := facade.DB.Model(&[]Tags{}).WhereIn("id", tags).Column("id", "name", "avatar", "description")
+	*result = columns
 }
 
-// author - 作者信息
 func (this *Article) author(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 作者信息
 	author := make(map[string]any)
-	allow  := []string{"id", "nickname", "avatar", "description", "result", "title"}
-	user   := facade.DB.Model(&Users{}).Find(this.Uid)
+	allow := []string{"id", "nickname", "avatar", "description", "result", "title"}
+	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
 
 	if !utils.Is.Empty(user) {
 		author = utils.Map.WithField(user, allow)
@@ -175,7 +170,7 @@ func (this *Article) comment(wg *sync.WaitGroup, result *any) {
 
 	// 当前的评论配置
 	comment := cast.ToStringMap(cast.ToStringMap(utils.Json.Decode(this.Json))["comment"])
-	config  := this.config("comment")
+	config := this.config("comment")
 
 	// 允许评论选项继承了父级配置
 	if cast.ToInt(comment["allow"]) == 0 {
@@ -183,11 +178,11 @@ func (this *Article) comment(wg *sync.WaitGroup, result *any) {
 	}
 	// 显示评论选项继承了父级配置
 	if cast.ToInt(comment["show"]) == 0 {
-		comment["show"]  = config["show"]
+		comment["show"] = config["show"]
 	}
 
-	// 评论数量
-	comment["count"] = facade.DB.Model(&Comment{}).Where("bind_type", "article").Where("bind_id", this.Id).Count()
+	count, _ := facade.DB.Model(&Comment{}).Where("bind_type", "article").Where("bind_id", this.Id).Count()
+	comment["count"] = count
 
 	*result = comment
 }

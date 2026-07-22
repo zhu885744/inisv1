@@ -68,38 +68,36 @@ func (this *Comment) syncResult() (result map[string]any) {
 	}
 }
 
-// authorSync - 同步解析作者信息
 func (this *Comment) authorSync(result *any) {
-	// 作者信息
-	user := facade.DB.Model(&Users{}).Find(this.Uid)
+	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
 	*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "result"})
 }
 
-// articleSync - 同步解析文章信息
 func (this *Comment) articleSync(result *any) {
 	if this.BindType != "article" {
 		return
 	}
 
-	*result = utils.Map.WithField(facade.DB.Model(&Article{}).Find(this.BindId), []string{"id", "title"})
+	article, _ := facade.DB.Model(&Article{}).Find(this.BindId)
+	*result = utils.Map.WithField(article, []string{"id", "title"})
 }
 
-// pageSync - 同步解析页面信息
 func (this *Comment) pageSync(result *any) {
 	if this.BindType != "page" {
 		return
 	}
 
-	*result = utils.Map.WithField(facade.DB.Model(&Pages{}).Find(this.BindId), []string{"id", "key", "title"})
+	page, _ := facade.DB.Model(&Pages{}).Find(this.BindId)
+	*result = utils.Map.WithField(page, []string{"id", "key", "title"})
 }
 
-// momentsSync - 同步解析动态信息
 func (this *Comment) momentsSync(result *any) {
 	if this.BindType != "moments" {
 		return
 	}
 
-	*result = utils.Map.WithField(facade.DB.Model(&Moments{}).Find(this.BindId), []string{"id", "content"})
+	moments, _ := facade.DB.Model(&Moments{}).Find(this.BindId)
+	*result = utils.Map.WithField(moments, []string{"id", "content"})
 }
 
 // author - 解析作者信息（保留原有方法，兼容可能的其他调用）

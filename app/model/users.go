@@ -29,14 +29,14 @@ type Users struct {
 	Source      string `gorm:"size:32; default:'default'; comment:注册来源;" json:"source"`
 	Remark      string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 以下为公共字段
-	Json         any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
-	Text         any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
-	Result       any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
-	LoginTime    int64                 `gorm:"size:32; comment:登录时间; default:Null;" json:"login_time"`
-	Status       int                   `gorm:"tinyint;default:0;comment:状态（0正常 1冻结）" json:"status"`
-	CreateTime   int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-	UpdateTime   int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
-	DeleteTime   soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	Result     any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	LoginTime  int64                 `gorm:"size:32; comment:登录时间; default:Null;" json:"login_time"`
+	Status     int                   `gorm:"tinyint;default:0;comment:状态（0正常 1冻结）" json:"status"`
+	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
 // InitUsers - 初始化Users表
@@ -69,7 +69,7 @@ func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 					// 忽略错误，使用默认头像
 				}
 			}()
-			
+
 			avatars := utils.File(utils.FileRequest{
 				Ext:    ".png, .jpg, .jpeg, .gif",
 				Dir:    "public/assets/rand/avatar/",
@@ -101,25 +101,22 @@ func (this *Users) AfterSave(tx *gorm.DB) (err error) {
 		tx.Model(this).UpdateColumn("avatar", this.Avatar)
 	}()
 
-	// 账号 唯一处理
 	if !utils.Is.Empty(this.Account) {
-		exist := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("account", this.Account).Exist()
+		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("account", this.Account).Exist()
 		if exist {
 			return errors.New("账号已存在！")
 		}
 	}
 
-	// 邮箱 唯一处理
 	if !utils.Is.Empty(this.Email) {
-		exist := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("email", this.Email).Exist()
+		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("email", this.Email).Exist()
 		if exist {
 			return errors.New("邮箱已存在！")
 		}
 	}
 
-	// 手机号 唯一处理
 	if !utils.Is.Empty(this.Phone) {
-		exist := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("phone", this.Phone).Exist()
+		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("phone", this.Phone).Exist()
 		if exist {
 			return errors.New("手机号已存在！")
 		}
@@ -136,8 +133,7 @@ func (this *Users) Rules(uid any) (slice []any) {
 
 		var table []AuthGroup
 
-		// 从规则分组里面查找
-		group := facade.DB.Model(&table).Like("uids", "%|"+cast.ToString(uid)+"|%").Select()
+		group, _ := facade.DB.Model(&table).Like("uids", "%|"+cast.ToString(uid)+"|%").Select()
 
 		var hashes []any
 
@@ -165,13 +161,12 @@ func (this *Users) Rules(uid any) (slice []any) {
 		// 判断是否拥有全部权限
 		if utils.In.Array("all", hashes) {
 
-			rules = facade.DB.Model(&AuthRules).Select()
+			rules, _ = facade.DB.Model(&AuthRules).Select()
 
 		} else {
 
-			// hashes 去重 去空
 			hashes = utils.Array.Empty(utils.Array.Unique(hashes))
-			rules = facade.DB.Model(&AuthRules).WhereIn("hash", hashes).Select()
+			rules, _ = facade.DB.Model(&AuthRules).WhereIn("hash", hashes).Select()
 		}
 
 		// 扁平化
@@ -227,8 +222,7 @@ func (this *Users) auth(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 查询自己拥有的权限
-	group := facade.DB.Model(&AuthGroup{}).Like("uids", "%|"+cast.ToString(this.Id)+"|%").Column("id", "rules", "name", "root", "pages", "key")
+	group, _ := facade.DB.Model(&AuthGroup{}).Like("uids", "%|"+cast.ToString(this.Id)+"|%").Column("id", "rules", "name", "root", "pages", "key")
 
 	var ids []int
 	var rules []string
@@ -276,13 +270,15 @@ func (this *Users) level(wg *sync.WaitGroup, result *any) {
 	// 查询下一等级
 	item2 := facade.DB.Model(&Level{}).Field(field).Limit(1).Where("exp", ">", this.Exp).Order("exp asc")
 
-	currents := cast.ToSlice(item1.Column())
+	currentsData, _ := item1.Column()
+	currents := cast.ToSlice(currentsData)
 	var current any
 	if len(currents) > 0 {
 		current = currents[0]
 	}
 
-	nexts := cast.ToSlice(item2.Column())
+	nextsData, _ := item2.Column()
+	nexts := cast.ToSlice(nextsData)
 	var next any
 	if len(nexts) > 0 {
 		next = nexts[0]
@@ -297,8 +293,8 @@ func (this *Users) level(wg *sync.WaitGroup, result *any) {
 // Destroy - 注销后，清空用户数据
 func (this *Users) Destroy(uid any) {
 
-	// 清空权限
-	if ids := facade.DB.Model(&[]AuthGroup{}).WithTrashed().Like("uids", "|"+cast.ToString(uid)+"|").Column("id"); !utils.Is.Empty(ids) {
+	ids, _ := facade.DB.Model(&[]AuthGroup{}).WithTrashed().Like("uids", "|"+cast.ToString(uid)+"|").Column("id")
+	if !utils.Is.Empty(ids) {
 		go (&AuthGroup{}).Auth(uid, ids, true)
 	}
 

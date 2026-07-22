@@ -163,7 +163,7 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	// 查询用户是否存在
-	item := facade.DB.Model(&table).Or([]any{
+	item, _ := facade.DB.Model(&table).Or([]any{
 		[]any{"email", "=", params["account"]},
 		[]any{"phone", "=", params["account"]},
 		[]any{"account", "=", params["account"]},
@@ -256,7 +256,7 @@ func (this *Comm) register(ctx *gin.Context) {
 	}
 
 	// 判断是否已经注册
-	ok := facade.DB.Model(&table).WithTrashed().Where([]any{
+	ok, _ := facade.DB.Model(&table).WithTrashed().Where([]any{
 		[]any{"source", "=", params["source"]},
 		[]any{social, "=", params["social"]},
 	}).Exist()
@@ -274,7 +274,7 @@ func (this *Comm) register(ctx *gin.Context) {
 
 	if !utils.Is.Empty(params["account"]) {
 		// 判断账号是否已经注册
-		ok := facade.DB.Model(&table).WithTrashed().Where([]any{
+		ok, _ := facade.DB.Model(&table).WithTrashed().Where([]any{
 			[]any{"source", "=", params["source"]},
 			[]any{"account", "=", params["account"]},
 		}).Exist()
@@ -378,9 +378,9 @@ func (this *Comm) register(ctx *gin.Context) {
 	utils.Struct.Set(&table, "login_time", time.Now().Unix())
 
 	// 创建用户
-	tx := facade.DB.Model(&table).Create(&table)
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	_, err = facade.DB.Model(&table).Create(&table)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -484,7 +484,7 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 	// 通过 social 查询用户
 	var user map[string]any
 	table := model.Users{}
-	user = facade.DB.Model(&table).Where(socialType, social).Find()
+	user, _ = facade.DB.Model(&table).Where(socialType, social).Find()
 
 	if utils.Is.Empty(user) {
 		if mode == "email" {
@@ -574,9 +574,9 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 	password := utils.Password.Create(params["password"])
 
 	// 更新密码
-	tx := facade.DB.Model(&model.Users{}).Where("id", user["id"]).UpdateColumn("password", password)
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	_, err := facade.DB.Model(&model.Users{}).Where("id", user["id"]).UpdateColumn("password", password)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -615,7 +615,7 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Users{}
 	// 查询用户
-	item := facade.DB.Model(&table).Where("id", jwt.Data["uid"]).Find()
+	item, _ := facade.DB.Model(&table).Where("id", jwt.Data["uid"]).Find()
 	if utils.Is.Empty(item) {
 		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 204)
 		return
@@ -676,7 +676,7 @@ func (this *Comm) signInConfig(ctx *gin.Context) (result map[string]any) {
 	}
 
 	// 不存在则查询数据库
-	result = facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
+	result, _ = facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
 	// 写入缓存
 	go facade.Cache.Set(cacheName, result)
 
@@ -696,7 +696,7 @@ func (this *Comm) loginExp(uid any) {
 func (this *Comm) auth(uid any) {
 
 	// 获取注册配置
-	config := facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
+	config, _ := facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
 	// 配置不存在 - 跳过
 	if utils.Is.Empty(config) {
 		return
@@ -707,7 +707,7 @@ func (this *Comm) auth(uid any) {
 
 	for _, id := range ids {
 		// 查找权限分组数据
-		item := facade.DB.Model(&model.AuthGroup{}).WithTrashed().Where("id", id).Find()
+		item, _ := facade.DB.Model(&model.AuthGroup{}).WithTrashed().Where("id", id).Find()
 		// 分组不存在 - 跳过
 		if utils.Is.Empty(item) {
 			return

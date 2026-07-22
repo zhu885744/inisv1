@@ -218,7 +218,7 @@ func (this *EXP) one(ctx *gin.Context) {
 	} else {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
-		item := query.Where(table).Find()
+		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -248,14 +248,14 @@ func (this *EXP) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
-	count := query.Where(table).Count()
+	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -290,7 +290,8 @@ func (this *EXP) rand(ctx *gin.Context) {
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -333,10 +334,10 @@ func (this *EXP) create(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -368,15 +369,16 @@ func (this *EXP) update(ctx *gin.Context) {
 
 	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
 
-	if !this.meta.root(ctx) && cast.ToInt(item.Find()["uid"]) != this.user(ctx).Id {
+	itemData, _ := item.Find()
+	if !this.meta.root(ctx) && cast.ToInt(itemData["uid"]) != this.user(ctx).Id {
 		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
 		return
 	}
 
-	tx := item.Scan(&table).Update(async.Result())
+	_, err = item.Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -387,12 +389,14 @@ func (this *EXP) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := facade.DB.Model(&model.EXP{})
 	query = this.buildQuery(query, params)
-	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := query.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *EXP) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -403,7 +407,8 @@ func (this *EXP) sum(ctx *gin.Context) {
 
 func (this *EXP) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -414,7 +419,8 @@ func (this *EXP) min(ctx *gin.Context) {
 
 func (this *EXP) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -442,7 +448,8 @@ func (this *EXP) column(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		items, _ := query.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -469,16 +476,17 @@ func (this *EXP) remove(ctx *gin.Context) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := item.Delete(ids)
+	_, err := item.Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -508,9 +516,9 @@ func (this *EXP) delete(ctx *gin.Context) {
 		return
 	}
 
-	tx := item.Force().Delete(ids)
+	_, err := item.Force().Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -526,16 +534,17 @@ func (this *EXP) clear(ctx *gin.Context) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	ids := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids := utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := item.Force().Delete()
+	_, err := item.Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -558,16 +567,17 @@ func (this *EXP) restore(ctx *gin.Context) {
 		item.Where("uid", this.user(ctx).Id)
 	}
 
-	ids = utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := facade.DB.Model(&model.EXP{}).OnlyTrashed().Restore(ids)
+	_, err := facade.DB.Model(&model.EXP{}).OnlyTrashed().Restore(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}
@@ -585,7 +595,7 @@ func (this *EXP) checkInStatus(ctx *gin.Context) {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	checked := facade.DB.Model(&model.EXP{}).Where([]any{
+	checked, _ := facade.DB.Model(&model.EXP{}).Where([]any{
 		[]any{"uid", "=", user.Id},
 		[]any{"type", "=", "check-in"},
 		[]any{"create_time", ">=", today.Unix()},
@@ -595,7 +605,7 @@ func (this *EXP) checkInStatus(ctx *gin.Context) {
 	var checkInTime int64
 
 	if checked {
-		item := facade.DB.Model(&model.EXP{}).Where([]any{
+		item, _ := facade.DB.Model(&model.EXP{}).Where([]any{
 			[]any{"uid", "=", user.Id},
 			[]any{"type", "=", "check-in"},
 			[]any{"create_time", ">=", today.Unix()},
@@ -609,7 +619,7 @@ func (this *EXP) checkInStatus(ctx *gin.Context) {
 		for i := 0; i < 365; i++ {
 			dayStart := today.AddDate(0, 0, -i)
 			dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
-			has := facade.DB.Model(&model.EXP{}).Where([]any{
+			has, _ := facade.DB.Model(&model.EXP{}).Where([]any{
 				[]any{"uid", "=", user.Id},
 				[]any{"type", "=", "check-in"},
 				[]any{"create_time", ">=", dayStart.Unix()},
@@ -654,7 +664,7 @@ func (this *EXP) checkInRank(ctx *gin.Context) {
 	var table []model.EXP
 
 	sql := "SELECT uid, COUNT(id) as check_in_count, SUM(value) AS total_exp FROM inis_exp WHERE type = 'check-in' AND create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY check_in_count DESC, total_exp DESC LIMIT ?"
-	total := facade.DB.Model(&table).Query(sql, start.Unix(), end.Unix(), this.meta.limit(ctx)).Column("uid", "check_in_count", "total_exp")
+	total, _ := facade.DB.Model(&table).Query(sql, start.Unix(), end.Unix(), this.meta.limit(ctx)).Column("uid", "check_in_count", "total_exp")
 	list := cast.ToSlice(total)
 
 	cacheName := this.cache.name(ctx)
@@ -672,7 +682,7 @@ func (this *EXP) checkInRank(ctx *gin.Context) {
 				defer wg.Done()
 				value := cast.ToStringMap(val)
 				field := []string{"id", "nickname", "avatar", "description", "title", "gender", "result"}
-				author := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
+				author, _ := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
 				item := facade.Comm.WithField(author, field)
 				item["check_in_count"] = cast.ToInt(value["check_in_count"])
 				item["total_exp"] = cast.ToInt(value["total_exp"])
@@ -740,17 +750,20 @@ func (this *EXP) share(ctx *gin.Context) {
 
 	switch params["bind_type"] {
 	case "article":
-		if exist := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
 			return
 		}
 	case "page":
-		if exist := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
 			return
 		}
 	case "moments":
-		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
@@ -803,23 +816,26 @@ func (this *EXP) collect(ctx *gin.Context) {
 
 	switch params["bind_type"] {
 	case "article":
-		if exist := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
 			return
 		}
 	case "page":
-		if exist := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
 			return
 		}
 	case "moments":
-		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
 	}
 
-	item := facade.DB.Model(&model.EXP{}).Where([]any{
+	item, _ := facade.DB.Model(&model.EXP{}).Where([]any{
 		[]any{"uid", "=", user.Id},
 		[]any{"type", "=", "collect"},
 		[]any{"bind_id", "=", params["bind_id"]},
@@ -828,11 +844,11 @@ func (this *EXP) collect(ctx *gin.Context) {
 
 	if !utils.Is.Empty(item) {
 		if cast.ToInt(params["state"]) == 0 {
-			tx := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
+			_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
 				"state": 0,
 			})
-			if tx.Error != nil {
-				this.json(ctx, nil, tx.Error.Error(), 400)
+			if err != nil {
+				this.json(ctx, nil, err.Error(), 400)
 				return
 			}
 			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "取消收藏成功！"), 200)
@@ -844,11 +860,11 @@ func (this *EXP) collect(ctx *gin.Context) {
 			return
 		}
 
-		tx := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
+		_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
 			"state": 1,
 		})
-		if tx.Error != nil {
-			this.json(ctx, gin.H{"value": 0}, tx.Error.Error(), 400)
+		if err != nil {
+			this.json(ctx, gin.H{"value": 0}, err.Error(), 400)
 			return
 		}
 
@@ -908,28 +924,32 @@ func (this *EXP) like(ctx *gin.Context) {
 
 	switch params["bind_type"] {
 	case "article":
-		if exist := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
 			return
 		}
 	case "page":
-		if exist := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
 			return
 		}
 	case "comment":
-		if exist := facade.DB.Model(&model.Comment{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Comment{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的评论！"), 400)
 			return
 		}
 	case "moments":
-		if exist := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist(); !exist {
+		exist, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist()
+		if !exist {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
 	}
 
-	item := facade.DB.Model(&model.EXP{}).Where([]any{
+	item, _ := facade.DB.Model(&model.EXP{}).Where([]any{
 		[]any{"uid", "=", user.Id},
 		[]any{"type", "=", "like"},
 		[]any{"bind_id", "=", params["bind_id"]},
@@ -938,11 +958,11 @@ func (this *EXP) like(ctx *gin.Context) {
 
 	if !utils.Is.Empty(item) {
 		if cast.ToInt(params["state"]) == 0 {
-			tx := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
+			_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
 				"state": 0,
 			})
-			if tx.Error != nil {
-				this.json(ctx, nil, tx.Error.Error(), 400)
+			if err != nil {
+				this.json(ctx, nil, err.Error(), 400)
 				return
 			}
 			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "点踩成功！"), 200)
@@ -954,11 +974,11 @@ func (this *EXP) like(ctx *gin.Context) {
 			return
 		}
 
-		tx := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
+		_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
 			"state": 1,
 		})
-		if tx.Error != nil {
-			this.json(ctx, gin.H{"value": 0}, tx.Error.Error(), 400)
+		if err != nil {
+			this.json(ctx, gin.H{"value": 0}, err.Error(), 400)
 			return
 		}
 
@@ -1010,7 +1030,7 @@ func (this *EXP) active(ctx *gin.Context) {
 	var table []model.EXP
 
 	sql := "SELECT uid, SUM(value) AS total, COUNT(id) as number FROM inis_exp WHERE create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY SUM(value) DESC LIMIT ?"
-	total := facade.DB.Model(&table).Query(sql, params["start"], params["end"], this.meta.limit(ctx)).Column("uid", "total", "number")
+	total, _ := facade.DB.Model(&table).Query(sql, params["start"], params["end"], this.meta.limit(ctx)).Column("uid", "total", "number")
 	list := cast.ToSlice(total)
 
 	cacheName := this.cache.name(ctx)
@@ -1028,7 +1048,7 @@ func (this *EXP) active(ctx *gin.Context) {
 				defer wg.Done()
 				value := cast.ToStringMap(val)
 				field := []string{"id", "nickname", "avatar", "description", "login_time", "title", "gender", "result"}
-				author := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
+				author, _ := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
 				item := facade.Comm.WithField(author, field)
 				item["exp"] = cast.ToInt(value["total"])
 				item["count"] = value["number"]

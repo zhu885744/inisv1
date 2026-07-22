@@ -39,7 +39,7 @@ func getRuleFromCache(ctx *gin.Context) map[string]any {
 	}
 
 	var table model.AuthRules
-	result := facade.DB.Model(&table).Where([]any{
+	result, _ := facade.DB.Model(&table).Where([]any{
 		[]any{"route", "=", ctx.Request.URL.Path},
 		[]any{"method", "=", strings.ToUpper(ctx.Request.Method)},
 	}).Find()

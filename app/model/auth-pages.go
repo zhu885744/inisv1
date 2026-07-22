@@ -42,8 +42,8 @@ func (this *AuthPages) AfterFind(tx *gorm.DB) (err error) {
 // BeforeCreate - 创建前的Hook
 func (this *AuthPages) BeforeCreate(tx *gorm.DB) (err error) {
 
-	// 检查 hash 是否存在
-	if exist := facade.DB.Model(&AuthPages{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
+	exist, _ := facade.DB.Model(&AuthPages{}).WithTrashed().Where("hash", this.Hash).Exist()
+	if exist {
 		return fmt.Errorf("hash: %s 已存在", this.Hash)
 	}
 
@@ -95,11 +95,12 @@ func InitAuthPages() {
 
 			hash := utils.Hash.Sum32(item.Path)
 
-			if exist := facade.DB.Model(&AuthPages{}).Where("hash", hash).Exist(); exist {
+			exist, _ := facade.DB.Model(&AuthPages{}).Where("hash", hash).Exist()
+			if exist {
 				return
 			}
 
-			res := facade.DB.Model(&AuthPages{}).Create(&AuthPages{
+			_, err := facade.DB.Model(&AuthPages{}).Create(&AuthPages{
 				Hash: hash,
 				Name: cast.ToString(item.Name),
 				Path: cast.ToString(item.Path),
@@ -107,11 +108,11 @@ func InitAuthPages() {
 				Size: cast.ToString(item.Size),
 			})
 
-			if res.Error != nil {
-				if strings.Contains(res.Error.Error(), "已存在") {
+			if err != nil {
+				if strings.Contains(err.Error(), "已存在") {
 					return
 				}
-				facade.Log.Error(map[string]any{"error": res.Error.Error()}, "自动添加页面失败")
+				facade.Log.Error(map[string]any{"error": err.Error()}, "自动添加页面失败")
 			}
 		}(item, &wg)
 	}

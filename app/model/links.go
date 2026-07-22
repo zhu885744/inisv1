@@ -57,7 +57,7 @@ func (this *Links) AfterFind(tx *gorm.DB) (err error) {
 
 	if this.Group != 0 {
 
-		item := facade.DB.Model(&LinksGroup{}).Find(this.Group)
+		item, _ := facade.DB.Model(&LinksGroup{}).Find(this.Group)
 
 		if !utils.Is.Empty(item) {
 
@@ -94,8 +94,8 @@ func (this *Links) AfterSave(tx *gorm.DB) (err error) {
 // initLinksData - 初始化Links表数据
 func initLinksData() {
 
-	// 如果数据表中有数据，则不进行初始化
-	if facade.DB.Model(&Links{}).Count() != 0 {
+	count, _ := facade.DB.Model(&Links{}).Count()
+	if count != 0 {
 		return
 	}
 

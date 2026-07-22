@@ -30,8 +30,7 @@ func InitLinksGroup() {
 		facade.Log.Error(map[string]any{"error": err}, "LinksGroup表迁移失败")
 		return
 	}
-	// 初始化数据
-	count := facade.DB.Model(&LinksGroup{}).Count()
+	count, _ := facade.DB.Model(&LinksGroup{}).Count()
 	if count != 0 {
 		return
 	}

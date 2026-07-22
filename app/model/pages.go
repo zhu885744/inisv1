@@ -46,9 +46,8 @@ func InitPages() {
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *Pages) AfterSave(tx *gorm.DB) (err error) {
 
-	// key 唯一处理
 	if !utils.Is.Empty(this.Key) {
-		exist := facade.DB.Model(&Pages{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
+		exist, _ := facade.DB.Model(&Pages{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
 		if exist {
 			return errors.New("key 已存在！")
 		}
@@ -75,9 +74,10 @@ func (this *Pages) AfterFind(tx *gorm.DB) (err error) {
 	// 标签信息
 	tags := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Tags, "|")))
 
+	tagsData, _ := facade.DB.Model(&[]Tags{}).WhereIn("id", tags).Column("id", "name", "avatar", "description")
 	this.Result = map[string]any{
 		"comment": comment,
-		"tags":    facade.DB.Model(&[]Tags{}).WhereIn("id", tags).Column("id", "name", "avatar", "description"),
+		"tags":    tagsData,
 	}
 	this.Text = cast.ToString(this.Text)
 	this.Json = utils.Json.Decode(this.Json)
@@ -102,8 +102,7 @@ func (this *Pages) config(key ...any) (json map[string]any) {
 
 	} else {
 
-		config = facade.DB.Model(&Config{}).Where("key", "ARTICLE").Find()
-		// 存储到缓存中
+		config, _ = facade.DB.Model(&Config{}).Where("key", "ARTICLE").Find()
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)
 		}

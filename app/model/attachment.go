@@ -56,21 +56,24 @@ func (this *Attachment) GenerateUUID() string {
 }
 
 func (this *Attachment) GetByUUID(uuid string) map[string]any {
-	return facade.DB.Model(&Attachment{}).Where("uuid", uuid).Find()
+	result, _ := facade.DB.Model(&Attachment{}).Where("uuid", uuid).Find()
+	return result
 }
 
 func (this *Attachment) GetByHash(fileHash string) map[string]any {
-	return facade.DB.Model(&Attachment{}).Where("file_hash", fileHash).Where("status", 1).Find()
+	result, _ := facade.DB.Model(&Attachment{}).Where("file_hash", fileHash).Where("status", 1).Find()
+	return result
 }
 
 func (this *Attachment) GetByTarget(targetType string, targetId uint) []map[string]any {
-	return facade.DB.Model(&[]Attachment{}).Where("target_type", targetType).Where("target_id", targetId).Where("status", 1).Select()
+	result, _ := facade.DB.Model(&[]Attachment{}).Where("target_type", targetType).Where("target_id", targetId).Where("status", 1).Select()
+	return result
 }
 
 func (this *Attachment) GetByUploader(uploaderId uint, page, limit int) ([]map[string]any, int64) {
 	query := facade.DB.Model(&[]Attachment{}).Where("uploader_id", uploaderId)
-	count := query.Count()
-	data := query.Limit(limit).Page(page).Order("create_time desc").Select()
+	count, _ := query.Count()
+	data, _ := query.Limit(limit).Page(page).Order("create_time desc").Select()
 	return data, count
 }
 
@@ -79,24 +82,26 @@ func (this *Attachment) DeleteByUUID(uuid string, uploaderId uint, isAdmin bool)
 	if !isAdmin {
 		query = query.Where("uploader_id", uploaderId)
 	}
-	tx := query.Delete()
-	return tx.Error == nil
+	_, err := query.Delete()
+	return err == nil
 }
 
 func (this *Attachment) ForceDeleteByUUID(uuid string, isAdmin bool) bool {
 	query := facade.DB.Model(&Attachment{}).WithTrashed().Where("uuid", uuid)
 	if !isAdmin {
-		query = query.Where("uploader_id", cast.ToUint(query.Find()["uploader_id"]))
+		result, _ := query.Find()
+		query = query.Where("uploader_id", cast.ToUint(result["uploader_id"]))
 	}
-	tx := query.Force().Delete()
-	return tx.Error == nil
+	_, err := query.Force().Delete()
+	return err == nil
 }
 
 func (this *Attachment) UpdateStatus(uuid string, status int8, isAdmin bool) bool {
 	query := facade.DB.Model(&Attachment{}).Where("uuid", uuid)
 	if !isAdmin {
-		query = query.Where("uploader_id", cast.ToUint(query.Find()["uploader_id"]))
+		result, _ := query.Find()
+		query = query.Where("uploader_id", cast.ToUint(result["uploader_id"]))
 	}
-	tx := query.Update(map[string]any{"status": status})
-	return tx.Error == nil
+	_, err := query.Update(map[string]any{"status": status})
+	return err == nil
 }

@@ -92,8 +92,7 @@ func (this *EXP) Add(table EXP) (err error) {
 	switch table.Type {
 	case "check-in", "login":
 		// 对于签到和登录类型，需要特殊处理，因为它们是每天只能一次的操作
-		// 检查是否已经操作过
-		count := facade.DB.Model(&EXP{}).Where([]any{
+		count, _ := facade.DB.Model(&EXP{}).Where([]any{
 			[]any{"uid", "=", table.Uid},
 			[]any{"type", "=", table.Type},
 			[]any{"create_time", ">=", today.Unix()},
@@ -111,8 +110,7 @@ func (this *EXP) Add(table EXP) (err error) {
 			}
 		}
 	case "like", "collect", "share", "comment":
-		// 对于基于对象的操作，检查是否已经对该对象操作过
-		exist := facade.DB.Model(&EXP{}).Where([]any{
+		exist, _ := facade.DB.Model(&EXP{}).Where([]any{
 			[]any{"uid", "=", table.Uid},
 			[]any{"type", "=", table.Type},
 			[]any{"bind_id", "=", table.BindId},
@@ -125,8 +123,7 @@ func (this *EXP) Add(table EXP) (err error) {
 			canAddExp = false
 		}
 	default:
-		// 对于其他类型，检查总次数是否达到限制
-		count := facade.DB.Model(&EXP{}).Where([]any{
+		count, _ := facade.DB.Model(&EXP{}).Where([]any{
 			[]any{"uid", "=", table.Uid},
 			[]any{"type", "=", table.Type},
 			[]any{"create_time", ">=", today.Unix()},
@@ -146,15 +143,13 @@ func (this *EXP) Add(table EXP) (err error) {
 			table.Description = fmt.Sprintf("%s奖励", limit[table.Type][0])
 		}
 
-		// 添加经验日志
-		tx := facade.DB.Model(&EXP{}).Create(&table)
+		_, err := facade.DB.Model(&EXP{}).Create(&table)
 
-		if tx.Error != nil {
-			return tx.Error
+		if err != nil {
+			return err
 		}
 
-		// 增加经验值
-		facade.DB.Model(&Users{}).Where("id", table.Uid).Inc("exp", table.Value)
+		_, _ = facade.DB.Model(&Users{}).Where("id", table.Uid).Inc("exp", table.Value)
 	}
 
 	// 对于基于对象的操作和其他类型，即使不增加经验值，也返回nil，这样操作可以继续
@@ -182,10 +177,9 @@ func (this *EXP) author(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 作者信息
 	author := make(map[string]any)
 	allow := []string{"id", "nickname", "avatar", "description", "result", "title"}
-	user := facade.DB.Model(&Users{}).Find(this.Uid)
+	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
 
 	if !utils.Is.Empty(user) {
 		author = utils.Map.WithField(user, allow)

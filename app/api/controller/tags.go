@@ -272,7 +272,7 @@ func (this *Tags) one(ctx *gin.Context) {
 
 		mold := facade.DB.Model(&table).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
 		mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-		item := mold.Where(table).Find()
+		item, _ := mold.Where(table).Find()
 
 		// 排除字段
 		data = facade.Comm.WithField(item, params["field"])
@@ -321,7 +321,7 @@ func (this *Tags) all(ctx *gin.Context) {
 	var result []model.Tags
 	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
 	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-	count := mold.Where(table).Count()
+	count, _ := mold.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	// 开启了缓存 并且 缓存中有数据
@@ -334,7 +334,7 @@ func (this *Tags) all(ctx *gin.Context) {
 	} else {
 
 		// 从数据库中获取数据
-		item := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 
 		// 排除字段
 		data = utils.ArrayMapWithField(item, params["field"])
@@ -386,7 +386,8 @@ func (this *Tags) rand(ctx *gin.Context) {
 	mold.ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
 	// 查询并打乱顺序
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -454,10 +455,10 @@ func (this *Tags) create(ctx *gin.Context) {
 	}
 
 	// 添加数据
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -469,6 +470,7 @@ func (this *Tags) update(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx)
+	var err error
 
 	if utils.Is.Empty(params["id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
@@ -476,7 +478,7 @@ func (this *Tags) update(ctx *gin.Context) {
 	}
 
 	// 验证器
-	err := validator.NewValid("tags", params)
+	err = validator.NewValid("tags", params)
 
 	// 参数校验不通过
 	if err != nil {
@@ -516,10 +518,10 @@ func (this *Tags) update(ctx *gin.Context) {
 	}
 
 	// 更新数据
-	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -537,7 +539,8 @@ func (this *Tags) count(ctx *gin.Context) {
 	item := facade.DB.Model(&table)
 	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
-	this.json(ctx, item.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := item.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // sum 求和
@@ -548,7 +551,8 @@ func (this *Tags) sum(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -568,7 +572,8 @@ func (this *Tags) min(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -588,7 +593,8 @@ func (this *Tags) max(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -632,7 +638,8 @@ func (this *Tags) column(ctx *gin.Context) {
 	} else {
 
 		// 从数据库中获取数据 - 排除字段
-		data = utils.ArrayMapWithField(item.Select(), params["field"])
+		items, _ := item.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 
 		// 缓存数据
 		if this.cache.enable(ctx) {
@@ -667,7 +674,8 @@ func (this *Tags) remove(ctx *gin.Context) {
 	item := facade.DB.Model(&table)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -676,9 +684,9 @@ func (this *Tags) remove(ctx *gin.Context) {
 	}
 
 	// 软删除
-	tx := item.Delete(ids)
+	_, err := item.Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -705,7 +713,8 @@ func (this *Tags) delete(ctx *gin.Context) {
 	item := facade.DB.Model(&table).WithTrashed()
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -714,9 +723,9 @@ func (this *Tags) delete(ctx *gin.Context) {
 	}
 
 	// 真实删除
-	tx := item.Force().Delete(ids)
+	_, err := item.Force().Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -732,7 +741,8 @@ func (this *Tags) clear(ctx *gin.Context) {
 
 	item := facade.DB.Model(&table).OnlyTrashed()
 
-	ids := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids := utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -741,9 +751,9 @@ func (this *Tags) clear(ctx *gin.Context) {
 	}
 
 	// 找到所有软删除的数据
-	tx := item.Force().Delete()
+	_, err := item.Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -770,7 +780,8 @@ func (this *Tags) restore(ctx *gin.Context) {
 	item := facade.DB.Model(&table).OnlyTrashed().WhereIn("id", ids)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -779,9 +790,9 @@ func (this *Tags) restore(ctx *gin.Context) {
 	}
 
 	// 还原数据
-	tx := facade.DB.Model(&table).OnlyTrashed().Restore(ids)
+	_, err := facade.DB.Model(&table).OnlyTrashed().Restore(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}

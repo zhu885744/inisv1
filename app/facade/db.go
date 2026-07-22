@@ -104,43 +104,43 @@ type ModelInterface interface {
 	// WithoutField - 排除查询字段
 	WithoutField(args ...any) *ModelStruct
 	// Select - 查询多条
-	Select(args ...any) (result []map[string]any)
+	Select(args ...any) (result []map[string]any, err error)
 	// Find - 查询单条
-	Find(args ...any) (result map[string]any)
+	Find(args ...any) (result map[string]any, err error)
 	// Exist - 是否存在
-	Exist(args ...any) (ok bool)
+	Exist(args ...any) (ok bool, err error)
 	// FindOrEmpty - 是否不存在
-	FindOrEmpty(args ...any) (ok bool)
+	FindOrEmpty(args ...any) (ok bool, err error)
 	// Count - 统计
-	Count() (result int64)
+	Count() (result int64, err error)
 	// Column - 列
-	Column(args ...any) (result any)
+	Column(args ...any) (result any, err error)
 	// Sum - 求和
-	Sum(field string) (result int64)
+	Sum(field string) (result int64, err error)
 	// Max - 最大值
-	Max(field string) (result int64)
+	Max(field string) (result int64, err error)
 	// Min - 最小值
-	Min(field string) (result int64)
+	Min(field string) (result int64, err error)
 	// Update - 更新
-	Update(data ...any) (tx *gorm.DB)
+	Update(data ...any) (tx *gorm.DB, err error)
 	// Force - 真实删除
 	Force() *ModelStruct
 	// Delete - 删除
-	Delete(args ...any) (tx *gorm.DB)
+	Delete(args ...any) (tx *gorm.DB, err error)
 	// Destroy - 销毁
-	Destroy(args ...any) (tx *gorm.DB)
+	Destroy(args ...any) (tx *gorm.DB, err error)
 	// Restore - 恢复
-	Restore(args ...any) (tx *gorm.DB)
+	Restore(args ...any) (tx *gorm.DB, err error)
 	// Create - 创建
-	Create(data ...any) (tx *gorm.DB)
+	Create(data ...any) (tx *gorm.DB, err error)
 	// Save - 保存
-	Save(data ...any) (tx *gorm.DB)
+	Save(data ...any) (tx *gorm.DB, err error)
 	// Inc - 自增
-	Inc(column any, step ...int) *ModelStruct
+	Inc(column any, step ...int) (*ModelStruct, error)
 	// Dec - 自减
-	Dec(column any, step ...int) *ModelStruct
+	Dec(column any, step ...int) (*ModelStruct, error)
 	// UpdateColumn - 更新单个字段
-	UpdateColumn(column any, value any) (tx *gorm.DB)
+	UpdateColumn(column any, value any) (tx *gorm.DB, err error)
 	// Query - 原生查询
 	Query(sql any, args ...any) *ModelStruct
 }

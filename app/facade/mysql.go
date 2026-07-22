@@ -421,12 +421,12 @@ func (this *ModelStruct) Like(args ...any) *ModelStruct {
 	if len(args) >= 2 {
 		field := cast.ToString(args[0])
 		value := cast.ToString(args[1])
-		
+
 		// 自动添加通配符
 		if !strings.Contains(value, "%") {
 			value = "%" + value + "%"
 		}
-		
+
 		query := fmt.Sprintf("`%v` LIKE ?", field)
 		this.model.Where(query, value)
 
@@ -780,101 +780,105 @@ func (this *ModelStruct) WithoutField(args ...any) *ModelStruct {
 }
 
 // Select - 查询多条
-func (this *ModelStruct) Select(args ...any) (result []map[string]any) {
+func (this *ModelStruct) Select(args ...any) (result []map[string]any, err error) {
 
 	if len(args) > 0 {
-		// 根据主键查询
 		if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
-			// 根据 id 批量查询
-			this.model.Where(args[0]).Find(this.dest)
+			tx := this.model.Where(args[0]).Find(this.dest)
+			if tx.Error != nil {
+				return nil, tx.Error
+			}
 		} else {
-			// 根据 id 单个查询
-			this.model.Where("id = ?", args[0]).Find(this.dest)
+			tx := this.model.Where("id = ?", args[0]).Find(this.dest)
+			if tx.Error != nil {
+				return nil, tx.Error
+			}
 		}
 	} else {
-		// 查询全部
-		this.model.Find(this.dest)
+		tx := this.model.Find(this.dest)
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
 	}
 
-	// any to []map[string]any
 	json := utils.Json.Decode(utils.Json.Encode(this.dest))
 	for _, val := range cast.ToSlice(json) {
 		result = append(result, cast.ToStringMap(val))
 	}
 
-	return
+	return result, nil
 }
 
 // Find - 查询单条
-func (this *ModelStruct) Find(args ...any) (result map[string]any) {
+func (this *ModelStruct) Find(args ...any) (result map[string]any, err error) {
 
 	if len(args) > 0 {
-		// 根据ID查询
 		this.model.Where("id = ?", args[0])
 	}
 
 	tx := this.model.First(&this.dest)
 
 	if tx.Error != nil {
-		return nil
+		return nil, tx.Error
 	}
 
 	json := utils.Json.Decode(utils.Json.Encode(this.dest))
 	result = cast.ToStringMap(json)
 
 	if utils.Is.Empty(result) {
-		return nil
+		return nil, nil
 	}
 
-	return result
+	return result, nil
 }
 
 // FindOrEmpty - 查询单条
-func (this *ModelStruct) FindOrEmpty(args ...any) (ok bool) {
+func (this *ModelStruct) FindOrEmpty(args ...any) (ok bool, err error) {
 
 	if len(args) > 0 {
-		// 根据ID查询
 		this.model.Where("id = ?", args[0])
 	}
 
 	tx := this.model.First(&this.dest)
 
 	if tx.Error != nil {
-		return true
+		return true, tx.Error
 	}
 
-	return !utils.Ternary[bool](tx.RowsAffected > 0, true, false)
+	return !utils.Ternary[bool](tx.RowsAffected > 0, true, false), nil
 }
 
 // Exist - 是否存在
-func (this *ModelStruct) Exist(args ...any) (ok bool) {
+func (this *ModelStruct) Exist(args ...any) (ok bool, err error) {
 
 	if len(args) > 0 {
-		// 根据ID查询
 		this.model.Where("id = ?", args[0])
 	}
 
 	tx := this.model.First(&this.dest)
 
 	if tx.Error != nil {
-		return false
+		return false, tx.Error
 	}
 
-	return utils.Ternary[bool](tx.RowsAffected > 0, true, false)
+	return utils.Ternary[bool](tx.RowsAffected > 0, true, false), nil
 }
 
 // Count - 统计
-func (this *ModelStruct) Count() (result int64) {
+func (this *ModelStruct) Count() (result int64, err error) {
 
 	var count int64
 
-	this.model.Count(&count)
+	tx := this.model.Count(&count)
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
 
-	return count
+	return count, nil
 }
 
 // Column - 列
-func (this *ModelStruct) Column(args ...any) (result any) {
+func (this *ModelStruct) Column(args ...any) (result any, err error) {
 
 	if len(args) > 0 {
 		this.model.Select(args[0], args[1:]...)
@@ -883,68 +887,93 @@ func (this *ModelStruct) Column(args ...any) (result any) {
 	if len(args) == 1 {
 
 		var data []string
-		this.model.Pluck(cast.ToString(args[0]), &data)
+		tx := this.model.Pluck(cast.ToString(args[0]), &data)
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
 
-		return data
+		return data, nil
 
 	} else {
 
 		var data []map[string]any
-		this.model.Scan(&data)
+		tx := this.model.Scan(&data)
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
 
-		return data
+		return data, nil
 	}
 }
 
 // Sum - 求和
-func (this *ModelStruct) Sum(field any) (result int64) {
+func (this *ModelStruct) Sum(field any) (result int64, err error) {
 
 	var sum int64
-	this.model.Select("sum(" + cast.ToString(field) + ") as sum").Scan(&sum)
+	tx := this.model.Select("sum(" + cast.ToString(field) + ") as sum").Scan(&sum)
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
 
-	return sum
+	return sum, nil
 }
 
 // Max - 最大值
-func (this *ModelStruct) Max(field any) (result int64) {
+func (this *ModelStruct) Max(field any) (result int64, err error) {
 
 	var sum int64
-	this.model.Select("max(" + cast.ToString(field) + ") as max").Scan(&sum)
+	tx := this.model.Select("max(" + cast.ToString(field) + ") as max").Scan(&sum)
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
 
-	return sum
+	return sum, nil
 }
 
 // Min - 最小值
-func (this *ModelStruct) Min(field any) (result int64) {
+func (this *ModelStruct) Min(field any) (result int64, err error) {
 
 	var sum int64
-	this.model.Select("min(" + cast.ToString(field) + ") as min").Scan(&sum)
+	tx := this.model.Select("min(" + cast.ToString(field) + ") as min").Scan(&sum)
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
 
-	return sum
+	return sum, nil
 }
 
 // Create - 创建
-func (this *ModelStruct) Create(data ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Create(data ...any) (tx *gorm.DB, err error) {
 
 	if len(data) <= 0 {
-		return this.model
+		return this.model, nil
 	}
 
-	return this.model.Create(data[0])
+	tx = this.model.Create(data[0])
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	return tx, nil
 }
 
 // Update - 更新
-func (this *ModelStruct) Update(data ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Update(data ...any) (tx *gorm.DB, err error) {
 
 	if len(data) <= 0 {
-		return this.model
+		return this.model, nil
 	}
 
-	return this.model.Updates(data[0])
+	tx = this.model.Updates(data[0])
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	return tx, nil
 }
 
 // Inc - 自增
-func (this *ModelStruct) Inc(column any, step ...int) *ModelStruct {
+func (this *ModelStruct) Inc(column any, step ...int) (*ModelStruct, error) {
 
 	size := 1
 
@@ -952,13 +981,16 @@ func (this *ModelStruct) Inc(column any, step ...int) *ModelStruct {
 		size = step[0]
 	}
 
-	this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` + ?", size))
+	tx := this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` + ?", size))
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
 
-	return this
+	return this, nil
 }
 
 // Dec - 自减
-func (this *ModelStruct) Dec(column any, step ...int) *ModelStruct {
+func (this *ModelStruct) Dec(column any, step ...int) (*ModelStruct, error) {
 
 	size := 1
 
@@ -966,29 +998,45 @@ func (this *ModelStruct) Dec(column any, step ...int) *ModelStruct {
 		size = step[0]
 	}
 
-	this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` - ?", size))
+	tx := this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` - ?", size))
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
 
-	return this
+	return this, nil
 }
 
 // UpdateColumn - 更新单个字段
-func (this *ModelStruct) UpdateColumn(column any, value any) (tx *gorm.DB) {
-	return this.model.UpdateColumn(cast.ToString(column), value)
+func (this *ModelStruct) UpdateColumn(column any, value any) (tx *gorm.DB, err error) {
+	tx = this.model.UpdateColumn(cast.ToString(column), value)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return tx, nil
 }
 
 // Save - 保存
-func (this *ModelStruct) Save(data ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Save(data ...any) (tx *gorm.DB, err error) {
 
 	if len(data) <= 0 {
-		return this.model
+		return this.model, nil
 	}
 
 	tx = this.model.First(&this.dest)
 	if tx.Error != nil {
-		return this.model.Session(&gorm.Session{}).Create(data[0])
+		tx = this.model.Session(&gorm.Session{}).Create(data[0])
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
+		return tx, nil
 	}
 
-	return this.model.Updates(data[0])
+	tx = this.model.Updates(data[0])
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	return tx, nil
 }
 
 // Force - 真实删除
@@ -998,67 +1046,78 @@ func (this *ModelStruct) Force() *ModelStruct {
 }
 
 // Delete - 删除
-func (this *ModelStruct) Delete(args ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Delete(args ...any) (tx *gorm.DB, err error) {
 
 	if len(args) > 0 {
 
-		// 根据主键删除
 		if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
-			// 根据 id 批量删除
-			return this.model.Delete(nil, args[0])
+			tx = this.model.Delete(nil, args[0])
+			if tx.Error != nil {
+				return nil, tx.Error
+			}
+			return tx, nil
 		}
 
-		// 根据 id 单个删除
-		return this.model.Where("id = ?", args[0]).Delete(nil)
+		tx = this.model.Where("id = ?", args[0]).Delete(nil)
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
+		return tx, nil
 	}
 
-	// 普通删除
-	return this.model.Delete(nil)
+	tx = this.model.Delete(nil)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return tx, nil
 }
 
 // Destroy - 销毁
-func (this *ModelStruct) Destroy(args ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Destroy(args ...any) (tx *gorm.DB, err error) {
 
-	// 如果 args 的长度小于 2，扩容
 	if len(args) < 2 {
 		args = append(args, make([]any, 2-len(args))...)
 	}
 
-	// 如果 args[1] != true，设置为 false
 	if args[1] != true {
 		args[1] = false
 	}
 
 	if args[1] == true {
-		// 真实删除
 		this.model.Unscoped()
 	}
 
 	if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
-		// 根据 id 批量删除
-		return this.model.Delete(nil, args[0])
+		tx = this.model.Delete(nil, args[0])
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
+		return tx, nil
 	}
 
-	// 根据 id 单个删除
-	return this.model.Where("id = ?", args[0]).Delete(nil)
+	tx = this.model.Where("id = ?", args[0]).Delete(nil)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return tx, nil
 }
 
 // Restore - 恢复
-func (this *ModelStruct) Restore(args ...any) (tx *gorm.DB) {
+func (this *ModelStruct) Restore(args ...any) (tx *gorm.DB, err error) {
 
 	if len(args) > 0 {
-		// 根据主键查询
 		if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
-			// 根据 id 批量查询
 			this.model.Where(args[0])
 		} else {
-			// 根据 id 单个查询
 			this.model.Where("id = ?", args[0])
 		}
 	}
 
-	// 恢复
-	return this.model.Unscoped().UpdateColumn(this.softDelete, this.defaultSoftDelete)
+	tx = this.model.Unscoped().UpdateColumn(this.softDelete, this.defaultSoftDelete)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return tx, nil
 }
 
 // Query - 原生查询

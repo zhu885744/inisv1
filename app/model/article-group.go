@@ -37,9 +37,8 @@ func InitArticleGroup() {
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *ArticleGroup) AfterSave(tx *gorm.DB) (err error) {
 
-	// key 唯一处理
 	if !utils.Is.Empty(this.Key) {
-		exist := facade.DB.Model(&ArticleGroup{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
+		exist, _ := facade.DB.Model(&ArticleGroup{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
 		if exist {
 			return errors.New("key 已存在！")
 		}

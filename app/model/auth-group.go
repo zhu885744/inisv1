@@ -3,25 +3,26 @@ package model
 import (
 	"errors"
 	"fmt"
+	"inis/app/facade"
+	"strings"
+	"sync"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"
-	"inis/app/facade"
-	"strings"
-	"sync"
 )
 
 type AuthGroup struct {
-	Id         int    				 `gorm:"type:int(32); comment:主键;" json:"id"`
-	Name       string 				 `gorm:"comment:权限名称;" json:"name"`
-	Key        string 				 `gorm:"size:256; comment:唯一键; default:Null;" json:"key"`
-	Uids       string 				 `gorm:"type:text; comment:用户ID;" json:"uids"`
-	Root	   int    				 `gorm:"type:int(32); comment:'是否拥有越权限操作数据的能力'; default:0;" json:"root"`
-	Rules      string 				 `gorm:"type:text; comment:权限规则;" json:"rules"`
-	Default    int    				 `gorm:"type:int(32); comment:默认权限; default:0;" json:"default"`
-	Pages      string 				 `gorm:"type:text; comment:页面权限; default:Null;" json:"pages"`
-	Remark     string 				 `gorm:"comment:备注; default:Null;" json:"remark"`
+	Id      int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Name    string `gorm:"comment:权限名称;" json:"name"`
+	Key     string `gorm:"size:256; comment:唯一键; default:Null;" json:"key"`
+	Uids    string `gorm:"type:text; comment:用户ID;" json:"uids"`
+	Root    int    `gorm:"type:int(32); comment:'是否拥有越权限操作数据的能力'; default:0;" json:"root"`
+	Rules   string `gorm:"type:text; comment:权限规则;" json:"rules"`
+	Default int    `gorm:"type:int(32); comment:默认权限; default:0;" json:"default"`
+	Pages   string `gorm:"type:text; comment:页面权限; default:Null;" json:"pages"`
+	Remark  string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -39,19 +40,18 @@ func InitAuthGroup() {
 		facade.Log.Error(map[string]any{"error": err}, "AuthGroup表迁移失败")
 		return
 	}
-	// 初始化数据
-	count := facade.DB.Model(&AuthGroup{}).Count()
+	count, _ := facade.DB.Model(&AuthGroup{}).Count()
 	if count != 0 {
 		return
 	}
 	facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
-		Id: 	 1,
+		Id:      1,
 		Name:    "超级管理员",
-        Key:     "admin",
+		Key:     "admin",
 		Uids:    "|1|",
 		Rules:   "all",
 		Pages:   "all",
-		Root: 	 1,
+		Root:    1,
 		Default: 1,
 		Remark:  "超级管理员，拥有所有权限！",
 	})
@@ -60,9 +60,8 @@ func InitAuthGroup() {
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
 
-	// key 唯一处理
 	if !utils.Is.Empty(this.Key) {
-		exist := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
+		exist, _ := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", "!=", this.Id).Where("key", this.Key).Exist()
 		if exist {
 			return errors.New("key 已存在！")
 		}
@@ -74,8 +73,8 @@ func (this *AuthGroup) AfterSave(tx *gorm.DB) (err error) {
 func (this *AuthGroup) AfterFind(tx *gorm.DB) (err error) {
 
 	this.Result = this.result()
-	this.Text   = cast.ToString(this.Text)
-	this.Json   = utils.Json.Decode(this.Json)
+	this.Text = cast.ToString(this.Text)
+	this.Json = utils.Json.Decode(this.Json)
 	return
 }
 
@@ -91,18 +90,17 @@ func (this *AuthGroup) result() (result map[string]any) {
 	wg.Wait()
 
 	return map[string]any{
-		"users"   : users,
+		"users": users,
 	}
 }
 
-// tags - 标签
 func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
 
 	defer wg.Done()
 
-	// 标签信息
-	tags  := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Uids, "|")))
-	*result = facade.DB.Model(&[]Users{}).WhereIn("id", tags).Column("id", "nickname", "avatar", "account")
+	tags := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Uids, "|")))
+	columns, _ := facade.DB.Model(&[]Users{}).WhereIn("id", tags).Column("id", "nickname", "avatar", "account")
+	*result = columns
 }
 
 // Auth 应用权限
@@ -110,7 +108,7 @@ func (this *AuthGroup) Auth(uid any, group any, isRemove bool) {
 
 	for _, id := range utils.Unity.Ids(group) {
 
-		item := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", id).Find()
+		item, _ := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", id).Find()
 		if utils.Is.Empty(item) {
 			continue
 		}

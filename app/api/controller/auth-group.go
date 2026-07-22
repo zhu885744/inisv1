@@ -79,7 +79,7 @@ func (this *AuthGroup) anyToIntSlice(idsAny []any) []int {
 }
 
 func (this *AuthGroup) isSystemAdminGroup(ids []int) (bool, []int) {
-	systemGroupIds := facade.DB.Model(&model.AuthGroup{}).
+	systemGroupIds, _ := facade.DB.Model(&model.AuthGroup{}).
 		Where("id", "=", 1).
 		WhereIn("id", ids).
 		Column("id")
@@ -196,7 +196,7 @@ func (this *AuthGroup) one(ctx *gin.Context) {
 	} else {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
-		item := query.Where(table).Find()
+		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -226,14 +226,14 @@ func (this *AuthGroup) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
-	count := query.Where(table).Count()
+	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -268,7 +268,8 @@ func (this *AuthGroup) rand(ctx *gin.Context) {
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -305,10 +306,10 @@ func (this *AuthGroup) create(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -339,10 +340,10 @@ func (this *AuthGroup) update(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -353,7 +354,8 @@ func (this *AuthGroup) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.withTrashOptions(facade.DB.Model(&model.AuthGroup{}), params)
 	query = this.buildQuery(query, params)
-	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := query.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *AuthGroup) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.ModelStruct, field string) any) (any, string) {
@@ -397,7 +399,8 @@ func (this *AuthGroup) aggregateQuery(ctx *gin.Context, aggFunc func(query *faca
 
 func (this *AuthGroup) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -408,7 +411,8 @@ func (this *AuthGroup) sum(ctx *gin.Context) {
 
 func (this *AuthGroup) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -419,7 +423,8 @@ func (this *AuthGroup) min(ctx *gin.Context) {
 
 func (this *AuthGroup) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -447,7 +452,8 @@ func (this *AuthGroup) column(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		items, _ := query.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -478,7 +484,8 @@ func (this *AuthGroup) remove(ctx *gin.Context) {
 
 	item := facade.DB.Model(&[]model.AuthGroup{}).Where("default", "!=", 1)
 
-	allowIdsAny := utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	allowIdsAny := utils.Unity.Ids(columnData)
 	allowIds := this.anyToIntSlice(allowIdsAny)
 
 	if utils.Is.Empty(allowIds) {
@@ -486,9 +493,9 @@ func (this *AuthGroup) remove(ctx *gin.Context) {
 		return
 	}
 
-	tx := item.Delete(allowIds)
+	_, err := item.Delete(allowIds)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -523,9 +530,9 @@ func (this *AuthGroup) delete(ctx *gin.Context) {
 		return
 	}
 
-	tx := item.Force().Delete(allowIds)
+	_, err := item.Force().Delete(allowIds)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -537,7 +544,8 @@ func (this *AuthGroup) clear(ctx *gin.Context) {
 	table := model.AuthGroup{}
 	item := facade.DB.Model(&table).OnlyTrashed()
 
-	idsAny := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	idsAny := utils.Unity.Ids(columnData)
 	ids := this.anyToIntSlice(idsAny)
 
 	isSys, sysIds := this.isSystemAdminGroup(ids)
@@ -551,9 +559,9 @@ func (this *AuthGroup) clear(ctx *gin.Context) {
 		return
 	}
 
-	tx := item.WhereIn("id", ids).Force().Delete()
+	_, err := item.WhereIn("id", ids).Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -573,7 +581,8 @@ func (this *AuthGroup) restore(ctx *gin.Context) {
 	ids := this.anyToIntSlice(idsAny)
 	item := facade.DB.Model(&model.AuthGroup{}).OnlyTrashed().WhereIn("id", ids)
 
-	allowIdsAny := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	allowIdsAny := utils.Unity.Ids(columnData)
 	allowIds := this.anyToIntSlice(allowIdsAny)
 
 	if utils.Is.Empty(allowIds) {
@@ -581,9 +590,9 @@ func (this *AuthGroup) restore(ctx *gin.Context) {
 		return
 	}
 
-	tx := facade.DB.Model(&model.AuthGroup{}).OnlyTrashed().Restore(allowIds)
+	_, err := facade.DB.Model(&model.AuthGroup{}).OnlyTrashed().Restore(allowIds)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}
@@ -608,7 +617,8 @@ func (this *AuthGroup) uids(ctx *gin.Context) {
 			cull.Where("id", "not in", ids)
 		}
 
-		for _, item := range cull.Select() {
+		cullItems, _ := cull.Select()
+		for _, item := range cullItems {
 			uids := cast.ToIntSlice(utils.ArrayUnique(utils.ArrayEmpty(strings.Split(cast.ToString(item["uids"]), "|"))))
 			if utils.InArray[int](cast.ToInt(params["uid"]), uids) {
 				for key, val := range uids {
@@ -626,9 +636,9 @@ func (this *AuthGroup) uids(ctx *gin.Context) {
 			})
 		}
 
-		add := facade.DB.Model(&[]model.AuthGroup{}).WithTrashed().Where("id", "in", ids).Select()
+		addItems, _ := facade.DB.Model(&[]model.AuthGroup{}).WithTrashed().Where("id", "in", ids).Select()
 
-		for _, item := range add {
+		for _, item := range addItems {
 			uids := strings.Split(cast.ToString(item["uids"]), "|")
 			uids = append(uids, cast.ToString(params["uid"]))
 			var result string

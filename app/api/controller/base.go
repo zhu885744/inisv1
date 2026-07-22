@@ -274,7 +274,7 @@ func (this meta) limit(ctx *gin.Context) (result int) {
 
 	} else {
 
-		config = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_PAGE_LIMIT").Find()
+		config, _ = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_PAGE_LIMIT").Find()
 		// 存储到缓存中
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)

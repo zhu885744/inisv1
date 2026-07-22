@@ -177,15 +177,23 @@ func getSystemStatus() map[string]any {
 					}
 				}()
 
+				usersCount, _ := facade.DB.Model(&model.Users{}).Count()
+				articlesCount, _ := facade.DB.Model(&model.Article{}).Count()
+				commentsCount, _ := facade.DB.Model(&model.Comment{}).Count()
+				pagesCount, _ := facade.DB.Model(&model.Pages{}).Count()
+				linksCount, _ := facade.DB.Model(&model.Links{}).Count()
+				bannersCount, _ := facade.DB.Model(&model.Banner{}).Count()
+				placardsCount, _ := facade.DB.Model(&model.Placard{}).Count()
+				tagsCount, _ := facade.DB.Model(&model.Tags{}).Count()
 				counts = map[string]any{
-					"users":    facade.DB.Model(&model.Users{}).Count(),
-					"articles": facade.DB.Model(&model.Article{}).Count(),
-					"comments": facade.DB.Model(&model.Comment{}).Count(),
-					"pages":    facade.DB.Model(&model.Pages{}).Count(),
-					"links":    facade.DB.Model(&model.Links{}).Count(),
-					"banners":  facade.DB.Model(&model.Banner{}).Count(),
-					"placards": facade.DB.Model(&model.Placard{}).Count(),
-					"tags":     facade.DB.Model(&model.Tags{}).Count(),
+					"users":    usersCount,
+					"articles": articlesCount,
+					"comments": commentsCount,
+					"pages":    pagesCount,
+					"links":    linksCount,
+					"banners":  bannersCount,
+					"placards": placardsCount,
+					"tags":     tagsCount,
 				}
 			}
 

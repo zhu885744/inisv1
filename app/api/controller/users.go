@@ -161,7 +161,7 @@ func (this *Users) one(ctx *gin.Context) {
 		isOwnData := table.Id == user.Id && user.Id != 0
 
 		// 从数据库中获取数据
-		item := mold.Where(table).Find()
+		item, _ := mold.Where(table).Find()
 
 		// 非管理员查看他人数据时，对敏感字段进行脱敏处理
 		if !isAdmin && !isOwnData && !utils.Is.Empty(item) {
@@ -228,7 +228,7 @@ func (this *Users) all(ctx *gin.Context) {
 	var result []model.Users
 	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
 	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
-	count := mold.Where(table).Count()
+	count, _ := mold.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	// 开启了缓存 并且 缓存中有数据
@@ -245,7 +245,7 @@ func (this *Users) all(ctx *gin.Context) {
 		isAdmin := this.meta.root(ctx)
 
 		// 从数据库中获取数据
-		item := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 
 		// 排除字段
 		data = utils.ArrayMapWithField(item, params["field"])
@@ -325,7 +325,8 @@ func (this *Users) rand(ctx *gin.Context) {
 	}
 
 	// 查询并打乱顺序
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -401,10 +402,10 @@ func (this *Users) create(ctx *gin.Context) {
 	}
 
 	// 创建用户
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -416,6 +417,7 @@ func (this *Users) update(ctx *gin.Context) {
 
 	// 获取请求参数
 	params := this.params(ctx)
+	var err error
 
 	if utils.Is.Empty(params["id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
@@ -423,7 +425,7 @@ func (this *Users) update(ctx *gin.Context) {
 	}
 
 	// 验证器
-	err := validator.NewValid("users", params)
+	err = validator.NewValid("users", params)
 
 	// 参数校验不通过
 	if err != nil {
@@ -482,10 +484,10 @@ func (this *Users) update(ctx *gin.Context) {
 	}
 
 	// 更新用户
-	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -532,9 +534,9 @@ func (this *Users) status(ctx *gin.Context) {
 
 	// 更新状态
 	table := model.Users{}
-	tx := facade.DB.Model(&table).Where("id", userId).UpdateColumn("status", status)
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	tx, err := facade.DB.Model(&table).Where("id", userId).UpdateColumn("status", status)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -561,7 +563,8 @@ func (this *Users) count(ctx *gin.Context) {
 	item := facade.DB.Model(&table)
 	item.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
-	this.json(ctx, item.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := item.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // sum 求和
@@ -572,7 +575,8 @@ func (this *Users) sum(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Order(ctx.Request.URL.Query()["order"]).Sum(field)
+		result, _ := query.Order(ctx.Request.URL.Query()["order"]).Sum(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -592,7 +596,8 @@ func (this *Users) min(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Order(ctx.Request.URL.Query()["order"]).Min(field)
+		result, _ := query.Order(ctx.Request.URL.Query()["order"]).Min(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -612,7 +617,8 @@ func (this *Users) max(ctx *gin.Context) {
 
 	// 使用聚合查询
 	data, cacheMsg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Order(ctx.Request.URL.Query()["order"]).Max(field)
+		result, _ := query.Order(ctx.Request.URL.Query()["order"]).Max(field)
+		return result
 	})
 	msg[1] = cacheMsg
 
@@ -641,7 +647,8 @@ func (this *Users) column(ctx *gin.Context) {
 		if !this.meta.root(ctx) {
 			item.WithoutField("account", "email", "phone")
 		}
-		return utils.ArrayMapWithField(item.Select(), params["field"])
+		items, _ := item.Select()
+		return utils.ArrayMapWithField(items, params["field"])
 	})
 
 	if !utils.Is.Empty(data) {
@@ -740,7 +747,8 @@ func (this *Users) remove(ctx *gin.Context) {
 	item := facade.DB.Model(&table)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -749,9 +757,9 @@ func (this *Users) remove(ctx *gin.Context) {
 	}
 
 	// 软删除
-	tx := item.Delete(ids)
+	_, err := item.Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -789,7 +797,8 @@ func (this *Users) delete(ctx *gin.Context) {
 	item := facade.DB.Model(&table).WithTrashed()
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -798,9 +807,9 @@ func (this *Users) delete(ctx *gin.Context) {
 	}
 
 	// 真实删除
-	tx := item.Force().Delete(ids)
+	_, err := item.Force().Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -817,13 +826,14 @@ func (this *Users) clear(ctx *gin.Context) {
 	item := facade.DB.Model(&table).OnlyTrashed()
 
 	// 检查回收站中是否包含系统管理员的账户
-	hasAdmin := item.Where("id", 1).Exist()
+	hasAdmin, _ := item.Where("id", 1).Exist()
 	if hasAdmin {
 		this.json(ctx, nil, facade.Lang(ctx, "回收站中包含系统管理员账户，禁止清空！"), 403)
 		return
 	}
 
-	ids := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids := utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -832,9 +842,9 @@ func (this *Users) clear(ctx *gin.Context) {
 	}
 
 	// 找到所有软删除的数据
-	tx := item.Force().Delete()
+	_, err := item.Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -861,7 +871,8 @@ func (this *Users) restore(ctx *gin.Context) {
 	item := facade.DB.Model(&table).OnlyTrashed().WhereIn("id", ids)
 
 	// 得到允许操作的 id 数组
-	ids = utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	// 无可操作数据
 	if utils.Is.Empty(ids) {
@@ -870,9 +881,9 @@ func (this *Users) restore(ctx *gin.Context) {
 	}
 
 	// 还原数据
-	tx := facade.DB.Model(&table).OnlyTrashed().Restore(ids)
+	_, err := facade.DB.Model(&table).OnlyTrashed().Restore(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}
@@ -885,6 +896,7 @@ func (this *Users) email(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+	var err error
 
 	if utils.Is.Empty(params["email"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "邮箱不能为空！"), 400)
@@ -907,7 +919,7 @@ func (this *Users) email(ctx *gin.Context) {
 	}
 
 	// 从数据库里面找一下这个邮箱是否已经存在
-	exist := facade.DB.Model(&model.Users{}).Where("email", params["email"]).Where("id", "!=", user.Id).Exist()
+	exist, _ := facade.DB.Model(&model.Users{}).Where("email", params["email"]).Where("id", "!=", user.Id).Exist()
 	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已绑定其它账号！"), 400)
 		return
@@ -965,9 +977,9 @@ func (this *Users) email(ctx *gin.Context) {
 	}
 
 	// 更新邮箱
-	tx := facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("email", params["email"])
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	_, err = facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("email", params["email"])
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -982,6 +994,7 @@ func (this *Users) phone(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+	var err error
 
 	if utils.Is.Empty(params["phone"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "手机号不能为空！"), 400)
@@ -1004,7 +1017,7 @@ func (this *Users) phone(ctx *gin.Context) {
 	}
 
 	// 从数据库里面找一下这个手机号是否已经存在
-	exist := facade.DB.Model(&model.Users{}).Where("phone", params["phone"]).Where("id", "!=", user.Id).Exist()
+	exist, _ := facade.DB.Model(&model.Users{}).Where("phone", params["phone"]).Where("id", "!=", user.Id).Exist()
 	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "该手机号已绑定其它账号！"), 400)
 		return
@@ -1067,9 +1080,9 @@ func (this *Users) phone(ctx *gin.Context) {
 	}
 
 	// 更新手机号
-	tx := facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("phone", params["phone"])
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	_, err = facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("phone", params["phone"])
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -1083,6 +1096,7 @@ func (this *Users) phone(ctx *gin.Context) {
 func (this *Users) destroy(ctx *gin.Context) {
 
 	table := model.Users{}
+	var err error
 	params := this.params(ctx, map[string]any{
 		"source": "default",
 	})
@@ -1148,10 +1162,10 @@ func (this *Users) destroy(ctx *gin.Context) {
 	(&model.Users{}).Destroy(user.Id)
 
 	// 删除用户
-	tx := facade.DB.Model(&table).Force().Delete(user.Id)
+	_, err = facade.DB.Model(&table).Force().Delete(user.Id)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 

@@ -43,8 +43,8 @@ func (this *AuthRules) AfterFind(tx *gorm.DB) (err error) {
 // BeforeCreate - 创建前的Hook
 func (this *AuthRules) BeforeCreate(tx *gorm.DB) (err error) {
 
-	// 检查 hash 是否存在
-	if exist := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist(); exist {
+	exist, _ := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist()
+	if exist {
 		return fmt.Errorf("hash: %s 已存在", this.Hash)
 	}
 
@@ -601,15 +601,16 @@ func saveAuthRules(item AuthRules) {
 		Route:  cast.ToString(item.Route),
 	}
 
-	if exist := facade.DB.Model(&AuthRules{}).Where("hash", hash).Exist(); exist {
+	exist, _ := facade.DB.Model(&AuthRules{}).Where("hash", hash).Exist()
+	if exist {
 		return
 	}
 
-	tx := facade.DB.Model(&AuthRules{}).Create(&table)
-	if tx.Error != nil {
-		if strings.Contains(tx.Error.Error(), "已存在") {
+	_, err := facade.DB.Model(&AuthRules{}).Create(&table)
+	if err != nil {
+		if strings.Contains(err.Error(), "已存在") {
 			return
 		}
-		facade.Log.Error(map[string]any{"error": tx.Error.Error()}, "自动添加规则失败")
+		facade.Log.Error(map[string]any{"error": err.Error()}, "自动添加规则失败")
 	}
 }

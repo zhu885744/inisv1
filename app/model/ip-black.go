@@ -57,8 +57,7 @@ func InitIpBlack() {
 // BeforeCreate - 创建前的Hook
 func (this *IpBlack) BeforeCreate(tx *gorm.DB) (err error) {
 
-	// 检查 hash 是否存在
-	exist := facade.DB.Model(&IpBlack{}).Where("ip", this.Ip).Exist()
+	exist, _ := facade.DB.Model(&IpBlack{}).Where("ip", this.Ip).Exist()
 	if exist {
 		return fmt.Errorf("ip: %s 已存在", this.Ip)
 	}

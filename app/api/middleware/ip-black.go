@@ -21,7 +21,7 @@ func getBlacklist() []string {
 		return cast.ToStringSlice(facade.Cache.Get(cacheName))
 	}
 
-	list := facade.DB.Model(&model.IpBlack{}).Column("ip")
+	list, _ := facade.DB.Model(&model.IpBlack{}).Column("ip")
 	column := cast.ToStringSlice(utils.ArrayEmpty(utils.ArrayUnique(cast.ToStringSlice(list))))
 
 	if cacheState {

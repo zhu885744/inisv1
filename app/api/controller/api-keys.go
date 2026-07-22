@@ -220,7 +220,7 @@ func (this *ApiKeys) one(ctx *gin.Context) {
 	} else {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
-		item := query.Where(table).Find()
+		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -250,14 +250,14 @@ func (this *ApiKeys) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
-	count := query.Where(table).Count()
+	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		item := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -292,7 +292,8 @@ func (this *ApiKeys) rand(ctx *gin.Context) {
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -334,15 +335,16 @@ func (this *ApiKeys) create(ctx *gin.Context) {
 		table.Value = this.generateAPIKey()
 	}
 
-	if facade.DB.Model(&table).Where("value", table.Value).Exist() {
+	exist, _ := facade.DB.Model(&table).Where("value", table.Value).Exist()
+	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 已经存在！", table.Value), 400)
 		return
 	}
 
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -377,17 +379,17 @@ func (this *ApiKeys) update(ctx *gin.Context) {
 	}
 
 	keyVal := cast.ToString(async.Get("value"))
-	item := facade.DB.Model(&table).Where("value", keyVal).Find()
+	item, _ := facade.DB.Model(&table).Where("value", keyVal).Find()
 
 	if !utils.Is.Empty(item) && item["value"] != keyVal {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 已经存在！", keyVal), 400)
 		return
 	}
 
-	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -398,12 +400,14 @@ func (this *ApiKeys) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.buildQuery(facade.DB.Model(&model.ApiKeys{}), params)
 	query = this.withTrashOptions(query, params)
-	this.json(ctx, query.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := query.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *ApiKeys) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -414,7 +418,8 @@ func (this *ApiKeys) sum(ctx *gin.Context) {
 
 func (this *ApiKeys) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -425,7 +430,8 @@ func (this *ApiKeys) min(ctx *gin.Context) {
 
 func (this *ApiKeys) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -453,7 +459,8 @@ func (this *ApiKeys) column(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		items, _ := query.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -475,27 +482,30 @@ func (this *ApiKeys) remove(ctx *gin.Context) {
 	}
 
 	query := facade.DB.Model(&model.ApiKeys{})
-	ids = utils.Unity.Ids(query.WhereIn("id", ids).Column("id"))
+	columnData, _ := query.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := query.Delete(ids)
+	_, err := query.Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
 
-	if facade.DB.Model(&model.ApiKeys{}).Count() == 0 {
+	count, _ := facade.DB.Model(&model.ApiKeys{}).Count()
+	if count == 0 {
 		item := facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_API_KEY")
-		if cast.ToInt(item.Find()["value"]) == 1 {
-			res := item.Update(map[string]any{
+		findResult, _ := item.Find()
+		if cast.ToInt(findResult["value"]) == 1 {
+			_, updateErr := item.Update(map[string]any{
 				"value": 0,
 			})
-			if res.Error == nil {
+			if updateErr == nil {
 				go facade.Cache.DelTags("SYSTEM_API_KEY")
 				this.json(ctx, nil, facade.Lang(ctx, "删除成功！<br>同时检测到您开启了API_KEY，但无密钥可用。<br>系统已为您自动关闭API_KEY功能！"), 200)
 				return
@@ -516,15 +526,16 @@ func (this *ApiKeys) delete(ctx *gin.Context) {
 	}
 
 	query := facade.DB.Model(&model.ApiKeys{}).WithTrashed()
-	ids = utils.Unity.Ids(query.WhereIn("id", ids).Column("id"))
+	columnData, _ := query.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := query.Force().Delete(ids)
-	if tx.Error != nil {
+	_, err := query.Force().Delete(ids)
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -541,8 +552,8 @@ func (this *ApiKeys) clear(ctx *gin.Context) {
 		return
 	}
 
-	tx := query.Force().Delete()
-	if tx.Error != nil {
+	_, err := query.Force().Delete()
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -560,16 +571,17 @@ func (this *ApiKeys) restore(ctx *gin.Context) {
 	}
 
 	query := facade.DB.Model(&model.ApiKeys{}).OnlyTrashed().WhereIn("id", ids)
-	ids = utils.Unity.Ids(query.Column("id"))
+	columnData, _ := query.Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := facade.DB.Model(&model.ApiKeys{}).OnlyTrashed().Restore(ids)
+	_, err := facade.DB.Model(&model.ApiKeys{}).OnlyTrashed().Restore(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}

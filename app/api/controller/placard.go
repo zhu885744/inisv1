@@ -212,7 +212,7 @@ func (this *Placard) one(ctx *gin.Context) {
 	} else {
 		mold := this.withTrashOptions(facade.DB.Model(&table), params)
 		mold = this.buildQuery(mold, params)
-		item := mold.Where(table).Find()
+		item, _ := mold.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -243,14 +243,14 @@ func (this *Placard) all(ctx *gin.Context) {
 
 	mold := this.withTrashOptions(facade.DB.Model(&result), params)
 	mold = this.buildQuery(mold, params)
-	count := mold.Where(table).Count()
+	count, _ := mold.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		item := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
@@ -286,7 +286,8 @@ func (this *Placard) rand(ctx *gin.Context) {
 	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(mold.Select()), params["field"])
+	items, _ := mold.Select()
+	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -332,10 +333,10 @@ func (this *Placard) create(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).Create(&table)
+	_, err = facade.DB.Model(&table).Create(&table)
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -345,12 +346,13 @@ func (this *Placard) create(ctx *gin.Context) {
 // update 更新数据
 func (this *Placard) update(ctx *gin.Context) {
 	params := this.params(ctx)
+	var err error
 	if utils.Is.Empty(params["id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
 		return
 	}
 
-	err := validator.NewValid("placard", params)
+	err = validator.NewValid("placard", params)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
@@ -374,10 +376,10 @@ func (this *Placard) update(ctx *gin.Context) {
 		}
 	}
 
-	tx := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
 
-	if tx.Error != nil {
-		this.json(ctx, nil, tx.Error.Error(), 400)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
@@ -389,13 +391,15 @@ func (this *Placard) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	item := facade.DB.Model(&model.Placard{})
 	item = this.buildQuery(item, params)
-	this.json(ctx, item.Count(), facade.Lang(ctx, "查询成功！"), 200)
+	count, _ := item.Count()
+	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // sum 求和
 func (this *Placard) sum(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Sum(field)
+		result, _ := query.Sum(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -407,7 +411,8 @@ func (this *Placard) sum(ctx *gin.Context) {
 // min 求最小值
 func (this *Placard) min(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Min(field)
+		result, _ := query.Min(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -419,7 +424,8 @@ func (this *Placard) min(ctx *gin.Context) {
 // max 求最大值
 func (this *Placard) max(ctx *gin.Context) {
 	data, msg := this.aggregateQuery(ctx, func(query *facade.ModelStruct, field string) any {
-		return query.Max(field)
+		result, _ := query.Max(field)
+		return result
 	})
 	if data == nil && msg == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "field"), 400)
@@ -448,7 +454,8 @@ func (this *Placard) column(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		data = utils.ArrayMapWithField(query.Select(), params["field"])
+		items, _ := query.Select()
+		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
 
@@ -471,16 +478,17 @@ func (this *Placard) remove(ctx *gin.Context) {
 	}
 
 	item := facade.DB.Model(&model.Placard{})
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := item.Delete(ids)
+	_, err := item.Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -499,16 +507,17 @@ func (this *Placard) delete(ctx *gin.Context) {
 	}
 
 	item := facade.DB.Model(&model.Placard{}).WithTrashed()
-	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+	columnData, _ := item.WhereIn("id", ids).Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := item.Force().Delete(ids)
+	_, err := item.Force().Delete(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
@@ -521,16 +530,17 @@ func (this *Placard) clear(ctx *gin.Context) {
 	table := model.Placard{}
 	item := facade.DB.Model(&table).OnlyTrashed()
 
-	ids := utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids := utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := item.Force().Delete()
+	_, err := item.Force().Delete()
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
@@ -549,16 +559,17 @@ func (this *Placard) restore(ctx *gin.Context) {
 	}
 
 	item := facade.DB.Model(&model.Placard{}).OnlyTrashed().WhereIn("id", ids)
-	ids = utils.Unity.Ids(item.Column("id"))
+	columnData, _ := item.Column("id")
+	ids = utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	tx := facade.DB.Model(&model.Placard{}).OnlyTrashed().Restore(ids)
+	_, err := facade.DB.Model(&model.Placard{}).OnlyTrashed().Restore(ids)
 
-	if tx.Error != nil {
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
 		return
 	}

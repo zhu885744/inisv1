@@ -2,24 +2,25 @@ package middleware
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
-	"golang.org/x/time/rate"
 	"inis/app/facade"
 	"inis/app/model"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
+	"golang.org/x/time/rate"
 )
 
 // QPS常量
 const (
-	qpsPointCacheName   = "config[SYSTEM_QPS]"
-	qpsBlockCacheName   = "config[SYSTEM_QPS_BLOCK]"
-	defaultPointSpeed   = 10
-	defaultGlobalSpeed  = 50
-	qpsWarnInterval     = 10 * time.Millisecond
+	qpsPointCacheName  = "config[SYSTEM_QPS]"
+	qpsBlockCacheName  = "config[SYSTEM_QPS_BLOCK]"
+	defaultPointSpeed  = 10
+	defaultGlobalSpeed = 50
+	qpsWarnInterval    = 10 * time.Millisecond
 )
 
 // QoSPoint - 单接口限流器
@@ -50,7 +51,7 @@ func QpsPoint() gin.HandlerFunc {
 		if cacheState && facade.Cache.Has(qpsPointCacheName) {
 			config = cast.ToStringMap(facade.Cache.Get(qpsPointCacheName))
 		} else {
-			config = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
+			config, _ = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
 			if cacheState {
 				go facade.Cache.Set(qpsPointCacheName, config)
 			}
@@ -87,7 +88,6 @@ func QpsPoint() gin.HandlerFunc {
 	}
 }
 
-// QpsGlobal - 全局接口限流器
 func QpsGlobal() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		var config map[string]any
@@ -97,7 +97,7 @@ func QpsGlobal() gin.HandlerFunc {
 		if cacheState && facade.Cache.Has(qpsPointCacheName) {
 			config = cast.ToStringMap(facade.Cache.Get(qpsPointCacheName))
 		} else {
-			config = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
+			config, _ = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS").Find()
 			if cacheState {
 				go facade.Cache.Set(qpsPointCacheName, config)
 			}
@@ -187,8 +187,8 @@ func qpsAutoUnban() {
 		for _, ipBlack := range expiredIPs {
 			facade.DB.Model(&model.IpBlack{}).Where("id", ipBlack.Id).Delete(&model.IpBlack{})
 			facade.Log.Info(map[string]any{
-				"ip":     ipBlack.Ip,
-				"level":  ipBlack.Level,
+				"ip":    ipBlack.Ip,
+				"level": ipBlack.Level,
 			}, "IP自动解封")
 		}
 
@@ -215,7 +215,8 @@ func QpsWarn(ctx *gin.Context) {
 	if cacheState && facade.Cache.Has(qpsBlockCacheName) {
 		QpsBlock = cast.ToStringMap(facade.Cache.Get(qpsBlockCacheName))
 	} else {
-		QpsBlock = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_BLOCK").Find()
+		QpsBlockData, _ := facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_BLOCK").Find()
+		QpsBlock = QpsBlockData
 		if cacheState {
 			go facade.Cache.Set(qpsBlockCacheName, QpsBlock)
 		}
@@ -230,8 +231,8 @@ func QpsWarn(ctx *gin.Context) {
 	}
 
 	config := cast.ToStringMap(QpsBlock["json"])
-	unix := time.Now().Add(-cast.ToDuration(utils.Calc(config["second"]))*time.Second).Unix()
-	count := facade.DB.Model(&model.QpsWarn{}).Where("ip", ip).Where("create_time", ">", unix).Count()
+	unix := time.Now().Add(-cast.ToDuration(utils.Calc(config["second"])) * time.Second).Unix()
+	count, _ := facade.DB.Model(&model.QpsWarn{}).Where("ip", ip).Where("create_time", ">", unix).Count()
 
 	// 达到封禁阈值
 	if count >= cast.ToInt64(config["count"]) {
@@ -288,17 +289,16 @@ func QpsWarn(ctx *gin.Context) {
 		return
 	}
 
-	// 记录警告
-	tx := facade.DB.Model(&model.QpsWarn{}).Create(&model.QpsWarn{
+	_, err := facade.DB.Model(&model.QpsWarn{}).Create(&model.QpsWarn{
 		Ip:     ip,
 		Agent:  ctx.GetHeader("User-Agent"),
 		Path:   ctx.Request.URL.Path,
 		Method: strings.ToUpper(ctx.Request.Method),
 	})
 
-	if tx.Error != nil {
+	if err != nil {
 		facade.Log.Error(map[string]any{
-			"error":     tx.Error.Error(),
+			"error":     err.Error(),
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
 			"file_line": utils.Caller().Line,
@@ -317,7 +317,7 @@ func sendBanNotification(ctx *gin.Context, ip string, level int, duration int64,
 	if cacheState && facade.Cache.Has(notifyCacheName) {
 		notifyConfig = cast.ToStringMap(facade.Cache.Get(notifyCacheName))
 	} else {
-		notifyConfig = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_NOTIFY").Find()
+		notifyConfig, _ = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_NOTIFY").Find()
 		if cacheState {
 			go facade.Cache.Set(notifyCacheName, notifyConfig)
 		}
