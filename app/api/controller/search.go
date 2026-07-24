@@ -4,6 +4,7 @@ import (
 	"inis/app/facade"
 	"inis/app/model"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,35 @@ func (this *Search) buildSearchQuery(keyword string, searchFields []string, audi
 	}
 }
 
+// highlightKeyword 关键词高亮
+func (this *Search) highlightKeyword(text string, keyword string) string {
+	if text == "" || keyword == "" {
+		return text
+	}
+	// 转义正则特殊字符
+	re := regexp.MustCompile(regexp.QuoteMeta(keyword))
+	return re.ReplaceAllString(text, `<mark>$0</mark>`)
+}
+
+// highlightResult 高亮搜索结果中的关键词
+func (this *Search) highlightResult(data []map[string]any, keyword string) []map[string]any {
+	if keyword == "" {
+		return data
+	}
+
+	// 需要高亮的字段
+	highlightFields := []string{"title", "content", "abstract", "description", "name", "nickname"}
+
+	for _, item := range data {
+		for _, field := range highlightFields {
+			if val, ok := item[field].(string); ok {
+				item[field] = this.highlightKeyword(val, keyword)
+			}
+		}
+	}
+	return data
+}
+
 // maskEmail 邮箱脱敏
 func (this *Search) maskEmail(email string) string {
 	if email == "" {
@@ -66,7 +96,7 @@ func (this *Search) maskEmail(email string) string {
 }
 
 // processSearchResult 处理搜索结果
-func (this *Search) processSearchResult(items any, count int64, limit int, searchType string) map[string]interface{} {
+func (this *Search) processSearchResult(items any, count int64, limit int, searchType string, keyword ...string) map[string]interface{} {
 	var data []map[string]any
 
 	switch v := items.(type) {
@@ -139,6 +169,11 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 		}
 	}
 
+	// 高亮关键词
+	if len(keyword) > 0 && keyword[0] != "" {
+		data = this.highlightResult(data, keyword[0])
+	}
+
 	return map[string]interface{}{
 		"data":  data,
 		"count": count,
@@ -208,6 +243,7 @@ func (this *Search) article(ctx *gin.Context) {
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -218,9 +254,10 @@ func (this *Search) article(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
 	// 执行实际的文章搜索
-	result := this.searchArticle(keyword, page, limit)
+	result := this.searchArticle(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
 	// 如果没有搜索到结果，返回空数据而不是测试数据
@@ -233,11 +270,11 @@ func (this *Search) article(ctx *gin.Context) {
 
 // pages - 页面搜索
 func (this *Search) pages(ctx *gin.Context) {
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -248,12 +285,11 @@ func (this *Search) pages(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
-	// 执行实际的页面搜索
-	result := this.searchPages(keyword, page, limit)
+	result := this.searchPages(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
-	// 如果没有搜索到结果，返回空数据
 	if result["count"] == int64(0) {
 		result["data"] = []map[string]any{}
 	}
@@ -263,11 +299,11 @@ func (this *Search) pages(ctx *gin.Context) {
 
 // tags - 标签搜索
 func (this *Search) tags(ctx *gin.Context) {
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -278,12 +314,11 @@ func (this *Search) tags(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
-	// 执行实际的标签搜索
-	result := this.searchTags(keyword, page, limit)
+	result := this.searchTags(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
-	// 如果没有搜索到结果，返回空数据
 	if result["count"] == int64(0) {
 		result["data"] = []map[string]any{}
 	}
@@ -293,11 +328,11 @@ func (this *Search) tags(ctx *gin.Context) {
 
 // users - 用户搜索
 func (this *Search) users(ctx *gin.Context) {
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -308,12 +343,11 @@ func (this *Search) users(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
-	// 执行实际的用户搜索
-	result := this.searchUsers(keyword, page, limit)
+	result := this.searchUsers(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
-	// 如果没有搜索到结果，返回空数据
 	if result["count"] == int64(0) {
 		result["data"] = []map[string]any{}
 	}
@@ -323,11 +357,11 @@ func (this *Search) users(ctx *gin.Context) {
 
 // links - 友链搜索
 func (this *Search) links(ctx *gin.Context) {
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -338,12 +372,11 @@ func (this *Search) links(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
-	// 执行实际的友链搜索
-	result := this.searchLinks(keyword, page, limit)
+	result := this.searchLinks(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
-	// 如果没有搜索到结果，返回空数据
 	if result["count"] == int64(0) {
 		result["data"] = []map[string]any{}
 	}
@@ -353,11 +386,11 @@ func (this *Search) links(ctx *gin.Context) {
 
 // moments - 动态搜索
 func (this *Search) moments(ctx *gin.Context) {
-	// 获取请求参数
 	params := this.params(ctx, map[string]any{
 		"keyword": "",
 		"page":    1,
 		"limit":   10,
+		"fields":  "",
 	})
 
 	keyword := cast.ToString(params["keyword"])
@@ -368,12 +401,11 @@ func (this *Search) moments(ctx *gin.Context) {
 
 	page := cast.ToInt(params["page"])
 	limit := cast.ToInt(params["limit"])
+	fields := cast.ToString(params["fields"])
 
-	// 执行实际的动态搜索
-	result := this.searchMoments(keyword, page, limit)
+	result := this.searchMoments(keyword, page, limit, fields)
 	result["keyword"] = keyword
 
-	// 如果没有搜索到结果，返回空数据
 	if result["count"] == int64(0) {
 		result["data"] = []map[string]any{}
 	}
@@ -407,15 +439,29 @@ func (this *Search) all(ctx *gin.Context) {
 }
 
 // searchArticle - 搜索文章
-func (this *Search) searchArticle(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchArticle(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
 	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
+	// 构建搜索字段
+	searchFields := []string{"title", "content", "abstract", "tags"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
+
 	// 构建搜索查询
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+	args = append(args, 1) // audit = 1
+
 	var articles []model.Article
-	query := db.Model(&articles).Where("(title LIKE ? OR content LIKE ? OR abstract LIKE ? OR tags LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, searchTerm, 1)
+	query := db.Model(&articles).Where("("+strings.Join(conditions, " OR ")+") AND audit = ?", args...)
 
 	// 统计总数
 	var count int64
@@ -425,179 +471,180 @@ func (this *Search) searchArticle(keyword string, page, limit int) map[string]in
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&articles)
 
-	return this.processSearchResult(articles, count, limit, "article")
+	return this.processSearchResult(articles, count, limit, "article", keyword)
 }
 
 // searchPages - 搜索独立页面
-func (this *Search) searchPages(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchPages(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
-	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索查询
-	var pages []model.Pages
-	query := db.Model(&pages).Where("(title LIKE ? OR content LIKE ? OR `key` LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, 1)
+	searchFields := []string{"title", "content", "key"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
 
-	// 统计总数
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		if field == "key" {
+			conditions = append(conditions, "`key` LIKE ?")
+		} else {
+			conditions = append(conditions, field+" LIKE ?")
+		}
+		args = append(args, searchTerm)
+	}
+	args = append(args, 1)
+
+	var pages []model.Pages
+	query := db.Model(&pages).Where("("+strings.Join(conditions, " OR ")+") AND audit = ?", args...)
+
 	var count int64
 	query.Count(&count)
 
-	// 分页查询
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&pages)
 
-	return this.processSearchResult(pages, count, limit, "pages")
+	return this.processSearchResult(pages, count, limit, "pages", keyword)
 }
 
 // searchTags - 搜索标签
-func (this *Search) searchTags(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchTags(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
-	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索查询
-	var tags []model.Tags
-	query := db.Model(&tags).Where("(name LIKE ? OR description LIKE ?)", searchTerm, searchTerm)
+	searchFields := []string{"name", "description"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
 
-	// 统计总数
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+
+	var tags []model.Tags
+	query := db.Model(&tags).Where("("+strings.Join(conditions, " OR ")+")", args...)
+
 	var count int64
 	query.Count(&count)
 
-	// 分页查询
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&tags)
 
-	return this.processSearchResult(tags, count, limit, "tags")
+	return this.processSearchResult(tags, count, limit, "tags", keyword)
 }
 
 // searchUsers - 搜索用户
-func (this *Search) searchUsers(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchUsers(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
-	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索查询 - 搜索昵称、邮箱、描述、头衔，排除冻结用户
-	var users []model.Users
-	query := db.Model(&users).Where("(nickname LIKE ? OR email LIKE ? OR description LIKE ? OR title LIKE ?) AND status = ?", searchTerm, searchTerm, searchTerm, searchTerm, 0)
+	searchFields := []string{"nickname", "email", "description", "title"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
 
-	// 统计总数
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+	args = append(args, 0)
+
+	var users []model.Users
+	query := db.Model(&users).Where("("+strings.Join(conditions, " OR ")+") AND status = ?", args...)
+
 	var count int64
 	query.Count(&count)
 
-	// 分页查询
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&users)
 
-	return this.processSearchResult(users, count, limit, "users")
+	return this.processSearchResult(users, count, limit, "users", keyword)
 }
 
 // searchLinks - 搜索友链
-func (this *Search) searchLinks(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchLinks(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
-	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索查询 - 搜索昵称、描述、链接，只搜索审核通过的友链
-	var links []model.Links
-	query := db.Model(&links).Where("(nickname LIKE ? OR description LIKE ? OR url LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, 1)
+	searchFields := []string{"nickname", "description", "url"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
 
-	// 统计总数
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+	args = append(args, 1)
+
+	var links []model.Links
+	query := db.Model(&links).Where("("+strings.Join(conditions, " OR ")+") AND audit = ?", args...)
+
 	var count int64
 	query.Count(&count)
 
-	// 分页查询
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&links)
 
-	return this.processSearchResult(links, count, limit, "links")
+	return this.processSearchResult(links, count, limit, "links", keyword)
 }
 
 // searchMoments - 搜索动态
-func (this *Search) searchMoments(keyword string, page, limit int) map[string]interface{} {
+func (this *Search) searchMoments(keyword string, page, limit int, fields ...string) map[string]interface{} {
 	searchTerm := "%" + keyword + "%"
 
-	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索查询 - 搜索内容、位置，只搜索审核通过的动态
-	var moments []model.Moments
-	query := db.Model(&moments).Where("(content LIKE ? OR location LIKE ?) AND audit = ?", searchTerm, searchTerm, 1)
+	searchFields := []string{"content", "location"}
+	if len(fields) > 0 && fields[0] != "" {
+		searchFields = strings.Split(fields[0], ",")
+	}
 
-	// 统计总数
+	var conditions []string
+	var args []any
+	for _, field := range searchFields {
+		conditions = append(conditions, field+" LIKE ?")
+		args = append(args, searchTerm)
+	}
+	args = append(args, 1)
+
+	var moments []model.Moments
+	query := db.Model(&moments).Where("("+strings.Join(conditions, " OR ")+") AND audit = ?", args...)
+
 	var count int64
 	query.Count(&count)
 
-	// 分页查询
 	offset := (page - 1) * limit
 	query.Limit(limit).Offset(offset).Order("create_time desc").Find(&moments)
 
-	return this.processSearchResult(moments, count, limit, "moments")
+	return this.processSearchResult(moments, count, limit, "moments", keyword)
 }
 
 // searchAll - 全局搜索
 func (this *Search) searchAll(keyword string, page, limit int) map[string]interface{} {
-	searchTerm := "%" + keyword + "%"
-
-	// 使用底层的 GORM 连接
-	db := facade.DB.Drive()
-
-	// 计算每个类型的 limit
 	perTypeLimit := limit / 6
 	if perTypeLimit < 1 {
 		perTypeLimit = 1
 	}
 
-	// 搜索文章 - 只搜索审核通过的文章
-	var articles []model.Article
-	articleQuery := db.Model(&articles).Where("(title LIKE ? OR content LIKE ? OR abstract LIKE ? OR tags LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, searchTerm, 1)
-	var articleCount int64
-	articleQuery.Count(&articleCount)
-	articleQuery.Limit(perTypeLimit).Order("create_time desc").Find(&articles)
-	articleResult := this.processSearchResult(articles, articleCount, perTypeLimit, "article")
-
-	// 搜索独立页面
-	var pages []model.Pages
-	pagesQuery := db.Model(&pages).Where("(title LIKE ? OR content LIKE ? OR abstract LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, 1)
-	var pagesCount int64
-	pagesQuery.Count(&pagesCount)
-	pagesQuery.Limit(perTypeLimit).Order("create_time desc").Find(&pages)
-	pagesResult := this.processSearchResult(pages, pagesCount, perTypeLimit, "pages")
-
-	// 搜索标签
-	var tags []model.Tags
-	tagsQuery := db.Model(&tags).Where("(name LIKE ? OR description LIKE ?)", searchTerm, searchTerm)
-	var tagsCount int64
-	tagsQuery.Count(&tagsCount)
-	tagsQuery.Limit(perTypeLimit).Order("create_time desc").Find(&tags)
-	tagsResult := this.processSearchResult(tags, tagsCount, perTypeLimit, "tags")
-
-	// 搜索用户 - 排除冻结用户
-	var users []model.Users
-	usersQuery := db.Model(&users).Where("(nickname LIKE ? OR email LIKE ? OR description LIKE ? OR title LIKE ?) AND status = ?", searchTerm, searchTerm, searchTerm, searchTerm, 0)
-	var usersCount int64
-	usersQuery.Count(&usersCount)
-	usersQuery.Limit(perTypeLimit).Order("create_time desc").Find(&users)
-	usersResult := this.processSearchResult(users, usersCount, perTypeLimit, "users")
-
-	// 搜索友链 - 只搜索审核通过的友链
-	var links []model.Links
-	linksQuery := db.Model(&links).Where("(nickname LIKE ? OR description LIKE ? OR url LIKE ?) AND audit = ?", searchTerm, searchTerm, searchTerm, 1)
-	var linksCount int64
-	linksQuery.Count(&linksCount)
-	linksQuery.Limit(perTypeLimit).Order("create_time desc").Find(&links)
-	linksResult := this.processSearchResult(links, linksCount, perTypeLimit, "links")
-
-	// 搜索动态 - 只搜索审核通过的动态
-	var moments []model.Moments
-	momentsQuery := db.Model(&moments).Where("(content LIKE ? OR location LIKE ?) AND audit = ?", searchTerm, searchTerm, 1)
-	var momentsCount int64
-	momentsQuery.Count(&momentsCount)
-	momentsQuery.Limit(perTypeLimit).Order("create_time desc").Find(&moments)
-	momentsResult := this.processSearchResult(moments, momentsCount, perTypeLimit, "moments")
+	articleResult := this.searchArticle(keyword, page, perTypeLimit)
+	pagesResult := this.searchPages(keyword, page, perTypeLimit)
+	tagsResult := this.searchTags(keyword, page, perTypeLimit)
+	usersResult := this.searchUsers(keyword, page, perTypeLimit)
+	linksResult := this.searchLinks(keyword, page, perTypeLimit)
+	momentsResult := this.searchMoments(keyword, page, perTypeLimit)
 
 	return map[string]interface{}{
 		"article": articleResult,
@@ -606,7 +653,7 @@ func (this *Search) searchAll(keyword string, page, limit int) map[string]interf
 		"users":   usersResult,
 		"links":   linksResult,
 		"moments": momentsResult,
-		"total":   articleCount + pagesCount + tagsCount + usersCount + linksCount + momentsCount,
+		"total":   cast.ToInt64(articleResult["count"]) + cast.ToInt64(pagesResult["count"]) + cast.ToInt64(tagsResult["count"]) + cast.ToInt64(usersResult["count"]) + cast.ToInt64(linksResult["count"]) + cast.ToInt64(momentsResult["count"]),
 		"type":    "all",
 	}
 }

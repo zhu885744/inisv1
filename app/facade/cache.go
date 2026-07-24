@@ -62,6 +62,17 @@ type CacheInterface interface {
 	DelPrefix(prefix ...any) bool
 	DelTags(tag ...any) bool
 	Clear() bool
+	Stats() CacheStats
+	IncrementHits()
+	IncrementMisses()
+}
+
+// CacheStats - 缓存统计信息
+type CacheStats struct {
+	Hits      int64
+	Misses    int64
+	HitRate   float64
+	TotalGets int64
 }
 
 // init - 初始化
@@ -146,6 +157,9 @@ type RedisCacheStruct struct {
 	Client *redis.Client
 	Prefix string
 	Expire time.Duration
+	hits   int64
+	misses int64
+	mutex  sync.Mutex
 }
 
 func (this *RedisCacheStruct) init() {
@@ -170,7 +184,40 @@ func (this *RedisCacheStruct) Has(key any) bool {
 func (this *RedisCacheStruct) Get(key any) any {
 	ctx := context.Background()
 	result, err := this.Client.Get(ctx, this.Prefix+cast.ToString(key)).Result()
-	return utils.Ternary[any](err != nil, nil, utils.Json.Decode(result))
+	if err != nil {
+		this.IncrementMisses()
+		return nil
+	}
+	this.IncrementHits()
+	return utils.Json.Decode(result)
+}
+
+func (this *RedisCacheStruct) Stats() CacheStats {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	total := this.hits + this.misses
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(this.hits) / float64(total) * 100
+	}
+	return CacheStats{
+		Hits:      this.hits,
+		Misses:    this.misses,
+		HitRate:   hitRate,
+		TotalGets: total,
+	}
+}
+
+func (this *RedisCacheStruct) IncrementHits() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.hits++
+}
+
+func (this *RedisCacheStruct) IncrementMisses() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.misses++
 }
 
 func (this *RedisCacheStruct) Set(key any, value any, expire ...any) bool {
@@ -285,6 +332,9 @@ func (this *RedisCacheStruct) Clear() bool {
 
 type FileCacheStruct struct {
 	Client *utils.FileCacheClient
+	hits   int64
+	misses int64
+	mutex  sync.Mutex
 }
 
 func (this *FileCacheStruct) init() {
@@ -308,9 +358,44 @@ func (this *FileCacheStruct) Has(key any) bool {
 
 func (this *FileCacheStruct) Get(key any) any {
 	if this.Client == nil {
+		this.IncrementMisses()
 		return nil
 	}
-	return utils.Json.Decode(this.Client.Get(key))
+	result := this.Client.Get(key)
+	if result == nil {
+		this.IncrementMisses()
+		return nil
+	}
+	this.IncrementHits()
+	return utils.Json.Decode(result)
+}
+
+func (this *FileCacheStruct) Stats() CacheStats {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	total := this.hits + this.misses
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(this.hits) / float64(total) * 100
+	}
+	return CacheStats{
+		Hits:      this.hits,
+		Misses:    this.misses,
+		HitRate:   hitRate,
+		TotalGets: total,
+	}
+}
+
+func (this *FileCacheStruct) IncrementHits() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.hits++
+}
+
+func (this *FileCacheStruct) IncrementMisses() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.misses++
 }
 
 func (this *FileCacheStruct) Set(key any, value any, expire ...any) bool {
@@ -352,6 +437,9 @@ func (this *FileCacheStruct) Clear() bool {
 
 type BigCacheStruct struct {
 	Client *BigCacheClient
+	hits   int64
+	misses int64
+	mutex  sync.Mutex
 }
 
 func (this *BigCacheStruct) init() {
@@ -367,9 +455,44 @@ func (this *BigCacheStruct) Has(key any) bool {
 
 func (this *BigCacheStruct) Get(key any) any {
 	if this.Client == nil {
+		this.IncrementMisses()
 		return nil
 	}
-	return utils.Json.Decode(this.Client.Get(key))
+	result := this.Client.Get(key)
+	if result == nil {
+		this.IncrementMisses()
+		return nil
+	}
+	this.IncrementHits()
+	return utils.Json.Decode(result)
+}
+
+func (this *BigCacheStruct) Stats() CacheStats {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	total := this.hits + this.misses
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(this.hits) / float64(total) * 100
+	}
+	return CacheStats{
+		Hits:      this.hits,
+		Misses:    this.misses,
+		HitRate:   hitRate,
+		TotalGets: total,
+	}
+}
+
+func (this *BigCacheStruct) IncrementHits() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.hits++
+}
+
+func (this *BigCacheStruct) IncrementMisses() {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	this.misses++
 }
 
 func (this *BigCacheStruct) Set(key any, value any, expire ...any) bool {
