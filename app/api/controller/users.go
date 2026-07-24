@@ -1102,13 +1102,11 @@ func (this *Users) destroy(ctx *gin.Context) {
 	})
 
 	user := this.meta.user(ctx)
-	// 即便中间件已经校验过登录了，这里还进行二次校验是未了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
 	if user.Id == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
 		return
 	}
 
-	// 禁止系统管理员账号注销账户
 	if user.Id == 1 {
 		this.json(ctx, nil, facade.Lang(ctx, "禁止注销系统管理员账户！"), 403)
 		return
@@ -1132,42 +1130,85 @@ func (this *Users) destroy(ctx *gin.Context) {
 
 	cacheName := fmt.Sprintf("[login][%v=%v]", social, contact)
 
-	// 验证码为空 - 发送验证码
 	if utils.Is.Empty(params["code"]) {
-
 		drive := utils.Ternary(social == "email", "email", "sms")
+
+		frequencyCacheName := fmt.Sprintf("destroy-frequency-%v-%v", drive, contact)
+		dailyLimitCacheName := fmt.Sprintf("destroy-daily-limit-%v-%v", drive, contact)
+
+		lastSendTime := facade.Cache.Get(frequencyCacheName)
+		if !utils.Is.Empty(lastSendTime) {
+			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
+		if dailyCount >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
 		sms := facade.NewSMS(drive).VerifyCode(contact)
 		if sms.Error != nil {
 			this.json(ctx, nil, sms.Error.Error(), 400)
 			return
 		}
-		// 缓存验证码 - 5分钟
-		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+
+		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
+		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
 		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
 		return
 	}
 
-	// 获取缓存里面的验证码
 	cacheCode := facade.Cache.Get(cacheName)
-
-	if cast.ToString(params["code"]) != cacheCode {
+	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
 		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
 		return
 	}
 
-	// 删除验证码
 	go facade.Cache.Del(cacheName)
 
-	// 清空数据
+	if utils.Is.Empty(params["password"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "请输入当前密码以确认注销！"), 400)
+		return
+	}
+
+	userRecord, _ := facade.DB.Model(&model.Users{}).Where("id", user.Id).Find()
+	if utils.Is.Empty(userRecord) {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
+		return
+	}
+
+	userPassword := cast.ToString(userRecord["password"])
+	if utils.Password.Verify(userPassword, params["password"]) == false {
+		this.json(ctx, nil, facade.Lang(ctx, "密码错误！"), 400)
+		return
+	}
+
 	(&model.Users{}).Destroy(user.Id)
 
-	// 删除用户
-	_, err = facade.DB.Model(&table).Force().Delete(user.Id)
-
+	randomPassword := utils.Rand.String(32, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	randomPasswordHash := utils.Password.Create(randomPassword)
+	_, err = facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("password", randomPasswordHash)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
+
+	facade.Cache.Del(fmt.Sprintf("user[%v]", user.Id))
+
+	_, err = facade.DB.Model(&table).Force().Delete(user.Id)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	ctx.SetCookie(cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN")), "", -1, "/", "", false, false)
+
+	facade.Log.Info(map[string]any{"user_id": user.Id, "email": user.Email, "phone": user.Phone}, "用户注销账户")
 
 	this.json(ctx, nil, facade.Lang(ctx, "注销成功！"), 200)
 }

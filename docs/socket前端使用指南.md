@@ -214,14 +214,32 @@ socket.send(JSON.stringify({
             "latency": "1.234ms",
             "error": "",
             "counts": {
-                "users": 100,
-                "articles": 50,
+                "users": {
+                    "total": 100,
+                    "active": 30,
+                    "normal": 95,
+                    "frozen": 5,
+                    "status": {"0": 95, "1": 5}
+                },
+                "articles": {
+                    "total": 50,
+                    "draft": 5,
+                    "published": 45,
+                    "status": {"0": 5, "1": 45}
+                },
+                "moments": {
+                    "total": 200,
+                    "draft": 10,
+                    "published": 190,
+                    "status": {"0": 10, "1": 190}
+                },
                 "comments": 200,
                 "pages": 10,
                 "links": 20,
                 "banners": 5,
                 "placards": 3,
-                "tags": 15
+                "tags": 15,
+                "attachments": 500
             }
         },
         "cache": {
@@ -301,14 +319,29 @@ socket.send(JSON.stringify({
 | `database.connected` | bool | 数据库连接状态 |
 | `database.latency` | string | 数据库延迟 |
 | `database.error` | string | 数据库错误信息 |
-| `database.counts.users` | int | 用户数量 |
-| `database.counts.articles` | int | 文章数量 |
+| `database.counts.users` | object | 用户统计对象 |
+| `database.counts.users.total` | int | 用户总数 |
+| `database.counts.users.active` | int | 活跃用户数（最近30天登录过） |
+| `database.counts.users.normal` | int | 正常状态用户数（status=0） |
+| `database.counts.users.frozen` | int | 冻结用户数（status=1） |
+| `database.counts.users.status` | object | 按状态分组统计（key为状态值） |
+| `database.counts.articles` | object | 文章统计对象 |
+| `database.counts.articles.total` | int | 文章总数 |
+| `database.counts.articles.draft` | int | 草稿数（status=0） |
+| `database.counts.articles.published` | int | 已发布数（status=1） |
+| `database.counts.articles.status` | object | 按状态分组统计（key为状态值） |
+| `database.counts.moments` | object | 动态统计对象 |
+| `database.counts.moments.total` | int | 动态总数 |
+| `database.counts.moments.draft` | int | 草稿数（status=0） |
+| `database.counts.moments.published` | int | 已发布数（status=1） |
+| `database.counts.moments.status` | object | 按状态分组统计（key为状态值） |
 | `database.counts.comments` | int | 评论数量 |
 | `database.counts.pages` | int | 页面数量 |
 | `database.counts.links` | int | 友链数量 |
 | `database.counts.banners` | int | 轮播数量 |
 | `database.counts.placards` | int | 公告数量 |
 | `database.counts.tags` | int | 标签数量 |
+| `database.counts.attachments` | int | 附件数量 |
 | `cache.enabled` | bool | 缓存是否启用 |
 | `cache.type` | string | 缓存类型（redis/file/ram） |
 | `cache.working` | bool | 缓存是否正常工作 |
@@ -559,6 +592,15 @@ socket.on('status', (content) => {
         // 系统状态
         console.log('CPU使用率:', content.resource.cpu.usage);
         console.log('内存使用率:', content.resource.memory.system_usage);
+        
+        // 数据库统计（新增）
+        console.log('用户总数:', content.database.counts.users.total);
+        console.log('活跃用户:', content.database.counts.users.active);
+        console.log('冻结用户:', content.database.counts.users.frozen);
+        console.log('文章总数:', content.database.counts.articles.total);
+        console.log('已发布文章:', content.database.counts.articles.published);
+        console.log('动态总数:', content.database.counts.moments.total);
+        console.log('附件数量:', content.database.counts.attachments);
     }
 });
 

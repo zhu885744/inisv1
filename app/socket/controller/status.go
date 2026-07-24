@@ -135,14 +135,31 @@ func getSystemStatus() map[string]any {
 		"latency":   "0ms",
 		"error":     "数据库未初始化",
 		"counts": map[string]any{
-			"users":    0,
-			"articles": 0,
-			"comments": 0,
-			"pages":    0,
-			"links":    0,
-			"banners":  0,
-			"placards": 0,
-			"tags":     0,
+			"users": map[string]any{
+				"total":  0,
+				"active": 0,
+				"frozen": 0,
+				"status": map[string]any{"0": 0, "1": 0},
+			},
+			"articles": map[string]any{
+				"total":     0,
+				"draft":     0,
+				"published": 0,
+				"status":    map[string]any{"0": 0, "1": 0},
+			},
+			"moments": map[string]any{
+				"total":     0,
+				"draft":     0,
+				"published": 0,
+				"status":    map[string]any{"0": 0, "1": 0},
+			},
+			"comments":    0,
+			"pages":       0,
+			"links":       0,
+			"banners":     0,
+			"placards":    0,
+			"tags":        0,
+			"attachments": 0,
 		},
 	}
 
@@ -155,14 +172,32 @@ func getSystemStatus() map[string]any {
 
 			// 尝试获取统计数据，但不强制要求成功
 			counts := map[string]any{
-				"users":    0,
-				"articles": 0,
-				"comments": 0,
-				"pages":    0,
-				"links":    0,
-				"banners":  0,
-				"placards": 0,
-				"tags":     0,
+				"users": map[string]any{
+					"total":  int64(0),
+					"active": int64(0),
+					"normal": int64(0),
+					"frozen": int64(0),
+					"status": map[string]any{"0": int64(0), "1": int64(0)},
+				},
+				"articles": map[string]any{
+					"total":     int64(0),
+					"draft":     int64(0),
+					"published": int64(0),
+					"status":    map[string]any{"0": int64(0), "1": int64(0)},
+				},
+				"moments": map[string]any{
+					"total":     int64(0),
+					"draft":     int64(0),
+					"published": int64(0),
+					"status":    map[string]any{"0": int64(0), "1": int64(0)},
+				},
+				"comments":    int64(0),
+				"pages":       int64(0),
+				"links":       int64(0),
+				"banners":     int64(0),
+				"placards":    int64(0),
+				"tags":        int64(0),
+				"attachments": int64(0),
 			}
 
 			// 只有在数据库连接成功时才尝试获取统计数据
@@ -178,22 +213,64 @@ func getSystemStatus() map[string]any {
 				}()
 
 				usersCount, _ := facade.DB.Model(&model.Users{}).Count()
+				usersNormalCount, _ := facade.DB.Model(&model.Users{}).Where("status", 0).Count()
+				usersFrozenCount, _ := facade.DB.Model(&model.Users{}).Where("status", 1).Count()
+
+				thirtyDaysAgo := time.Now().Unix() - 30*24*60*60
+				usersActiveCount, _ := facade.DB.Model(&model.Users{}).Where("login_time", ">", thirtyDaysAgo).Count()
+
 				articlesCount, _ := facade.DB.Model(&model.Article{}).Count()
+				articlesDraftCount, _ := facade.DB.Model(&model.Article{}).Where("status", 0).Count()
+				articlesPublishedCount, _ := facade.DB.Model(&model.Article{}).Where("status", 1).Count()
+
+				momentsCount, _ := facade.DB.Model(&model.Moments{}).Count()
+				momentsDraftCount, _ := facade.DB.Model(&model.Moments{}).Where("status", 0).Count()
+				momentsPublishedCount, _ := facade.DB.Model(&model.Moments{}).Where("status", 1).Count()
+
 				commentsCount, _ := facade.DB.Model(&model.Comment{}).Count()
 				pagesCount, _ := facade.DB.Model(&model.Pages{}).Count()
 				linksCount, _ := facade.DB.Model(&model.Links{}).Count()
 				bannersCount, _ := facade.DB.Model(&model.Banner{}).Count()
 				placardsCount, _ := facade.DB.Model(&model.Placard{}).Count()
 				tagsCount, _ := facade.DB.Model(&model.Tags{}).Count()
+				attachmentsCount, _ := facade.DB.Model(&model.Attachment{}).Count()
+
 				counts = map[string]any{
-					"users":    usersCount,
-					"articles": articlesCount,
-					"comments": commentsCount,
-					"pages":    pagesCount,
-					"links":    linksCount,
-					"banners":  bannersCount,
-					"placards": placardsCount,
-					"tags":     tagsCount,
+					"users": map[string]any{
+						"total":  usersCount,
+						"active": usersActiveCount,
+						"normal": usersNormalCount,
+						"frozen": usersFrozenCount,
+						"status": map[string]any{
+							"0": usersNormalCount,
+							"1": usersFrozenCount,
+						},
+					},
+					"articles": map[string]any{
+						"total":     articlesCount,
+						"draft":     articlesDraftCount,
+						"published": articlesPublishedCount,
+						"status": map[string]any{
+							"0": articlesDraftCount,
+							"1": articlesPublishedCount,
+						},
+					},
+					"moments": map[string]any{
+						"total":     momentsCount,
+						"draft":     momentsDraftCount,
+						"published": momentsPublishedCount,
+						"status": map[string]any{
+							"0": momentsDraftCount,
+							"1": momentsPublishedCount,
+						},
+					},
+					"comments":    commentsCount,
+					"pages":       pagesCount,
+					"links":       linksCount,
+					"banners":     bannersCount,
+					"placards":    placardsCount,
+					"tags":        tagsCount,
+					"attachments": attachmentsCount,
 				}
 			}
 
