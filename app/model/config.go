@@ -64,6 +64,16 @@ func InitConfig() {
 			"sensitive_words":  []string{"色情", "广告", "开户"},
 			"email_notify":     facade.H{"enabled": 1, "retry_count": 3, "retry_interval": 5},
 		}), Remark: "评论配置"},
+		{Key: "SYSTEM_EXP_RULES", Json: utils.Json.Encode(facade.H{
+			"like":     facade.H{"name": "点赞", "value": 1, "daily_limit": 10},
+			"collect":  facade.H{"name": "收藏", "value": 1, "daily_limit": 10},
+			"visit":    facade.H{"name": "访问", "value": 1, "daily_limit": 10},
+			"share":    facade.H{"name": "分享", "value": 1, "daily_limit": 10},
+			"login":    facade.H{"name": "登录", "value": 5, "daily_limit": 1},
+			"comment":  facade.H{"name": "评论", "value": 1, "daily_limit": 10},
+			"check-in": facade.H{"name": "签到", "value": 10, "daily_limit": 1},
+			"moments":  facade.H{"name": "发布动态", "value": 50, "daily_limit": 1},
+		}), Remark: "经验值规则配置"},
 	}
 
 	for _, item := range configs {

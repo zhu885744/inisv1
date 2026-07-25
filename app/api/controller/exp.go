@@ -722,7 +722,9 @@ func (this *EXP) checkIn(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"value": 10}, facade.Lang(ctx, "签到成功！"), 200)
+	expConfig := model.GetExpConfig()
+	value := cast.ToInt(expConfig["check-in"]["value"])
+	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "签到成功！"), 200)
 }
 
 func (this *EXP) share(ctx *gin.Context) {
@@ -782,7 +784,9 @@ func (this *EXP) share(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, "分享成功！"), 200)
+	expConfig := model.GetExpConfig()
+	value := cast.ToInt(expConfig["share"]["value"])
+	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "分享成功！"), 200)
 }
 
 func (this *EXP) collect(ctx *gin.Context) {
@@ -890,7 +894,9 @@ func (this *EXP) collect(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, "收藏成功！"), 200)
+	expConfig := model.GetExpConfig()
+	value := cast.ToInt(expConfig["collect"]["value"])
+	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "收藏成功！"), 200)
 }
 
 func (this *EXP) like(ctx *gin.Context) {
@@ -1005,7 +1011,9 @@ func (this *EXP) like(ctx *gin.Context) {
 		return
 	}
 
-	this.json(ctx, gin.H{"value": 1}, facade.Lang(ctx, msg+"成功！"), 200)
+	expConfig := model.GetExpConfig()
+	value := cast.ToInt(expConfig["like"]["value"])
+	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, msg+"成功！"), 200)
 }
 
 func (this *EXP) active(ctx *gin.Context) {

@@ -13,6 +13,51 @@ import (
 	"gorm.io/plugin/soft_delete"
 )
 
+// ExpCacheKey - exp配置缓存键
+const ExpCacheKey = "SYSTEM_EXP_RULES"
+
+// GetExpConfig - 获取经验值配置（缓存优先）
+func GetExpConfig() map[string]facade.H {
+	// 优先从缓存获取
+	if facade.Cache.Has(ExpCacheKey) {
+		if data, ok := facade.Cache.Get(ExpCacheKey).(map[string]facade.H); ok {
+			return data
+		}
+	}
+
+	// 从数据库获取
+	item, _ := facade.DB.Model(&Config{}).Where("key", ExpCacheKey).Find()
+	if !utils.Is.Empty(item) {
+		// Find() 返回 map[string]any，json 字段也是 map[string]any
+		if jsonData, ok := item["json"].(map[string]any); ok {
+			// 转换为 map[string]facade.H
+			expConfig := make(map[string]facade.H)
+			for k, v := range jsonData {
+				if vMap, ok := v.(map[string]any); ok {
+					expConfig[k] = facade.H(vMap)
+				}
+			}
+			// 设置缓存
+			facade.Cache.Set(ExpCacheKey, expConfig)
+			return expConfig
+		}
+	}
+
+	// 返回默认配置
+	defaultConfig := map[string]facade.H{
+		"like":     {"name": "点赞", "value": 1, "daily_limit": 10},
+		"collect":  {"name": "收藏", "value": 1, "daily_limit": 10},
+		"visit":    {"name": "访问", "value": 1, "daily_limit": 10},
+		"share":    {"name": "分享", "value": 1, "daily_limit": 10},
+		"login":    {"name": "登录", "value": 5, "daily_limit": 1},
+		"comment":  {"name": "评论", "value": 1, "daily_limit": 10},
+		"check-in": {"name": "签到", "value": 10, "daily_limit": 1},
+		"moments":  {"name": "发布动态", "value": 50, "daily_limit": 1},
+	}
+
+	return defaultConfig
+}
+
 type EXP struct {
 	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Uid         int    `gorm:"type:int(32); comment:用户ID;" json:"uid"`
@@ -65,19 +110,11 @@ func (this *EXP) Add(table EXP) (err error) {
 		return errors.New("请先登录！")
 	}
 
-	limit := map[string][]any{
-		"like":     {"点赞", 1, 10},   // 点赞 - 每天10次，一次1经验值
-		"collect":  {"收藏", 1, 10},   // 收藏 - 每天10次，一次1经验值
-		"visit":    {"访问", 1, 10},   // 访问 - 每天10次，一次1经验值
-		"share":    {"分享", 1, 10},   // 分享 - 每天10次，一次1经验值
-		"login":    {"登录", 5, 1},    // 登录 - 每天1次，一次5经验值
-		"comment":  {"评论", 1, 10},   // 评论 - 每天10次，一次1经验值
-		"check-in": {"签到", 10, 1},   // 签到 - 每天1次，一次10经验值
-		"moments":  {"发布动态", 50, 1}, // 发布动态 - 每天1次，一次50经验值
-	}
+	// 从配置获取经验值规则
+	expConfig := GetExpConfig()
 
-	// 检查 limit[table.Type] 是否存在
-	if _, ok := limit[table.Type]; !ok {
+	// 检查配置是否存在
+	if _, ok := expConfig[table.Type]; !ok {
 		return errors.New("未知的经验值类型！")
 	}
 
@@ -98,7 +135,7 @@ func (this *EXP) Add(table EXP) (err error) {
 			[]any{"create_time", ">=", today.Unix()},
 		}).Count()
 
-		if count >= cast.ToInt64(limit[table.Type][2]) {
+		if count >= cast.ToInt64(expConfig[table.Type]["daily_limit"]) {
 			// 已经操作过，返回错误信息
 			switch table.Type {
 			case "check-in":
@@ -129,7 +166,7 @@ func (this *EXP) Add(table EXP) (err error) {
 			[]any{"create_time", ">=", today.Unix()},
 		}).Count()
 
-		if count >= cast.ToInt64(limit[table.Type][2]) {
+		if count >= cast.ToInt64(expConfig[table.Type]["daily_limit"]) {
 			// 达到限制，不增加经验值
 			canAddExp = false
 		}
@@ -138,9 +175,9 @@ func (this *EXP) Add(table EXP) (err error) {
 	// 如果可以增加经验值
 	if canAddExp {
 		// 每次增加的经验值
-		table.Value = cast.ToInt(limit[table.Type][1])
+		table.Value = cast.ToInt(expConfig[table.Type]["value"])
 		if utils.Is.Empty(table.Description) {
-			table.Description = fmt.Sprintf("%s奖励", limit[table.Type][0])
+			table.Description = fmt.Sprintf("%s奖励", expConfig[table.Type]["name"])
 		}
 
 		_, err := facade.DB.Model(&EXP{}).Create(&table)

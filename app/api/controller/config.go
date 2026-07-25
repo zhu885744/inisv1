@@ -154,6 +154,8 @@ func (this *Config) INDEX(ctx *gin.Context) {
 func (this *Config) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "config"})
 	facade.Cache.DelTags([]any{"[GET]", "[?]"})
+	// 清除经验值配置缓存
+	facade.Cache.Del(model.ExpCacheKey)
 }
 
 func (this *Config) one(ctx *gin.Context) {
