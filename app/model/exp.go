@@ -45,14 +45,20 @@ func GetExpConfig() map[string]facade.H {
 
 	// 返回默认配置
 	defaultConfig := map[string]facade.H{
-		"like":     {"name": "点赞", "value": 1, "daily_limit": 10},
-		"collect":  {"name": "收藏", "value": 1, "daily_limit": 10},
-		"visit":    {"name": "访问", "value": 1, "daily_limit": 10},
-		"share":    {"name": "分享", "value": 1, "daily_limit": 10},
-		"login":    {"name": "登录", "value": 5, "daily_limit": 1},
-		"comment":  {"name": "评论", "value": 1, "daily_limit": 10},
-		"check-in": {"name": "签到", "value": 10, "daily_limit": 1},
-		"moments":  {"name": "发布动态", "value": 50, "daily_limit": 1},
+		"like":            {"name": "点赞", "value": 1, "daily_limit": 10},
+		"collect":         {"name": "收藏", "value": 1, "daily_limit": 10},
+		"visit":           {"name": "访问", "value": 1, "daily_limit": 10},
+		"share":           {"name": "分享", "value": 1, "daily_limit": 10},
+		"login":           {"name": "登录", "value": 5, "daily_limit": 1},
+		"comment":         {"name": "评论", "value": 1, "daily_limit": 10},
+		"check-in":        {"name": "签到", "value": 10, "daily_limit": 1},
+		"moments":         {"name": "发布动态", "value": 50, "daily_limit": 1},
+		"article-create":  {"name": "发布文章", "value": 5, "daily_limit": 10},
+		"article-like":    {"name": "文章获赞", "value": 5, "daily_limit": 10},
+		"article-collect": {"name": "文章被收藏", "value": 5, "daily_limit": 10},
+		"comment-create":  {"name": "发表评论", "value": 5, "daily_limit": 10},
+		"comment-like":    {"name": "评论获赞", "value": 5, "daily_limit": 10},
+		"user-like":       {"name": "用户点赞", "value": 5, "daily_limit": 10},
 	}
 
 	return defaultConfig

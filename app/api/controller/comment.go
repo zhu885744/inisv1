@@ -537,10 +537,11 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 		}()
 		_ = (&model.EXP{}).Add(model.EXP{
-			Uid:      user.Id,
-			Type:     "comment",
-			BindId:   table.BindId,
-			BindType: table.BindType,
+			Uid:         user.Id,
+			Type:        "comment-create",
+			BindId:      table.Id,
+			BindType:    table.BindType,
+			Description: "发表评论奖励",
 		})
 	}()
 

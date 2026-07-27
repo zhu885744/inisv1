@@ -442,3 +442,41 @@
 ### 2. 缓存策略
 - 所有查询接口均支持缓存
 - 数据修改后会自动清除相关缓存
+
+### 3. 系统自带页面
+
+系统启动时会自动初始化以下后台管理页面，无需手动创建：
+
+| 序号 | 页面名称 | 图标 | 路径 |
+| :--- | :--- | :--- | :--- |
+| 1 | 撰写文章 | `article` | `/admin/article/write` |
+| 2 | 文章管理 | `article` | `/admin/article` |
+| 3 | 文章分类 | `group` | `/admin/article/group` |
+| 4 | 用户管理 | `user` | `/admin/users` |
+| 5 | 评论管理 | `comment` | `/admin/comment` |
+| 6 | 公告管理 | `bell` | `/admin/placard` |
+| 7 | 轮播管理 | `banner` | `/admin/banner` |
+| 8 | 标签管理 | `tag` | `/admin/tags` |
+| 9 | 等级管理 | `level` | `/admin/level` |
+| 10 | 经验管理 | `level` | `/admin/exp` |
+| 11 | 消息通知 | `bell` | `/admin/message` |
+| 12 | 友链管理 | `link` | `/admin/links` |
+| 13 | 系统配置 | `system` | `/admin/system` |
+| 14 | 独立页面 | `open` | `/admin/pages` |
+| 15 | 撰写独立页面 | `article` | `/admin/pages/write` |
+| 16 | 友链分组 | `group` | `/admin/links/group` |
+| 17 | 权限规则 | `rule` | `/admin/auth/rules` |
+| 18 | 权限分组 | `group` | `/admin/auth/group` |
+| 19 | 接口密钥 | `key` | `/admin/api/keys` |
+| 20 | IP黑名单 | `qps` | `/admin/ip/black` |
+| 21 | IP白名单 | `white` | `/admin/ip/white` |
+| 22 | QPS预警 | `black` | `/admin/qps/warn` |
+| 23 | 后台页面管理 | `open` | `/admin/auth/pages` |
+| 24 | 动态管理 | `article` | `/admin/moments` |
+| 25 | 附件管理 | `file` | `/admin/attachment` |
+
+### 4. 页面初始化机制
+
+- 页面通过 `path` 字段的哈希值进行去重
+- 已存在的页面不会重复创建
+- 初始化逻辑位于 [auth-pages.go](app/model/auth-pages.go) 的 `InitAuthPages()` 函数中

@@ -70,6 +70,8 @@ func InitAuthPages() {
 		{Name: "轮播管理", Icon: "banner", Path: "/admin/banner", Size: "14px"},
 		{Name: "标签管理", Icon: "tag", Path: "/admin/tags", Size: "14px"},
 		{Name: "等级管理", Icon: "level", Path: "/admin/level", Size: "14px"},
+		{Name: "经验管理", Icon: "level", Path: "/admin/exp", Size: "14px"},
+		{Name: "消息通知", Icon: "bell", Path: "/admin/message", Size: "14px"},
 		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},
 		{Name: "独立页面", Icon: "open", Path: "/admin/pages", Size: "14px"},

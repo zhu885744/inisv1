@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
@@ -139,10 +140,9 @@ func (this *EXP) IPOST(ctx *gin.Context) {
 	allow := map[string]any{
 		"save":     this.save,
 		"create":   this.create,
-		"like":     this.like,
 		"share":    this.share,
-		"collect":  this.collect,
 		"check-in": this.checkIn,
+		"give":     this.give,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -326,7 +326,13 @@ func (this *EXP) create(ctx *gin.Context) {
 		return
 	}
 
-	table := model.EXP{Uid: uid, CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
+	// 管理员可以指定目标用户ID
+	targetUid := uid
+	if this.meta.root(ctx) && !utils.Is.Empty(params["uid"]) {
+		targetUid = cast.ToInt(params["uid"])
+	}
+
+	table := model.EXP{Uid: targetUid, CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
 
 	for key, val := range params {
 		if utils.In.Array(key, expAllowFieldsSlice) {
@@ -789,233 +795,6 @@ func (this *EXP) share(ctx *gin.Context) {
 	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "分享成功！"), 200)
 }
 
-func (this *EXP) collect(ctx *gin.Context) {
-	params := this.params(ctx, map[string]any{
-		"state":     1,
-		"bind_type": "article",
-	})
-
-	if !utils.InArray(cast.ToInt(params["state"]), []int{0, 1}) {
-		this.json(ctx, nil, facade.Lang(ctx, "state 只能是 0 或 1"), 400)
-		return
-	}
-
-	allow := []any{"article", "page", "moments"}
-
-	if !utils.In.Array(params["bind_type"], allow) {
-		this.json(ctx, nil, facade.Lang(ctx, "不存在的收藏类型！"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["bind_id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bind_id"), 400)
-		return
-	}
-
-	user := this.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
-
-	switch params["bind_type"] {
-	case "article":
-		exist, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
-			return
-		}
-	case "page":
-		exist, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
-			return
-		}
-	case "moments":
-		exist, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
-			return
-		}
-	}
-
-	item, _ := facade.DB.Model(&model.EXP{}).Where([]any{
-		[]any{"uid", "=", user.Id},
-		[]any{"type", "=", "collect"},
-		[]any{"bind_id", "=", params["bind_id"]},
-		[]any{"bind_type", "=", params["bind_type"]},
-	}).Find()
-
-	if !utils.Is.Empty(item) {
-		if cast.ToInt(params["state"]) == 0 {
-			_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
-				"state": 0,
-			})
-			if err != nil {
-				this.json(ctx, nil, err.Error(), 400)
-				return
-			}
-			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "取消收藏成功！"), 200)
-			return
-		}
-
-		if cast.ToInt(params["state"]) == 1 && cast.ToInt(item["state"]) == 1 {
-			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "已经收藏过了！"), 400)
-			return
-		}
-
-		_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
-			"state": 1,
-		})
-		if err != nil {
-			this.json(ctx, gin.H{"value": 0}, err.Error(), 400)
-			return
-		}
-
-		this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "收藏成功！"), 200)
-		return
-	}
-
-	if cast.ToInt(params["state"]) == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "您未收藏该内容！"), 400)
-		return
-	}
-
-	err := (&model.EXP{}).Add(model.EXP{
-		Type:        "collect",
-		Uid:         user.Id,
-		BindId:      cast.ToInt(params["bind_id"]),
-		BindType:    cast.ToString(params["bind_type"]),
-		Description: cast.ToString(params["description"]),
-	})
-
-	if err != nil {
-		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
-		return
-	}
-
-	expConfig := model.GetExpConfig()
-	value := cast.ToInt(expConfig["collect"]["value"])
-	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "收藏成功！"), 200)
-}
-
-func (this *EXP) like(ctx *gin.Context) {
-	params := this.params(ctx, map[string]any{
-		"state":     1,
-		"bind_type": "article",
-	})
-
-	if !utils.InArray(cast.ToInt(params["state"]), []int{0, 1}) {
-		this.json(ctx, nil, facade.Lang(ctx, "state 只能是 0 或 1"), 400)
-		return
-	}
-
-	allow := []any{"article", "page", "comment", "moments"}
-
-	if !utils.In.Array(params["bind_type"], allow) {
-		this.json(ctx, nil, facade.Lang(ctx, "不存在的点赞类型！"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["bind_id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bind_id"), 400)
-		return
-	}
-
-	user := this.user(ctx)
-	if user.Id == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
-
-	switch params["bind_type"] {
-	case "article":
-		exist, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
-			return
-		}
-	case "page":
-		exist, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
-			return
-		}
-	case "comment":
-		exist, _ := facade.DB.Model(&model.Comment{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的评论！"), 400)
-			return
-		}
-	case "moments":
-		exist, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Exist()
-		if !exist {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
-			return
-		}
-	}
-
-	item, _ := facade.DB.Model(&model.EXP{}).Where([]any{
-		[]any{"uid", "=", user.Id},
-		[]any{"type", "=", "like"},
-		[]any{"bind_id", "=", params["bind_id"]},
-		[]any{"bind_type", "=", params["bind_type"]},
-	}).Find()
-
-	if !utils.Is.Empty(item) {
-		if cast.ToInt(params["state"]) == 0 {
-			_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
-				"state": 0,
-			})
-			if err != nil {
-				this.json(ctx, nil, err.Error(), 400)
-				return
-			}
-			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "点踩成功！"), 200)
-			return
-		}
-
-		if cast.ToInt(params["state"]) == 1 && cast.ToInt(item["state"]) == 1 {
-			this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "已经点过赞啦！"), 400)
-			return
-		}
-
-		_, err := facade.DB.Model(&model.EXP{}).Where(item["id"]).Update(map[string]any{
-			"state": 1,
-		})
-		if err != nil {
-			this.json(ctx, gin.H{"value": 0}, err.Error(), 400)
-			return
-		}
-
-		this.json(ctx, gin.H{"value": 0}, facade.Lang(ctx, "点赞成功！"), 200)
-		return
-	}
-
-	msg := "点赞"
-	if cast.ToInt(params["state"]) == 0 {
-		msg = "点踩"
-	}
-
-	err := (&model.EXP{}).Add(model.EXP{
-		Type:        "like",
-		Uid:         user.Id,
-		State:       cast.ToInt(params["state"]),
-		BindId:      cast.ToInt(params["bind_id"]),
-		BindType:    cast.ToString(params["bind_type"]),
-		Description: utils.Default(cast.ToString(params["description"]), msg+"奖励"),
-	})
-
-	if err != nil {
-		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
-		return
-	}
-
-	expConfig := model.GetExpConfig()
-	value := cast.ToInt(expConfig["like"]["value"])
-	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, msg+"成功！"), 200)
-}
-
 func (this *EXP) active(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
@@ -1076,4 +855,77 @@ func (this *EXP) active(ctx *gin.Context) {
 	}
 
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// give - 给指定用户添加或扣除经验值（管理员专用）
+func (this *EXP) give(ctx *gin.Context) {
+	// 验证管理员权限
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	params := this.params(ctx)
+
+	// 验证用户ID
+	targetUid := cast.ToInt(params["uid"])
+	if targetUid == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid"), 400)
+		return
+	}
+
+	// 验证经验值数量
+	value := cast.ToInt(params["value"])
+	if value == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "经验值不能为0！"), 400)
+		return
+	}
+
+	// 验证用户是否存在
+	userItem, _ := facade.DB.Model(&model.Users{}).Where("id", targetUid).Find()
+	if utils.Is.Empty(userItem) {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 400)
+		return
+	}
+
+	// 如果是扣除经验值，验证用户当前经验值是否足够
+	if value < 0 {
+		currentExp := cast.ToInt(userItem["exp"])
+		if currentExp < -value {
+			this.json(ctx, nil, facade.Lang(ctx, "用户经验值不足！当前经验值: %d，需要扣除: %d", currentExp, -value), 400)
+			return
+		}
+	}
+
+	// 创建经验值记录
+	table := model.EXP{
+		Uid:         targetUid,
+		Value:       value,
+		Type:        "give",
+		Description: cast.ToString(params["description"]),
+	}
+
+	if utils.Is.Empty(table.Description) {
+		if value > 0 {
+			table.Description = fmt.Sprintf("管理员发放经验值 %d", value)
+		} else {
+			table.Description = fmt.Sprintf("管理员扣除经验值 %d", -value)
+		}
+	}
+
+	_, err := facade.DB.Model(&table).Create(&table)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 更新用户表的经验值
+	_, _ = facade.DB.Model(&model.Users{}).Where("id", targetUid).Inc("exp", value)
+
+	// 根据操作类型返回不同消息
+	if value > 0 {
+		this.json(ctx, gin.H{"id": table.Id, "value": value}, facade.Lang(ctx, "发放成功！"), 200)
+	} else {
+		this.json(ctx, gin.H{"id": table.Id, "value": value}, facade.Lang(ctx, "扣除成功！"), 200)
+	}
 }
