@@ -16,12 +16,12 @@ type UserCollects struct {
 }
 
 const (
-	userCollectsAllowFields = "target_type,target_id,status"
-	userCollectsAllowQuery  = "id,uid,target_type,target_id,status"
+	userCollectsAllowFields = "target_type,target_id"
+	userCollectsAllowQuery  = "id,uid,target_type,target_id"
 )
 
-var userCollectsAllowFieldsSlice = []any{"target_type", "target_id", "status"}
-var userCollectsAllowQuerySlice = []any{"id", "uid", "target_type", "target_id", "status"}
+var userCollectsAllowFieldsSlice = []any{"target_type", "target_id"}
+var userCollectsAllowQuerySlice = []any{"id", "uid", "target_type", "target_id"}
 
 func (this *UserCollects) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
@@ -31,16 +31,6 @@ func (this *UserCollects) buildQuery(query *facade.ModelStruct, params map[strin
 		INot(params["not"]).
 		INull(params["null"]).
 		INotNull(params["notNull"])
-}
-
-func (this *UserCollects) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
-	if cast.ToBool(params["onlyTrashed"]) {
-		query = query.OnlyTrashed()
-	}
-	if cast.ToBool(params["withTrashed"]) {
-		query = query.WithTrashed()
-	}
-	return query
 }
 
 func (this *UserCollects) getFromCache(ctx *gin.Context, cacheName string) (any, bool) {
@@ -104,7 +94,6 @@ func (this *UserCollects) IPUT(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"update":    this.update,
-		"restore":   this.restore,
 		"uncollect": this.uncollect,
 	}
 	err := this.call(allow, method, ctx)
@@ -162,7 +151,7 @@ func (this *UserCollects) one(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		query := this.withTrashOptions(facade.DB.Model(&table), params)
+		query := facade.DB.Model(&table)
 		query = this.buildQuery(query, params)
 
 		if !this.meta.root(ctx) {
@@ -203,7 +192,7 @@ func (this *UserCollects) all(ctx *gin.Context) {
 	limit := this.meta.limit(ctx)
 	var result []model.UserCollects
 
-	query := this.withTrashOptions(facade.DB.Model(&result), params)
+	query := facade.DB.Model(&result)
 	query = this.buildQuery(query, params)
 
 	if !this.meta.root(ctx) {
@@ -238,10 +227,8 @@ func (this *UserCollects) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 	limit := this.meta.limit(ctx)
 	except := utils.Unity.Ids(params["except"])
-	onlyTrashed := cast.ToBool(params["onlyTrashed"])
-	withTrashed := cast.ToBool(params["withTrashed"])
 
-	query := facade.DB.Model(&model.UserCollects{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	query := facade.DB.Model(&model.UserCollects{})
 
 	if !this.meta.root(ctx) {
 		query = query.Where("uid", this.user(ctx).Id)
@@ -254,7 +241,6 @@ func (this *UserCollects) rand(ctx *gin.Context) {
 	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
 
 	mold := facade.DB.Model(&[]model.UserCollects{}).Where("id", "IN", ids)
-	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
 	if !this.meta.root(ctx) {
@@ -341,7 +327,7 @@ func (this *UserCollects) update(ctx *gin.Context) {
 		}
 	}
 
-	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
+	item := facade.DB.Model(&table).Where("id", params["id"])
 
 	findResult, _ := item.Find()
 	if !this.meta.root(ctx) && cast.ToInt(findResult["uid"]) != this.user(ctx).Id {
@@ -361,7 +347,7 @@ func (this *UserCollects) update(ctx *gin.Context) {
 
 func (this *UserCollects) count(ctx *gin.Context) {
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.UserCollects{}), params)
+	query := facade.DB.Model(&model.UserCollects{})
 	query = this.buildQuery(query, params)
 
 	if !this.meta.root(ctx) {
@@ -377,7 +363,7 @@ func (this *UserCollects) aggregateQuery(ctx *gin.Context, aggFunc func(query *f
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.UserCollects{}), params)
+	query := facade.DB.Model(&model.UserCollects{})
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	if !this.meta.root(ctx) {
@@ -457,7 +443,7 @@ func (this *UserCollects) column(ctx *gin.Context) {
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&[]model.UserCollects{}), params)
+	query := facade.DB.Model(&[]model.UserCollects{})
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	if !this.meta.root(ctx) {
@@ -528,7 +514,7 @@ func (this *UserCollects) delete(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.UserCollects{}).WithTrashed()
+	item := facade.DB.Model(&model.UserCollects{})
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
@@ -540,7 +526,7 @@ func (this *UserCollects) delete(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete(ids)
+	_, err := item.Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
@@ -552,7 +538,7 @@ func (this *UserCollects) delete(ctx *gin.Context) {
 
 func (this *UserCollects) clear(ctx *gin.Context) {
 	table := model.UserCollects{}
-	item := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&table)
 
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
@@ -566,7 +552,7 @@ func (this *UserCollects) clear(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete()
+	_, err := item.Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
@@ -574,38 +560,6 @@ func (this *UserCollects) clear(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
-}
-
-func (this *UserCollects) restore(ctx *gin.Context) {
-	params := this.params(ctx)
-	ids := utils.Unity.Ids(params["ids"])
-
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
-		return
-	}
-
-	item := facade.DB.Model(&model.UserCollects{}).OnlyTrashed().WhereIn("id", ids)
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
-	}
-
-	columnData, _ := item.Column("id")
-	ids = utils.Unity.Ids(columnData)
-
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
-		return
-	}
-
-	_, err := facade.DB.Model(&model.UserCollects{}).OnlyTrashed().Restore(ids)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
-		return
-	}
-
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 func (this *UserCollects) collect(ctx *gin.Context) {
@@ -640,7 +594,6 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,
-		"status":      1,
 	}, facade.Lang(ctx, "收藏成功！"), 200)
 }
 
@@ -676,7 +629,6 @@ func (this *UserCollects) uncollect(ctx *gin.Context) {
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,
-		"status":      0,
 	}, facade.Lang(ctx, "取消收藏成功！"), 200)
 }
 
@@ -745,7 +697,16 @@ func (this *UserCollects) counts(ctx *gin.Context) {
 	targetType := cast.ToString(params["target_type"])
 	targetIds := cast.ToIntSlice(params["target_ids"])
 
-	counts := (&model.UserCollects{}).GetCollectsCounts(targetType, targetIds)
+	var counts map[int]int64
+
+	if targetType == "user_collects" {
+		counts = make(map[int]int64)
+		for _, uid := range targetIds {
+			counts[uid] = (&model.UserCollects{}).GetUserCollectsCount(uid)
+		}
+	} else {
+		counts = (&model.UserCollects{}).GetCollectsCounts(targetType, targetIds)
+	}
 
 	this.json(ctx, gin.H{"counts": counts}, facade.Lang(ctx, "查询成功！"), 200)
 }

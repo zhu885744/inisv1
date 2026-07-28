@@ -8,21 +8,17 @@ import (
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
-	"gorm.io/plugin/soft_delete"
 )
 
 type UserCollects struct {
-	Id         int                   `gorm:"type:int(32); comment:主键;" json:"id"`
-	Uid        int                   `gorm:"type:int(32); comment:用户ID;" json:"uid"`
-	TargetType string                `gorm:"type:varchar(32); comment:目标类型(article/page/moment/comment);" json:"target_type"`
-	TargetId   int                   `gorm:"type:int(32); comment:目标ID;" json:"target_id"`
-	Status     int                   `gorm:"type:int(12); default:1; comment:状态(1:已收藏,0:已取消);" json:"status"`
-	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
-	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
-	Result     any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
-	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
-	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+	Id         int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	Uid        int    `gorm:"type:int(32); comment:用户ID;" json:"uid"`
+	TargetType string `gorm:"type:varchar(32); comment:目标类型(article/page/moment/comment);" json:"target_type"`
+	TargetId   int    `gorm:"type:int(32); comment:目标ID;" json:"target_id"`
+	Json       any    `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text       any    `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	Result     any    `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	CreateTime int64  `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 }
 
 func (this *UserCollects) TableName() string {
@@ -137,39 +133,23 @@ func (this *UserCollects) Collect(uid, targetId int, targetType string) (err err
 		return errors.New("不支持收藏用户")
 	}
 
-	var exist []UserCollects
-	facade.DB.Model(&exist).
-		WithTrashed().
+	exists, _ := facade.DB.Model(&UserCollects{}).
 		Where("uid", uid).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
-		Select()
+		Count()
 
-	if len(exist) > 0 {
-		if exist[0].Status == 1 && exist[0].DeleteTime == 0 {
-			return errors.New("已经收藏过了")
-		}
-		facade.DB.Model(&UserCollects{}).Restore(exist[0].Id)
-		_, err = facade.DB.Model(&UserCollects{}).
-			Where("id", exist[0].Id).
-			UpdateColumn("status", 1)
-
-		if err == nil && targetType == "moment" {
-			facade.DB.Model(&Moments{}).
-				Where("id", targetId).
-				UpdateColumn("favorites", gorm.Expr("favorites + 1"))
-		}
-		return
+	if exists > 0 {
+		return errors.New("已经收藏过了")
 	}
 
-	_, err = facade.DB.Model(&UserCollects{}).Create(&UserCollects{
+	tx, err := facade.DB.Model(&UserCollects{}).Create(&UserCollects{
 		Uid:        uid,
 		TargetType: targetType,
 		TargetId:   targetId,
-		Status:     1,
 	})
 
-	if err == nil && targetType == "moment" {
+	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
 		facade.DB.Model(&Moments{}).
 			Where("id", targetId).
 			UpdateColumn("favorites", gorm.Expr("favorites + 1"))
@@ -183,13 +163,13 @@ func (this *UserCollects) Uncollect(uid, targetId int, targetType string) (err e
 		return errors.New("参数错误")
 	}
 
-	_, err = facade.DB.Model(&UserCollects{}).
+	tx, err := facade.DB.Model(&UserCollects{}).
 		Where("uid", uid).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
-		UpdateColumn("status", 0)
+		Delete()
 
-	if err == nil && targetType == "moment" {
+	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
 		facade.DB.Model(&Moments{}).
 			Where("id", targetId).
 			UpdateColumn("favorites", gorm.Expr("GREATEST(favorites - 1, 0)"))
@@ -203,15 +183,13 @@ func (this *UserCollects) IsCollected(uid, targetId int, targetType string) bool
 		Where("uid", uid).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
-		Where("status", 1).
 		Count()
 	return count > 0
 }
 
 func (this *UserCollects) GetCollectsByUid(uid int, targetType string) ([]map[string]any, int64) {
 	query := facade.DB.Model(&[]UserCollects{}).
-		Where("uid", uid).
-		Where("status", 1)
+		Where("uid", uid)
 
 	if targetType != "" {
 		query = query.Where("target_type", targetType)
@@ -223,18 +201,9 @@ func (this *UserCollects) GetCollectsByUid(uid int, targetType string) ([]map[st
 }
 
 func (this *UserCollects) GetCollectsCount(targetId int, targetType string) int64 {
-	if targetType == "moment" {
-		var moment Moments
-		facade.DB.Model(&Moments{}).
-			Where("id", targetId).
-			Find(&moment)
-		return moment.Favorites
-	}
-
 	count, _ := facade.DB.Model(&UserCollects{}).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
-		Where("status", 1).
 		Count()
 	return count
 }
@@ -243,7 +212,13 @@ func (this *UserCollects) GetReceivedCollectsCount(uid int) int64 {
 	count, _ := facade.DB.Model(&UserCollects{}).
 		Where("target_type", "user").
 		Where("target_id", uid).
-		Where("status", 1).
+		Count()
+	return count
+}
+
+func (this *UserCollects) GetUserCollectsCount(uid int) int64 {
+	count, _ := facade.DB.Model(&UserCollects{}).
+		Where("uid", uid).
 		Count()
 	return count
 }
@@ -255,15 +230,14 @@ func (this *UserCollects) GetCollectsCounts(targetType string, targetIds []int) 
 	}
 
 	var counts []struct {
-		TargetId int   `json:"target_id"`
-		Count    int64 `json:"count"`
+		TargetId int   `gorm:"column:target_id"`
+		Count    int64 `gorm:"column:count"`
 	}
 
 	facade.DB.Drive().Model(&UserCollects{}).
 		Select("target_id, COUNT(*) as count").
 		Where("target_type = ?", targetType).
 		Where("target_id IN ?", targetIds).
-		Where("status = 1").
 		Group("target_id").
 		Scan(&counts)
 

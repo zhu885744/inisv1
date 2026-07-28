@@ -335,7 +335,7 @@ func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[s
 		<div class="brand"><div class="brand-name">新评论通知</div></div>
 	</div>
 	<div class="mail-content">
-		<p class="subtitle">您的文章《${title}》收到了一条新评论</p>
+		<p class="subtitle">您的${bind_label}《${title}》收到了一条新评论</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
 		<p><strong>评论者：</strong>${author_name}</p>
 		<p><strong>评论时间：</strong>${created_at}</p>
@@ -425,7 +425,7 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 		<div class="brand"><div class="brand-name">评论回复通知</div></div>
 	</div>
 	<div class="mail-content">
-		<p class="subtitle">您在文章《${title}》中的评论收到了一条回复</p>
+		<p class="subtitle">您在${bind_label}《${title}》中的评论收到了一条回复</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
 		<p><strong>回复者：</strong>${author_name}</p>
 		<p><strong>回复时间：</strong>${created_at}</p>

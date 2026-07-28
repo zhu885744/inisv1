@@ -159,24 +159,19 @@ func (this *ModelStruct) IWhere(where any) *ModelStruct {
 	}
 
 	if utils.Is.String(where) {
-		// 尝试解析为JSON对象
 		jsonData := utils.Json.Decode(where)
 		if jsonData != nil {
-			// 如果解析成功，按Map处理
 			for key, val := range cast.ToStringMap(jsonData) {
-				this.Where(key, val)
+				this.handleWhereField(key, val)
 			}
 		} else {
-			// 解析失败，按原字符串处理
 			this.Where(where)
 		}
 
 	} else if utils.Is.Slice(where) {
 
 		var slice []any
-		// ToStringSlice
 		for _, val := range cast.ToSlice(where) {
-			// this.Where(val)
 			slice = append(slice, val)
 		}
 
@@ -185,8 +180,47 @@ func (this *ModelStruct) IWhere(where any) *ModelStruct {
 	} else if utils.Is.MapAny(where) {
 
 		for key, val := range cast.ToStringMap(where) {
-			this.Where(key, val)
+			this.handleWhereField(key, val)
 		}
+	}
+
+	return this
+}
+
+func (this *ModelStruct) handleWhereField(key string, val any) *ModelStruct {
+	if val == nil {
+		this.Where(key, "IS NULL")
+		return this
+	}
+
+	if utils.Is.MapAny(val) {
+		valMap := cast.ToStringMap(val)
+		for op, opVal := range valMap {
+			switch op {
+			case "$in":
+				this.WhereIn(key, opVal)
+			case "$nin":
+				this.WhereNotIn(key, opVal)
+			case "$gt":
+				this.Where(key, ">", opVal)
+			case "$lt":
+				this.Where(key, "<", opVal)
+			case "$gte":
+				this.Where(key, ">=", opVal)
+			case "$lte":
+				this.Where(key, "<=", opVal)
+			case "$ne":
+				this.Where(key, "!=", opVal)
+			case "$eq":
+				this.Where(key, "=", opVal)
+			case "$like":
+				this.Where(key, "LIKE", opVal)
+			default:
+				this.Where(key, val)
+			}
+		}
+	} else {
+		this.Where(key, val)
 	}
 
 	return this
@@ -248,6 +282,24 @@ func (this *ModelStruct) IWhereIn(where any) *ModelStruct {
 		for key, val := range cast.ToStringMap(where) {
 			this.WhereIn(key, val)
 		}
+	}
+
+	return this
+}
+
+// WhereNotIn - 条件
+func (this *ModelStruct) WhereNotIn(args ...any) *ModelStruct {
+
+	if len(args) >= 3 {
+
+		query := fmt.Sprintf("`%v` %v NOT IN (?)", args[0], args[1])
+		this.model.Where(query, args[2])
+
+	} else if len(args) == 2 {
+
+		query := fmt.Sprintf("`%v` NOT IN (?)", args[0])
+		this.model.Where(query, args[1])
+
 	}
 
 	return this
@@ -1048,7 +1100,7 @@ func (this *ModelStruct) Force() *ModelStruct {
 // Delete - 删除
 func (this *ModelStruct) Delete(args ...any) (tx *gorm.DB, err error) {
 
-	if len(args) > 0 {
+	if len(args) > 0 && args[0] != nil {
 
 		if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
 			tx = this.model.Delete(nil, args[0])
@@ -1087,7 +1139,7 @@ func (this *ModelStruct) Destroy(args ...any) (tx *gorm.DB, err error) {
 		this.model.Unscoped()
 	}
 
-	if reflect.TypeOf(args[0]).Kind() == reflect.Slice {
+	if args[0] != nil && reflect.TypeOf(args[0]).Kind() == reflect.Slice {
 		tx = this.model.Delete(nil, args[0])
 		if tx.Error != nil {
 			return nil, tx.Error

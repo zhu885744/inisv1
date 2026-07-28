@@ -663,8 +663,12 @@ func (this *UserFollows) following(ctx *gin.Context) {
 
 	uid := this.meta.user(ctx).Id
 	if uid == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
+		if !utils.Is.Empty(params["uid"]) {
+			uid = cast.ToInt(params["uid"])
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+			return
+		}
 	}
 
 	page := cast.ToInt(params["page"])
@@ -691,8 +695,12 @@ func (this *UserFollows) followers(ctx *gin.Context) {
 
 	uid := this.meta.user(ctx).Id
 	if uid == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
+		if !utils.Is.Empty(params["uid"]) {
+			uid = cast.ToInt(params["uid"])
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+			return
+		}
 	}
 
 	page := cast.ToInt(params["page"])

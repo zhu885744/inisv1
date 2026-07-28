@@ -12,16 +12,16 @@ import (
 )
 
 type UserFollows struct {
-	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
-	Uid         int    `gorm:"type:int(32); comment:用户ID;" json:"uid"`
-	FollowUid   int    `gorm:"type:int(32); comment:关注的用户ID;" json:"follow_uid"`
-	Status      int    `gorm:"type:int(12); default:1; comment:状态（1关注 0取消）;" json:"status"`
-	Description string `gorm:"comment:描述; default:Null;" json:"description"`
-	Json        any    `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
-	Text        any    `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
-	Result      any    `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
-	CreateTime  int64  `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-	UpdateTime  int64  `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+	Id          int                   `gorm:"type:int(32); comment:主键;" json:"id"`
+	Uid         int                   `gorm:"type:int(32); comment:用户ID;" json:"uid"`
+	FollowUid   int                   `gorm:"type:int(32); comment:关注的用户ID;" json:"follow_uid"`
+	Status      int                   `gorm:"type:int(12); default:1; comment:状态（1关注 0取消）;" json:"status"`
+	Description string                `gorm:"comment:描述; default:Null;" json:"description"`
+	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text        any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	Result      any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	CreateTime  int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime  int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime  soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
@@ -41,25 +41,28 @@ func (this *UserFollows) AfterFind(tx *gorm.DB) (err error) {
 }
 
 func (this *UserFollows) result() (result map[string]any) {
-	var followUser any
+	var followerUser any
+	var followeeUser any
 	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
 
-	go this.followUser(&wg, &followUser)
+	go this.followUser(&wg, &followerUser, this.Uid)
+	go this.followUser(&wg, &followeeUser, this.FollowUid)
 
 	wg.Wait()
 
 	return map[string]any{
-		"follow_user": followUser,
+		"follower": followerUser,
+		"followee": followeeUser,
 	}
 }
 
-func (this *UserFollows) followUser(wg *sync.WaitGroup, result *any) {
+func (this *UserFollows) followUser(wg *sync.WaitGroup, result *any, uid int) {
 	defer wg.Done()
 
 	user := make(map[string]any)
 	allow := []string{"id", "nickname", "avatar", "description", "result", "title", "exp"}
-	item, _ := facade.DB.Model(&Users{}).Find(this.FollowUid)
+	item, _ := facade.DB.Model(&Users{}).Find(uid)
 
 	if !utils.Is.Empty(item) {
 		user = utils.Map.WithField(item, allow)
@@ -158,8 +161,8 @@ func (this *UserFollows) GetFollowsCounts(targetType string, targetIds []int) ma
 	}
 
 	var counts []struct {
-		TargetId int   `json:"target_id"`
-		Count    int64 `json:"count"`
+		TargetId int   `gorm:"column:target_id"`
+		Count    int64 `gorm:"column:count"`
 	}
 
 	var field string
@@ -170,7 +173,7 @@ func (this *UserFollows) GetFollowsCounts(targetType string, targetIds []int) ma
 	}
 
 	facade.DB.Drive().Model(&UserFollows{}).
-		Select(field + ", COUNT(*) as count").
+		Select(field+" as target_id, COUNT(*) as count").
 		Where(field+" IN ?", targetIds).
 		Where("status = 1").
 		Group(field).

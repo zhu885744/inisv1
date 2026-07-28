@@ -16,12 +16,12 @@ type UserLikes struct {
 }
 
 const (
-	userLikesAllowFields = "target_type,target_id,status"
-	userLikesAllowQuery  = "id,uid,target_type,target_id,status"
+	userLikesAllowFields = "target_type,target_id"
+	userLikesAllowQuery  = "id,uid,target_type,target_id"
 )
 
-var userLikesAllowFieldsSlice = []any{"target_type", "target_id", "status"}
-var userLikesAllowQuerySlice = []any{"id", "uid", "target_type", "target_id", "status"}
+var userLikesAllowFieldsSlice = []any{"target_type", "target_id"}
+var userLikesAllowQuerySlice = []any{"id", "uid", "target_type", "target_id"}
 
 func (this *UserLikes) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
@@ -31,16 +31,6 @@ func (this *UserLikes) buildQuery(query *facade.ModelStruct, params map[string]a
 		INot(params["not"]).
 		INull(params["null"]).
 		INotNull(params["notNull"])
-}
-
-func (this *UserLikes) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
-	if cast.ToBool(params["onlyTrashed"]) {
-		query = query.OnlyTrashed()
-	}
-	if cast.ToBool(params["withTrashed"]) {
-		query = query.WithTrashed()
-	}
-	return query
 }
 
 func (this *UserLikes) getFromCache(ctx *gin.Context, cacheName string) (any, bool) {
@@ -105,7 +95,6 @@ func (this *UserLikes) IPUT(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"update": this.update,
-		"restore": this.restore,
 		"unlike": this.unlike,
 	}
 	err := this.call(allow, method, ctx)
@@ -163,7 +152,7 @@ func (this *UserLikes) one(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		query := this.withTrashOptions(facade.DB.Model(&table), params)
+		query := facade.DB.Model(&table)
 		query = this.buildQuery(query, params)
 
 		if !this.meta.root(ctx) {
@@ -190,7 +179,7 @@ func (this *UserLikes) all(ctx *gin.Context) {
 
 	params := this.params(ctx, map[string]any{
 		"page":  1,
-		"order": "created_at desc",
+		"order": "create_time desc",
 	})
 
 	table := model.UserLikes{}
@@ -204,7 +193,7 @@ func (this *UserLikes) all(ctx *gin.Context) {
 	limit := this.meta.limit(ctx)
 	var result []model.UserLikes
 
-	query := this.withTrashOptions(facade.DB.Model(&result), params)
+	query := facade.DB.Model(&result)
 	query = this.buildQuery(query, params)
 
 	if !this.meta.root(ctx) {
@@ -239,10 +228,8 @@ func (this *UserLikes) rand(ctx *gin.Context) {
 	params := this.params(ctx)
 	limit := this.meta.limit(ctx)
 	except := utils.Unity.Ids(params["except"])
-	onlyTrashed := cast.ToBool(params["onlyTrashed"])
-	withTrashed := cast.ToBool(params["withTrashed"])
 
-	query := facade.DB.Model(&model.UserLikes{}).OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
+	query := facade.DB.Model(&model.UserLikes{})
 
 	if !this.meta.root(ctx) {
 		query = query.Where("uid", this.user(ctx).Id)
@@ -255,7 +242,6 @@ func (this *UserLikes) rand(ctx *gin.Context) {
 	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
 
 	mold := facade.DB.Model(&[]model.UserLikes{}).Where("id", "IN", ids)
-	mold.OnlyTrashed(onlyTrashed).WithTrashed(withTrashed)
 	mold = this.buildQuery(mold, params)
 
 	if !this.meta.root(ctx) {
@@ -336,7 +322,7 @@ func (this *UserLikes) update(ctx *gin.Context) {
 		}
 	}
 
-	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
+	item := facade.DB.Model(&table).Where("id", params["id"])
 
 	findResult, _ := item.Find()
 	if !this.meta.root(ctx) && cast.ToInt(findResult["uid"]) != this.user(ctx).Id {
@@ -356,7 +342,7 @@ func (this *UserLikes) update(ctx *gin.Context) {
 
 func (this *UserLikes) count(ctx *gin.Context) {
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.UserLikes{}), params)
+	query := facade.DB.Model(&model.UserLikes{})
 	query = this.buildQuery(query, params)
 
 	if !this.meta.root(ctx) {
@@ -372,7 +358,7 @@ func (this *UserLikes) aggregateQuery(ctx *gin.Context, aggFunc func(query *faca
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&model.UserLikes{}), params)
+	query := facade.DB.Model(&model.UserLikes{})
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	if !this.meta.root(ctx) {
@@ -452,7 +438,7 @@ func (this *UserLikes) column(ctx *gin.Context) {
 	var data any
 
 	params := this.params(ctx)
-	query := this.withTrashOptions(facade.DB.Model(&[]model.UserLikes{}), params)
+	query := facade.DB.Model(&[]model.UserLikes{})
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	if !this.meta.root(ctx) {
@@ -523,7 +509,7 @@ func (this *UserLikes) delete(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.UserLikes{}).WithTrashed()
+	item := facade.DB.Model(&model.UserLikes{})
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
 	}
@@ -535,7 +521,7 @@ func (this *UserLikes) delete(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete(ids)
+	_, err := item.Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
@@ -546,8 +532,7 @@ func (this *UserLikes) delete(ctx *gin.Context) {
 }
 
 func (this *UserLikes) clear(ctx *gin.Context) {
-	table := model.UserLikes{}
-	item := facade.DB.Model(&table).OnlyTrashed()
+	item := facade.DB.Model(&model.UserLikes{})
 
 	if !this.meta.root(ctx) {
 		item.Where("uid", this.user(ctx).Id)
@@ -561,7 +546,7 @@ func (this *UserLikes) clear(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete()
+	_, err := item.Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
@@ -569,38 +554,6 @@ func (this *UserLikes) clear(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
-}
-
-func (this *UserLikes) restore(ctx *gin.Context) {
-	params := this.params(ctx)
-	ids := utils.Unity.Ids(params["ids"])
-
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
-		return
-	}
-
-	item := facade.DB.Model(&model.UserLikes{}).OnlyTrashed().WhereIn("id", ids)
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
-	}
-
-	columnData, _ := item.Column("id")
-	ids = utils.Unity.Ids(columnData)
-
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
-		return
-	}
-
-	_, err := facade.DB.Model(&model.UserLikes{}).OnlyTrashed().Restore(ids)
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "恢复失败！"), 400)
-		return
-	}
-
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
 func (this *UserLikes) like(ctx *gin.Context) {
@@ -635,7 +588,6 @@ func (this *UserLikes) like(ctx *gin.Context) {
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,
-		"status":      1,
 	}, facade.Lang(ctx, "点赞成功！"), 200)
 }
 
@@ -671,7 +623,6 @@ func (this *UserLikes) unlike(ctx *gin.Context) {
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,
-		"status":      0,
 	}, facade.Lang(ctx, "取消点赞成功！"), 200)
 }
 
@@ -709,8 +660,12 @@ func (this *UserLikes) likes(ctx *gin.Context) {
 
 	uid := this.meta.user(ctx).Id
 	if uid == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
+		if !utils.Is.Empty(params["uid"]) {
+			uid = cast.ToInt(params["uid"])
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+			return
+		}
 	}
 
 	targetType := cast.ToString(params["target_type"])
@@ -752,7 +707,16 @@ func (this *UserLikes) counts(ctx *gin.Context) {
 	targetType := cast.ToString(params["target_type"])
 	targetIds := cast.ToIntSlice(params["target_ids"])
 
-	counts := (&model.UserLikes{}).GetLikesCounts(targetType, targetIds)
+	var counts map[int]int64
+
+	if targetType == "user_likes" {
+		counts = make(map[int]int64)
+		for _, uid := range targetIds {
+			counts[uid] = (&model.UserLikes{}).GetUserLikesCount(uid)
+		}
+	} else {
+		counts = (&model.UserLikes{}).GetLikesCounts(targetType, targetIds)
+	}
 
 	this.json(ctx, gin.H{"counts": counts}, facade.Lang(ctx, "查询成功！"), 200)
 }

@@ -2,13 +2,21 @@
 
 ## 接口概述
 
-`user-collects` 控制器用于管理用户收藏数据，支持收藏、取消收藏、检查收藏状态等功能。所有接口均支持缓存优化和权限控制。
+`user-collects` 控制器用于管理用户收藏数据，采用"存在即收藏"的设计模式：记录存在表示已收藏，删除记录表示取消收藏。支持收藏、取消收藏、检查收藏状态、获取收藏列表及批量查询收藏数量等功能。所有接口均支持缓存优化和权限控制。
+
+### 设计模式
+
+- **收藏**：在 `user_collects` 表中新增一条记录
+- **取消收藏**：从 `user_collects` 表中删除对应记录
+- **是否已收藏**：通过查询记录是否存在来判断
+- **唯一约束**：`(uid, target_type, target_id)` 联合唯一索引，防止重复收藏
+- **不支持收藏用户**：`target_type` 不支持 `user` 类型
 
 ### 接口类型说明
 
 | 接口类型 | 说明 |
 | :--- | :--- |
-| **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、restore、save、create、update |
+| **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、save、create、update |
 | **业务接口** | collect（收藏）、uncollect（取消收藏）、is-collected（检查是否已收藏）、collects（获取我的收藏列表）、counts（批量查询收藏数量） |
 
 ---
@@ -28,6 +36,25 @@
 
 ---
 
+## 数据模型
+
+### UserCollects 结构
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `id` | int | 主键，自增 |
+| `uid` | int | 用户ID |
+| `target_type` | string | 目标类型：article/page/moment/comment |
+| `target_id` | int | 目标ID |
+| `json` | any | JSON扩展数据 |
+| `text` | any | 文本扩展数据 |
+| `result` | any | 复合返回结果（含author信息） |
+| `create_time` | int64 | 创建时间戳 |
+
+> **注意**：模型已移除 `status` 和 `delete_time` 字段，采用"记录存在即表示已收藏"的设计。
+
+---
+
 ## 接口列表
 
 ### 1. GET 请求接口
@@ -43,12 +70,12 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `id` | int | 否 | 收藏记录ID |
-| `uuid` | string | 否 | 收藏记录UUID |
+| `uid` | int | 否 | 用户ID |
+| `target_type` | string | 否 | 目标类型 |
+| `target_id` | int | 否 | 目标ID |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 | `where` | json | 否 | 条件查询 |
 | `like` | json | 否 | 模糊查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -60,8 +87,15 @@
         "uid": 1,
         "target_type": "article",
         "target_id": 10,
-        "status": 1,
-        "create_time": 1699900000
+        "create_time": 1699900000,
+        "result": {
+            "author": {
+                "id": 2,
+                "nickname": "作者昵称",
+                "avatar": "",
+                "description": ""
+            }
+        }
     }
 }
 ```
@@ -79,13 +113,11 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `page` | int | 否 | 页码，默认1 |
-| `limit` | int | 否 | 每页数量 |
-| `order` | string | 否 | 排序字段，默认 `created_at desc` |
+| `size` | int | 否 | 每页数量 |
+| `order` | string | 否 | 排序字段，默认 `create_time desc` |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 | `where` | json | 否 | 条件查询 |
 | `like` | json | 否 | 模糊查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -112,11 +144,9 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `limit` | int | 否 | 返回数量 |
+| `size` | int | 否 | 返回数量 |
 | `except` | string | 否 | 排除的ID，逗号分隔 |
 | `field` | string | 否 | 返回字段 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -140,8 +170,6 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `where` | json | 否 | 条件查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -372,7 +400,6 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `uid` | int | 否 | 用户ID（管理员） |
 | `target_type` | string | 否 | 目标类型 |
 | `target_id` | int | 否 | 目标ID |
-| `status` | int | 否 | 状态（1:已收藏,0:已取消） |
 
 **成功响应** (200):
 ```json
@@ -400,7 +427,6 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `uid` | int | 否 | 用户ID（管理员） |
 | `target_type` | string | **是** | 目标类型（不支持 "user"） |
 | `target_id` | int | **是** | 目标ID |
-| `status` | int | 否 | 状态，默认1 |
 
 **成功响应** (200):
 ```json
@@ -413,11 +439,20 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 }
 ```
 
+**错误响应** (400 - 不支持收藏用户):
+```json
+{
+    "code": 400,
+    "msg": "不支持收藏用户！",
+    "data": null
+}
+```
+
 #### 2.3 收藏 [业务接口]
 
 - **路径**: `/api/user-collects/collect`
 - **方法**: `POST`
-- **描述**: 收藏指定目标。重复收藏直接返回成功，不会报错
+- **描述**: 收藏指定目标。已收藏时返回错误提示
 
 **请求参数**:
 
@@ -433,19 +468,27 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
     "msg": "收藏成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 1
+        "target_id": 10
     }
 }
 ```
 
-**权限说明**: 需要登录
+**错误响应** (400 - 已收藏):
+```json
+{
+    "code": 400,
+    "msg": "已经收藏过了",
+    "data": null
+}
+```
+
+**权限说明**: 需要登录。不支持收藏用户（target_type=user）
 
 #### 2.4 取消收藏 [业务接口]
 
 - **路径**: `/api/user-collects/uncollect`
 - **方法**: `POST` / `PUT`
-- **描述**: 取消收藏指定目标。即使没有收藏记录也返回成功
+- **描述**: 取消收藏指定目标。删除对应记录，即使记录不存在也返回成功
 
 **请求参数**:
 
@@ -461,8 +504,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
     "msg": "取消收藏成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 0
+        "target_id": 10
     }
 }
 ```
@@ -486,7 +528,6 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `id` | int | **是** | 收藏记录ID |
 | `target_type` | string | 否 | 目标类型 |
 | `target_id` | int | 否 | 目标ID |
-| `status` | int | 否 | 状态 |
 
 **成功响应** (200):
 ```json
@@ -501,36 +542,13 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能更新自己的数据
 
-#### 3.2 恢复收藏 [基础接口-恢复数据]
-
-- **路径**: `/api/user-collects/restore`
-- **方法**: `PUT`
-- **描述**: 从回收站恢复收藏记录
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `ids` | string | **是** | 收藏记录ID列表，逗号分隔 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "恢复成功！",
-    "data": {
-        "ids": [1, 2, 3]
-    }
-}
-```
-
-#### 3.3 取消收藏 [业务接口]
+#### 3.2 取消收藏 [业务接口]
 
 > 与 2.4 相同，支持 `POST` 和 `PUT` 两种请求方式
 
 - **路径**: `/api/user-collects/uncollect`
 - **方法**: `PUT`
-- **描述**: 取消收藏指定目标。即使没有收藏记录也返回成功
+- **描述**: 取消收藏指定目标
 
 **请求参数**:
 
@@ -546,8 +564,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
     "msg": "取消收藏成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 0
+        "target_id": 10
     }
 }
 ```
@@ -558,11 +575,11 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 ### 4. DELETE 请求接口
 
-#### 4.1 软删除收藏 [基础接口-软删除]
+#### 4.1 删除收藏记录 [基础接口-删除]
 
 - **路径**: `/api/user-collects/remove`
 - **方法**: `DELETE`
-- **描述**: 将收藏记录移入回收站
+- **描述**: 删除指定的收藏记录（物理删除）
 
 **请求参数**:
 
@@ -608,11 +625,11 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.3 清空回收站 [基础接口-清空回收站]
+#### 4.3 清空所有收藏 [基础接口-清空]
 
 - **路径**: `/api/user-collects/clear`
 - **方法**: `DELETE`
-- **描述**: 清空所有已删除的收藏记录
+- **描述**: 清空所有收藏记录
 
 **请求参数**: 无
 
@@ -646,6 +663,58 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 ---
 
+## 前端使用指南
+
+### 场景一：展示文章收藏数并判断是否已收藏
+
+```javascript
+// 获取收藏状态和数量（一个请求搞定）
+const res = await request.get('/api/user-collects/is-collected', {
+    target_type: 'article',
+    target_id: articleId
+})
+// res.data = { is_collected: true, count: 15 }
+```
+
+### 场景二：执行收藏/取消收藏
+
+```javascript
+// 收藏
+await request.post('/api/user-collects/collect', {
+    target_type: 'article',
+    target_id: articleId
+})
+
+// 取消收藏
+await request.post('/api/user-collects/uncollect', {
+    target_type: 'article',
+    target_id: articleId
+})
+```
+
+### 场景三：列表页批量获取收藏数
+
+```javascript
+// 批量获取多个文章的收藏数
+const res = await request.get('/api/user-collects/counts', {
+    target_type: 'article',
+    target_ids: '1,2,3,4,5'
+})
+// res.data.counts = { "1": 10, "2": 5, "3": 3 }
+```
+
+### 场景四：我的收藏列表
+
+```javascript
+// 获取当前用户的收藏历史
+const res = await request.get('/api/user-collects/collects', {
+    target_type: 'article',  // 可选，筛选类型
+    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
+})
+```
+
+---
+
 ## 特殊说明
 
 ### 1. 缓存策略
@@ -665,17 +734,20 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `moment` | 动态 |
 | `comment` | 评论 |
 
+> **注意**：收藏不支持 `user` 类型，收藏用户会返回错误。
+
 ### 4. 收藏奖励机制
 - 用户收藏文章/页面/动态后，会给作者增加经验值奖励
 - 奖励类型：article-collect
 - 奖励规则由经验值配置控制
 
-### 5. 状态说明
-- `status=1`：已收藏
-- `status=0`：已取消收藏（逻辑取消，非物理删除）
+### 5. 设计说明
+- **无 status 字段**：通过记录是否存在来判断收藏状态，简化数据模型
+- **无软删除**：取消收藏即物理删除记录，不存在回收站概念
+- **唯一约束**：`(uid, target_type, target_id)` 保证每个用户对同一目标只能有一条收藏记录
+- **不支持收藏用户**：与点赞不同，收藏不支持对用户的收藏操作
 
 ### 6. 收藏/取消收藏特性
-- 收藏不检查重复，重复收藏直接返回成功
-- 取消收藏不检查是否存在记录，直接更新状态返回成功
+- 收藏时如已存在记录，会返回"已经收藏过了"错误
+- 取消收藏不检查记录是否存在，直接执行删除操作
 - uncollect 同时支持 POST 和 PUT 两种请求方式
-- 不支持收藏用户（target_type=user）

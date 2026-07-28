@@ -2,13 +2,20 @@
 
 ## 接口概述
 
-`user-likes` 控制器用于管理用户点赞数据，支持点赞、取消点赞、检查点赞状态、获取点赞列表及每日点赞信息等功能。所有接口均支持缓存优化和权限控制。
+`user-likes` 控制器用于管理用户点赞数据，采用"存在即点赞"的设计模式：记录存在表示已点赞，删除记录表示取消点赞。支持点赞、取消点赞、检查点赞状态、获取点赞列表及每日点赞信息等功能。所有接口均支持缓存优化和权限控制。
+
+### 设计模式
+
+- **点赞**：在 `user_likes` 表中新增一条记录
+- **取消点赞**：从 `user_likes` 表中删除对应记录
+- **是否已点赞**：通过查询记录是否存在来判断
+- **唯一约束**：`(uid, target_type, target_id)` 联合唯一索引，防止重复点赞
 
 ### 接口类型说明
 
 | 接口类型 | 说明 |
 | :--- | :--- |
-| **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、restore、save、create、update |
+| **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、save、create、update |
 | **业务接口** | like（点赞）、unlike（取消点赞）、is-liked（检查是否已点赞）、likes（获取我的点赞列表）、daily-info（获取每日点赞信息）、counts（批量查询点赞数量） |
 
 ---
@@ -28,6 +35,25 @@
 
 ---
 
+## 数据模型
+
+### UserLikes 结构
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `id` | int | 主键，自增 |
+| `uid` | int | 用户ID |
+| `target_type` | string | 目标类型：article/page/moment/comment/user |
+| `target_id` | int | 目标ID |
+| `json` | any | JSON扩展数据 |
+| `text` | any | 文本扩展数据 |
+| `result` | any | 复合返回结果（含author信息） |
+| `create_time` | int64 | 创建时间戳 |
+
+> **注意**：模型已移除 `status` 和 `delete_time` 字段，采用"记录存在即表示已点赞"的设计。
+
+---
+
 ## 接口列表
 
 ### 1. GET 请求接口
@@ -43,12 +69,12 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `id` | int | 否 | 点赞记录ID |
-| `uuid` | string | 否 | 点赞记录UUID |
+| `uid` | int | 否 | 用户ID |
+| `target_type` | string | 否 | 目标类型 |
+| `target_id` | int | 否 | 目标ID |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 | `where` | json | 否 | 条件查询 |
 | `like` | json | 否 | 模糊查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -60,8 +86,15 @@
         "uid": 1,
         "target_type": "article",
         "target_id": 10,
-        "status": 1,
-        "create_time": 1699900000
+        "create_time": 1699900000,
+        "result": {
+            "author": {
+                "id": 2,
+                "nickname": "作者昵称",
+                "avatar": "",
+                "description": ""
+            }
+        }
     }
 }
 ```
@@ -79,13 +112,11 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `page` | int | 否 | 页码，默认1 |
-| `limit` | int | 否 | 每页数量 |
-| `order` | string | 否 | 排序字段，默认 `created_at desc` |
+| `size` | int | 否 | 每页数量 |
+| `order` | string | 否 | 排序字段，默认 `create_time desc` |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 | `where` | json | 否 | 条件查询 |
 | `like` | json | 否 | 模糊查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -112,11 +143,9 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `limit` | int | 否 | 返回数量 |
+| `size` | int | 否 | 返回数量 |
 | `except` | string | 否 | 排除的ID，逗号分隔 |
 | `field` | string | 否 | 返回字段 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -140,8 +169,6 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `where` | json | 否 | 条件查询 |
-| `withTrashed` | bool | 否 | 是否包含已删除数据 |
-| `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
 ```json
@@ -397,7 +424,6 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 | `uid` | int | 否 | 用户ID（管理员） |
 | `target_type` | string | 否 | 目标类型 |
 | `target_id` | int | 否 | 目标ID |
-| `status` | int | 否 | 状态（1:已点赞,0:已取消） |
 
 **成功响应** (200):
 ```json
@@ -425,7 +451,6 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 | `uid` | int | 否 | 用户ID（管理员） |
 | `target_type` | string | **是** | 目标类型 |
 | `target_id` | int | **是** | 目标ID |
-| `status` | int | 否 | 状态，默认1 |
 
 **成功响应** (200):
 ```json
@@ -442,7 +467,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 - **路径**: `/api/user-likes/like`
 - **方法**: `POST`
-- **描述**: 点赞指定目标。重复点赞直接返回成功，不会报错
+- **描述**: 点赞指定目标。已点赞时返回错误提示
 
 **请求参数**:
 
@@ -458,19 +483,27 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "msg": "点赞成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 1
+        "target_id": 10
     }
 }
 ```
 
-**权限说明**: 需要登录
+**错误响应** (400 - 已点赞):
+```json
+{
+    "code": 400,
+    "msg": "已经点赞过了",
+    "data": null
+}
+```
+
+**权限说明**: 需要登录。对用户点赞（target_type=user）时受每日次数限制
 
 #### 2.4 取消点赞 [业务接口]
 
 - **路径**: `/api/user-likes/unlike`
 - **方法**: `POST` / `PUT`
-- **描述**: 取消点赞指定目标。即使没有点赞记录也返回成功
+- **描述**: 取消点赞指定目标。删除对应记录，即使记录不存在也返回成功
 
 **请求参数**:
 
@@ -486,8 +519,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "msg": "取消点赞成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 0
+        "target_id": 10
     }
 }
 ```
@@ -511,7 +543,6 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 | `id` | int | **是** | 点赞记录ID |
 | `target_type` | string | 否 | 目标类型 |
 | `target_id` | int | 否 | 目标ID |
-| `status` | int | 否 | 状态 |
 
 **成功响应** (200):
 ```json
@@ -526,36 +557,13 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能更新自己的数据
 
-#### 3.2 恢复点赞 [基础接口-恢复数据]
-
-- **路径**: `/api/user-likes/restore`
-- **方法**: `PUT`
-- **描述**: 从回收站恢复点赞记录
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `ids` | string | **是** | 点赞记录ID列表，逗号分隔 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "恢复成功！",
-    "data": {
-        "ids": [1, 2, 3]
-    }
-}
-```
-
-#### 3.3 取消点赞 [业务接口]
+#### 3.2 取消点赞 [业务接口]
 
 > 与 2.4 相同，支持 `POST` 和 `PUT` 两种请求方式
 
 - **路径**: `/api/user-likes/unlike`
 - **方法**: `PUT`
-- **描述**: 取消点赞指定目标。即使没有点赞记录也返回成功
+- **描述**: 取消点赞指定目标
 
 **请求参数**:
 
@@ -571,8 +579,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "msg": "取消点赞成功！",
     "data": {
         "target_type": "moment",
-        "target_id": 10,
-        "status": 0
+        "target_id": 10
     }
 }
 ```
@@ -583,11 +590,11 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 ### 4. DELETE 请求接口
 
-#### 4.1 软删除点赞 [基础接口-软删除]
+#### 4.1 删除点赞记录 [基础接口-删除]
 
 - **路径**: `/api/user-likes/remove`
 - **方法**: `DELETE`
-- **描述**: 将点赞记录移入回收站
+- **描述**: 删除指定的点赞记录（物理删除）
 
 **请求参数**:
 
@@ -633,11 +640,11 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.3 清空回收站 [基础接口-清空回收站]
+#### 4.3 清空所有点赞 [基础接口-清空]
 
 - **路径**: `/api/user-likes/clear`
 - **方法**: `DELETE`
-- **描述**: 清空所有已删除的点赞记录
+- **描述**: 清空所有点赞记录
 
 **请求参数**: 无
 
@@ -671,6 +678,58 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 ---
 
+## 前端使用指南
+
+### 场景一：展示文章点赞数并判断是否已点赞
+
+```javascript
+// 获取点赞状态和数量（一个请求搞定）
+const res = await request.get('/api/user-likes/is-liked', {
+    target_type: 'article',
+    target_id: articleId
+})
+// res.data = { is_liked: true, count: 42 }
+```
+
+### 场景二：执行点赞/取消点赞
+
+```javascript
+// 点赞
+await request.post('/api/user-likes/like', {
+    target_type: 'article',
+    target_id: articleId
+})
+
+// 取消点赞
+await request.post('/api/user-likes/unlike', {
+    target_type: 'article',
+    target_id: articleId
+})
+```
+
+### 场景三：列表页批量获取点赞数
+
+```javascript
+// 批量获取多个文章的点赞数
+const res = await request.get('/api/user-likes/counts', {
+    target_type: 'article',
+    target_ids: '1,2,3,4,5'
+})
+// res.data.counts = { "1": 10, "2": 5, "3": 3 }
+```
+
+### 场景四：我的点赞列表
+
+```javascript
+// 获取当前用户的点赞历史
+const res = await request.get('/api/user-likes/likes', {
+    target_type: 'article',  // 可选，筛选类型
+    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
+})
+```
+
+---
+
 ## 特殊说明
 
 ### 1. 缓存策略
@@ -696,9 +755,10 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 - 奖励类型：article-like、comment-like、user-like
 - 奖励规则由经验值配置控制
 
-### 5. 状态说明
-- `status=1`：已点赞
-- `status=0`：已取消点赞（逻辑取消，非物理删除）
+### 5. 设计说明
+- **无 status 字段**：通过记录是否存在来判断点赞状态，简化数据模型
+- **无软删除**：取消点赞即物理删除记录，不存在回收站概念
+- **唯一约束**：`(uid, target_type, target_id)` 保证每个用户对同一目标只能有一条点赞记录
 
 ### 6. 每日点赞限制
 - 对用户点赞（target_type=user）有每日次数限制
@@ -706,6 +766,6 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 - 调用 `/api/user-likes/daily-info` 可查询当前限制和剩余次数
 
 ### 7. 点赞/取消点赞特性
-- 点赞不检查重复，重复点赞直接返回成功
-- 取消点赞不检查是否存在记录，直接更新状态返回成功
+- 点赞时如已存在记录，会返回"已经点赞过了"错误
+- 取消点赞不检查记录是否存在，直接执行删除操作
 - unlike 同时支持 POST 和 PUT 两种请求方式

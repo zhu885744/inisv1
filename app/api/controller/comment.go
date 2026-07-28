@@ -570,17 +570,32 @@ func (this *Comment) create(ctx *gin.Context) {
 			facade.Log.Info(map[string]any{"user_id": user.Id, "user_email": facade.Comm.MaskEmail(userEmail), "user_name": cast.ToString(cast.ToStringMap(userInfo)["name"])}, "获取评论用户信息")
 
 			title := ""
+			bindLabel := ""
 			switch table.BindType {
 			case "article":
 				article, _ := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
 				if !utils.Is.Empty(article) {
 					title = cast.ToString(cast.ToStringMap(article)["title"])
 				}
+				bindLabel = "文章"
 			case "page":
 				page, _ := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
 				if !utils.Is.Empty(page) {
 					title = cast.ToString(cast.ToStringMap(page)["title"])
 				}
+				bindLabel = "页面"
+			case "moment":
+				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(moment) {
+					content := cast.ToString(cast.ToStringMap(moment)["content"])
+					runes := []rune(content)
+					if len(runes) > 50 {
+						title = string(runes[:50]) + "..."
+					} else {
+						title = content
+					}
+				}
+				bindLabel = "动态"
 			}
 
 			createdAt := time.Now().Format("2006-01-02 15:04:05")
@@ -594,6 +609,7 @@ func (this *Comment) create(ctx *gin.Context) {
 				"ip":           table.Ip,
 				"bind_type":    table.BindType,
 				"bind_id":      table.BindId,
+				"bind_label":   bindLabel,
 				"title":        title,
 			}
 			facade.Log.Info(map[string]any{"comment_id": table.Id, "bind_type": table.BindType, "bind_id": table.BindId}, "评论通知处理")
@@ -619,6 +635,16 @@ func (this *Comment) create(ctx *gin.Context) {
 					facade.Log.Info(map[string]any{"page_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取页面作者信息")
 				} else {
 					facade.Log.Warn(map[string]any{"page_id": table.BindId}, "页面不存在，跳过发送给作者")
+				}
+			case "moment":
+				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(moment) {
+					authorId := cast.ToInt(cast.ToStringMap(moment)["uid"])
+					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+					facade.Log.Info(map[string]any{"moment_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取动态作者信息")
+				} else {
+					facade.Log.Warn(map[string]any{"moment_id": table.BindId}, "动态不存在，跳过发送给作者")
 				}
 			default:
 				facade.Log.Warn(map[string]any{"bind_type": table.BindType}, "未知绑定类型，跳过发送给作者")
