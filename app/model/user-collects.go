@@ -83,13 +83,6 @@ func (this *UserCollects) author(wg *sync.WaitGroup, result *any) {
 }
 
 func (this *UserCollects) AfterCreate(tx *gorm.DB) (err error) {
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		this.handleCollectExp()
-	}()
-	wg.Wait()
 	return
 }
 

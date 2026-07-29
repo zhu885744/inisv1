@@ -90,13 +90,6 @@ func (this *UserLikes) author(wg *sync.WaitGroup, result *any) {
 }
 
 func (this *UserLikes) AfterCreate(tx *gorm.DB) (err error) {
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		this.handleLikeExp()
-	}()
-	wg.Wait()
 	return
 }
 
@@ -114,12 +107,12 @@ func (this *UserLikes) handleLikeExp() {
 		var page Pages
 		facade.DB.Model(&Pages{}).Where("id", this.TargetId).Find(&page)
 		authorId = page.Uid
-		expType = "article-like"
+		expType = "user-like"
 	case "moment":
 		var moment Moments
 		facade.DB.Model(&Moments{}).Where("id", this.TargetId).Find(&moment)
 		authorId = moment.Uid
-		expType = "article-like"
+		expType = "user-like"
 	case "comment":
 		var comment Comment
 		facade.DB.Model(&Comment{}).Where("id", this.TargetId).Find(&comment)

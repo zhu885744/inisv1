@@ -591,6 +591,40 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 		return
 	}
 
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "收藏经验值协程发生错误")
+			}
+		}()
+
+		var authorId int
+
+		switch targetType {
+		case "article":
+			article, _ := facade.DB.Model(&model.Article{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(article)["uid"])
+		case "page":
+			page, _ := facade.DB.Model(&model.Pages{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
+		case "moment":
+			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
+		default:
+			return
+		}
+
+		if authorId > 0 && authorId != uid {
+			_ = (&model.EXP{}).Add(model.EXP{
+				Uid:         authorId,
+				Type:        "article-collect",
+				BindType:    targetType,
+				BindId:      targetId,
+				Description: "文章被收藏奖励",
+			})
+		}
+	}()
+
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,

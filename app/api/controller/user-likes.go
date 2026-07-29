@@ -585,6 +585,51 @@ func (this *UserLikes) like(ctx *gin.Context) {
 		return
 	}
 
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "点赞经验值协程发生错误")
+			}
+		}()
+
+		var authorId int
+		var expType string
+
+		switch targetType {
+		case "article":
+			article, _ := facade.DB.Model(&model.Article{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(article)["uid"])
+			expType = "article-like"
+		case "page":
+			page, _ := facade.DB.Model(&model.Pages{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
+			expType = "user-like"
+		case "moment":
+			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
+			expType = "user-like"
+		case "comment":
+			comment, _ := facade.DB.Model(&model.Comment{}).Where("id", targetId).Find()
+			authorId = cast.ToInt(cast.ToStringMap(comment)["uid"])
+			expType = "comment-like"
+		case "user":
+			authorId = targetId
+			expType = "user-like"
+		default:
+			return
+		}
+
+		if authorId > 0 && authorId != uid {
+			_ = (&model.EXP{}).Add(model.EXP{
+				Uid:         authorId,
+				Type:        expType,
+				BindType:    targetType,
+				BindId:      targetId,
+				Description: expType + "奖励",
+			})
+		}
+	}()
+
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,
