@@ -3,7 +3,10 @@ package facade
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	AliYunClient "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	AliYunUtil "github.com/alibabacloud-go/openapi-util/service"
@@ -29,6 +32,47 @@ const (
 	// SMSModeTencent - 腾讯云
 	SMSModeTencent = "tencent"
 )
+
+// ========== SMS 日志记录 ==========
+// smsLog - 记录短信/邮件发送日志到独立文件
+// logType: "email" 或 "sms"
+func smsLog(logType string, success bool, detail map[string]any) {
+	logDir := filepath.Join("runtime", "sms")
+	// 创建目录
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return
+	}
+
+	logFile := filepath.Join(logDir, logType+".log")
+
+	// 构建日志内容
+	status := "成功"
+	if !success {
+		status = "失败"
+	}
+
+	// 构建详情字符串
+	detailStr := ""
+	for k, v := range detail {
+		detailStr += fmt.Sprintf(" | %s: %v", k, v)
+	}
+
+	line := fmt.Sprintf("[%s] [%s] %s%s\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		status,
+		logType,
+		detailStr,
+	)
+
+	// 以追加模式写入
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	f.WriteString(line)
+}
 
 // ========== 结构体声明（必须在变量使用前） ==========
 // SMSResponse - 短信响应
@@ -236,12 +280,19 @@ func initSMS() {
 // init 初始化 邮件服务
 func (this *GoMailRequest) init() {
 	if SMSToml == nil {
+		smsLog("email", false, map[string]any{"error": "SMS配置文件未加载"})
 		return
 	}
 	port := cast.ToInt(SMSToml.Get("email.port"))
 	host := cast.ToString(SMSToml.Get("email.host"))
 	account := cast.ToString(SMSToml.Get("email.account"))
 	password := cast.ToString(SMSToml.Get("email.password"))
+
+	if utils.Is.Empty(host) || utils.Is.Empty(account) {
+		smsLog("email", false, map[string]any{"error": "邮件配置缺失", "host": host, "account": account})
+		return
+	}
+
 	this.Client = gomail.NewDialer(host, port, account, password)
 }
 
@@ -251,6 +302,13 @@ func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResp
 
 	if !utils.Is.Email(phone) {
 		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		smsLog("email", false, map[string]any{"recipient": phone, "error": response.Error, "type": "验证码"})
+		return
+	}
+
+	if this.Client == nil {
+		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
+		smsLog("email", false, map[string]any{"recipient": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -281,10 +339,12 @@ func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResp
 	err := this.Client.DialAndSend(item)
 	if err != nil {
 		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": phone, "error": err, "type": "验证码"})
 		return response
 	}
 
 	response.VerifyCode = cast.ToString(code[0])
+	smsLog("email", true, map[string]any{"recipient": phone, "type": "验证码"})
 	return response
 }
 
@@ -294,6 +354,13 @@ func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[s
 
 	if !utils.Is.Email(recipient) {
 		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "评论通知"})
+		return
+	}
+
+	if this.Client == nil {
+		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "评论通知"})
 		return
 	}
 
@@ -371,10 +438,12 @@ func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[s
 	err := this.Client.DialAndSend(item)
 	if err != nil {
 		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "评论通知", "bind_type": commentInfo["bind_type"], "bind_id": commentInfo["bind_id"]})
 		return response
 	}
 
 	response.Result = "邮件发送成功"
+	smsLog("email", true, map[string]any{"recipient": recipient, "type": "评论通知", "bind_type": commentInfo["bind_type"], "bind_id": commentInfo["bind_id"]})
 	return response
 }
 
@@ -384,6 +453,13 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 
 	if !utils.Is.Email(recipient) {
 		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "回复通知"})
+		return
+	}
+
+	if this.Client == nil {
+		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "回复通知"})
 		return
 	}
 
@@ -461,10 +537,12 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 	err := this.Client.DialAndSend(item)
 	if err != nil {
 		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "回复通知", "bind_type": commentInfo["bind_type"], "bind_id": commentInfo["bind_id"]})
 		return response
 	}
 
 	response.Result = "邮件发送成功"
+	smsLog("email", true, map[string]any{"recipient": recipient, "type": "回复通知", "bind_type": commentInfo["bind_type"], "bind_id": commentInfo["bind_id"]})
 	return response
 }
 
@@ -508,6 +586,7 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 	// 手机号格式校验
 	if !utils.Is.Phone(phone) {
 		response.Error = errors.New("格式错误，请给一个正确的手机号码")
+		smsLog("sms", false, map[string]any{"provider": "aliyun", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -515,6 +594,7 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 	templateCode := cast.ToString(SMSToml.Get("aliyun.verify_code"))
 	if utils.Is.Empty(templateCode) {
 		response.Error = errors.New("阿里云短信模板Code未配置")
+		smsLog("sms", false, map[string]any{"provider": "aliyun", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -543,6 +623,7 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 	// 签名校验
 	if utils.Is.Empty(params["SignName"]) {
 		response.Error = errors.New("阿里云短信签名未配置")
+		smsLog("sms", false, map[string]any{"provider": "aliyun", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -555,6 +636,7 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 	result, err := this.Client.CallApi(this.ApiInfo(), request, runtime)
 	if err != nil {
 		response.Error = err
+		smsLog("sms", false, map[string]any{"provider": "aliyun", "phone": phone, "error": err, "type": "验证码"})
 		return response
 	}
 
@@ -562,12 +644,14 @@ func (this *AliYunSMS) VerifyCode(phone any, code ...any) (response *SMSResponse
 	body := cast.ToStringMap(result["body"])
 	if body["Code"] != "OK" {
 		response.Error = errors.New(cast.ToString(body["Message"]))
+		smsLog("sms", false, map[string]any{"provider": "aliyun", "phone": phone, "error": response.Error, "type": "验证码"})
 		return response
 	}
 
 	response.Result = result
 	response.Text = utils.Json.Encode(result)
 	response.VerifyCode = cast.ToString(code[0])
+	smsLog("sms", true, map[string]any{"provider": "aliyun", "phone": phone, "type": "验证码"})
 	return response
 }
 
@@ -920,6 +1004,7 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 	// 手机号格式校验
 	if !utils.Is.Phone(phone) {
 		response.Error = errors.New("格式错误，请给一个正确的手机号码")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -930,14 +1015,17 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 
 	if utils.Is.Empty(sdkAppId) {
 		response.Error = errors.New("腾讯云短信SDK AppID未配置")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 	if utils.Is.Empty(signName) {
 		response.Error = errors.New("腾讯云短信签名未配置")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 	if utils.Is.Empty(templateId) {
 		response.Error = errors.New("腾讯云短信模板ID未配置")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return
 	}
 
@@ -958,17 +1046,20 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 	item, err := this.Client.SendSms(request)
 	if err != nil {
 		response.Error = err
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": err, "type": "验证码"})
 		return response
 	}
 
 	// 响应边界处理
 	if item == nil || item.Response == nil {
 		response.Error = errors.New("腾讯云短信响应为空")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return response
 	}
 
 	if len(item.Response.SendStatusSet) == 0 {
 		response.Error = errors.New("腾讯云短信发送状态为空")
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": response.Error, "type": "验证码"})
 		return response
 	}
 
@@ -979,6 +1070,7 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 			errMsg = *status.Message
 		}
 		response.Error = errors.New(errMsg)
+		smsLog("sms", false, map[string]any{"provider": "tencent", "phone": phone, "error": errMsg, "type": "验证码"})
 		return response
 	}
 
@@ -986,6 +1078,7 @@ func (this *TencentSMS) VerifyCode(phone any, code ...any) (response *SMSRespons
 	response.VerifyCode = cast.ToString(code[0])
 	response.Text = item.ToJsonString()
 	response.Result = utils.Json.Decode(item.ToJsonString())
+	smsLog("sms", true, map[string]any{"provider": "tencent", "phone": phone, "type": "验证码"})
 
 	return response
 }

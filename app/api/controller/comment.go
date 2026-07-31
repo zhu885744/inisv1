@@ -558,7 +558,9 @@ func (this *Comment) create(ctx *gin.Context) {
 		emailNotify := cast.ToStringMap(commentConfig["email_notify"])
 		facade.Log.Info(map[string]any{"email_notify": emailNotify}, "加载邮件通知配置")
 
-		if cast.ToInt(emailNotify["enabled"]) == 1 {
+		if emailNotify == nil {
+			facade.Log.Warn(nil, "email_notify配置为空，跳过邮件通知")
+		} else if cast.ToInt(emailNotify["enabled"]) == 1 {
 			facade.Log.Info(nil, "邮件通知功能已开启")
 
 			retryCount := cast.ToInt(emailNotify["retry_count"])
@@ -584,7 +586,7 @@ func (this *Comment) create(ctx *gin.Context) {
 					title = cast.ToString(cast.ToStringMap(page)["title"])
 				}
 				bindLabel = "页面"
-			case "moment":
+			case "moments":
 				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
 				if !utils.Is.Empty(moment) {
 					content := cast.ToString(cast.ToStringMap(moment)["content"])
@@ -636,7 +638,7 @@ func (this *Comment) create(ctx *gin.Context) {
 				} else {
 					facade.Log.Warn(map[string]any{"page_id": table.BindId}, "页面不存在，跳过发送给作者")
 				}
-			case "moment":
+			case "moments":
 				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
 				if !utils.Is.Empty(moment) {
 					authorId := cast.ToInt(cast.ToStringMap(moment)["uid"])
@@ -661,7 +663,7 @@ func (this *Comment) create(ctx *gin.Context) {
 					}
 					if i < retryCount {
 						facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给作者失败，准备重试")
-						time.Sleep(time.Duration(retryInterval) * time.Second)
+						time.Sleep(time.Duration(retryInterval) * time.Minute)
 					} else {
 						facade.Log.Error(map[string]any{"error": response.Error, "recipient": facade.Comm.MaskEmail(authorEmail)}, "发送文章作者邮件通知失败")
 					}
@@ -690,7 +692,7 @@ func (this *Comment) create(ctx *gin.Context) {
 							}
 							if i < retryCount {
 								facade.Log.Warn(map[string]any{"error": response.Error, "retry": i + 1}, "邮件发送给被回复用户失败，准备重试")
-								time.Sleep(time.Duration(retryInterval) * time.Second)
+								time.Sleep(time.Duration(retryInterval) * time.Minute)
 							} else {
 								facade.Log.Error(map[string]any{"error": response.Error, "recipient": facade.Comm.MaskEmail(parentEmail)}, "发送评论回复邮件通知失败")
 							}
