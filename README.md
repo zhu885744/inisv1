@@ -300,48 +300,238 @@ flowchart TD
 
 ```
 inisv1/
-├── .gitignore          # Git 忽略文件配置
-├── LICENSE             # 项目许可证
-├── README.md           # 项目说明文档（功能、运行、规划等）
-├── build.bat           # 编译脚本（生成可执行文件）
-├── go.mod              # Go 模块依赖配置
-├── go.sum              # 依赖校验文件
-├── inis.sh             # linux 安装脚本
-├── install.lock        # 安装锁文件（标记是否完成初始化）
-├── main.go             # 程序入口文件
-├── config/             # 配置文件目录
-│   ├── .gitignore      # 配置目录的 Git 忽略规则
-│   ├── app.go          # 应用配置核心逻辑（启动服务等）
-│   └── i18n/           # 国际化语言配置
-│       ├── en-us.json   # 英语语言包
-│       ├── ja-jp.json   # 日语语言包
-│       ├── ko-kr.json   # 韩语语言包
-│       ├── ru-ru.json   # 俄语语言包
-│       └── zh-cn.json   # 中文语言包
-├── docs/               # API 文档目录
-│   ├── docs.go         # Swagger 文档生成
-│   ├── swagger.json    # Swagger JSON 文件
-│   └── swagger.yaml    # Swagger YAML 文件
-└── app/                # 核心业务代码目录
-    ├── api/            # API 接口相关（控制器、路由）
-    │   ├── controller/ # API 控制器
-    │   ├── middleware/ # API 中间件
-    │   └── route/      # API 路由
-    ├── dev/            # 开发相关功能（系统信息、调试等）
-    │   ├── controller/ # 开发控制器
-    │   └── route/      # 开发路由
-    ├── facade/         # 门面层（封装核心服务、工具）
-    ├── index/          # 首页相关路由/控制器
-    │   ├── controller/ # 首页控制器
-    │   └── route/      # 首页路由
-    ├── middleware/     # 全局中间件（CORS、权限校验等）
-    ├── model/          # 数据模型（与数据库交互）
-    ├── socket/         # WebSocket 相关（实时通信）
-    │   ├── controller/ # WebSocket 控制器
-    │   ├── middleware/ # WebSocket 中间件
-    │   └── route/      # WebSocket 路由
-    ├── timer/          # 定时任务（日志清理等）
-    └── validator/      # 数据验证器
+├── .gitignore              # Git 忽略文件配置
+├── LICENSE                 # 项目许可证（MIT）
+├── README.md               # 项目说明文档（功能、运行、规划等）
+├── build.bat               # 编译脚本（生成可执行文件）
+├── go.mod                  # Go 模块依赖配置
+├── go.sum                  # 依赖校验文件
+├── inis.sh                 # Linux 安装脚本
+├── install.lock            # 安装锁文件（标记是否完成初始化）
+├── main.go                 # 程序入口文件
+│
+├── config/                 # 配置文件目录
+│   ├── .gitignore          # 配置目录的 Git 忽略规则（忽略 sms.toml 等敏感配置）
+│   ├── app.go              # 应用配置核心逻辑（启动服务、读取配置等）
+│   └── i18n/               # 国际化语言配置
+│       ├── en-us.json      # 英语语言包
+│       ├── ja-jp.json      # 日语语言包
+│       ├── ko-kr.json      # 韩语语言包
+│       ├── ru-ru.json      # 俄语语言包
+│       └── zh-cn.json      # 中文语言包
+│
+├── docs/                   # API 文档目录
+│   ├── API docs/           # 各模块 API 接口文档
+│   │   ├── api-keys.md     # API 密钥管理接口文档
+│   │   ├── article-group.md# 文章分组接口文档
+│   │   ├── article.md      # 文章接口文档
+│   │   ├── attachment.md   # 附件管理接口文档
+│   │   ├── auth-group.md   # 权限分组接口文档
+│   │   ├── auth-pages.md   # 权限页面接口文档
+│   │   ├── auth-rules.md   # 权限规则接口文档
+│   │   ├── banner.md       # 轮播图接口文档
+│   │   ├── base.md         # 基础接口文档
+│   │   ├── comm.md         # 通用接口文档
+│   │   ├── comment.md      # 评论接口文档
+│   │   ├── config.md       # 系统配置接口文档
+│   │   ├── exp.md          # 经验值接口文档
+│   │   ├── file.md         # 文件上传接口文档
+│   │   ├── ip-black.md     # IP 黑名单接口文档
+│   │   ├── ip-white.md     # IP 白名单接口文档
+│   │   ├── level.md        # 等级接口文档
+│   │   ├── links-group.md  # 友链分组接口文档
+│   │   ├── links.md        # 友链接口文档
+│   │   ├── moments.md      # 动态接口文档
+│   │   ├── oauth.md        # 第三方登录接口文档
+│   │   ├── pages.md        # 独立页面接口文档
+│   │   ├── placard.md      # 公告接口文档
+│   │   ├── proxy.md        # 代理接口文档
+│   │   ├── qps-warn.md     # QPS 预警接口文档
+│   │   ├── rss.md          # RSS 订阅接口文档
+│   │   ├── search.md       # 搜索接口文档
+│   │   ├── tags.md         # 标签接口文档
+│   │   ├── test.md         # 测试接口文档
+│   │   ├── toml.md         # TOML 配置接口文档
+│   │   ├── user-collects.md       # 用户收藏接口文档
+│   │   ├── user-follows.md        # 用户关注接口文档
+│   │   ├── user-interaction-guide.md # 用户互动模块前端调用指南
+│   │   ├── user-likes.md          # 用户点赞接口文档
+│   │   └── users.md       # 用户接口文档
+│   ├── cache.md            # 缓存机制说明文档
+│   ├── database-index.md   # 数据库索引说明文档
+│   ├── socket前端使用指南.md # WebSocket 前端使用指南
+│   ├── 二次开发规范.md      # 二次开发规范文档
+│   ├── 前端主题开发及API调用规范.md # 前端主题开发及 API 调用规范
+│   ├── 友链api使用文档.md   # 友链 API 使用文档
+│   └── 项目规划.md          # 项目规划文档
+│
+├── public/                 # 静态资源目录
+│   ├── index.html          # 首页 HTML
+│   ├── install.html        # 安装引导页 HTML
+│   └── assets/             # 静态资源
+│       ├── emoji/          # 表情包资源
+│       │   ├── bilibili/   # B站表情包（webp 格式）
+│       │   ├── qq/         # QQ 表情包（gif 格式）
+│       │   └── tiktok/     # 抖音表情包（png 格式）
+│       └── rand/           # 随机资源
+│           ├── avatar/     # 默认头像
+│           └── imgs.txt    # 随机图片列表
+│
+└── app/                    # 核心业务代码目录
+    │
+    ├── api/                # API 接口相关（控制器、路由、中间件）
+    │   ├── controller/     # API 控制器
+    │   │   ├── OAuth.go            # 第三方登录控制器
+    │   │   ├── api-keys.go         # API 密钥管理控制器
+    │   │   ├── article-group.go    # 文章分组控制器
+    │   │   ├── article.go          # 文章控制器
+    │   │   ├── attachment.go       # 附件管理控制器
+    │   │   ├── auth-group.go       # 权限分组控制器
+    │   │   ├── auth-pages.go       # 权限页面控制器
+    │   │   ├── auth-rules.go       # 权限规则控制器
+    │   │   ├── banner.go           # 轮播图控制器
+    │   │   ├── base.go             # 基础控制器（公共方法封装）
+    │   │   ├── comm.go             # 通用接口控制器（验证码、统计等）
+    │   │   ├── comment.go          # 评论控制器
+    │   │   ├── config.go           # 系统配置控制器
+    │   │   ├── exp.go              # 经验值控制器
+    │   │   ├── ip-black.go         # IP 黑名单控制器
+    │   │   ├── ip-white.go         # IP 白名单控制器
+    │   │   ├── level.go            # 等级控制器
+    │   │   ├── links-group.go      # 友链分组控制器
+    │   │   ├── links.go            # 友链控制器
+    │   │   ├── moments.go          # 动态控制器
+    │   │   ├── pages.go            # 独立页面控制器
+    │   │   ├── placard.go          # 公告控制器
+    │   │   ├── proxy.go            # 代理控制器
+    │   │   ├── qps-warn.go         # QPS 预警控制器
+    │   │   ├── rss.go              # RSS 订阅控制器
+    │   │   ├── search.go           # 搜索控制器
+    │   │   ├── tags.go             # 标签控制器
+    │   │   ├── test.go             # 测试控制器
+    │   │   ├── toml.go             # TOML 配置控制器
+    │   │   ├── user-collects.go    # 用户收藏控制器
+    │   │   ├── user-follows.go     # 用户关注控制器
+    │   │   ├── user-likes.go       # 用户点赞控制器
+    │   │   └── users.go            # 用户控制器
+    │   ├── middleware/     # API 中间件
+    │   │   ├── api-key.go          # API 密钥验证中间件
+    │   │   ├── file_limit.go       # 文件上传限制中间件
+    │   │   ├── ip-black.go         # IP 黑名单中间件
+    │   │   ├── jwt.go              # JWT 认证中间件
+    │   │   ├── method.go           # 请求方法校验中间件
+    │   │   └── rule.go             # 权限规则校验中间件
+    │   └── route/          # API 路由
+    │       └── app.go              # API 路由注册
+    │
+    ├── dev/                # 开发相关功能（系统信息、安装引导等）
+    │   ├── controller/     # 开发控制器
+    │   │   ├── base.go             # 开发基础控制器
+    │   │   ├── info.go             # 系统信息控制器
+    │   │   └── install.go          # 安装引导控制器
+    │   └── route/          # 开发路由
+    │       └── app.go              # 开发路由注册
+    │
+    ├── facade/             # 门面层（封装核心服务、工具）
+    │   ├── app.go                  # 应用服务封装（启动、关闭等）
+    │   ├── cache.go                # 缓存服务封装
+    │   ├── comm.go                 # 通用工具封装（XSS 检测、HTML 过滤等）
+    │   ├── const.go                # 常量定义
+    │   ├── crypt.go                # 加密解密封装
+    │   ├── db.go                   # 数据库服务封装（Facade 模式）
+    │   ├── lang.go                 # 多语言服务封装
+    │   ├── log.go                  # 日志服务封装
+    │   ├── mysql.go                # MySQL 数据库封装
+    │   ├── sms.go                  # 短信/邮件服务封装
+    │   ├── storage.go              # 存储服务封装（本地/云存储）
+    │   ├── template.go             # 模板引擎封装
+    │   ├── toml.go                 # TOML 配置读取封装
+    │   └── var.go                  # 全局变量定义
+    │
+    ├── index/              # 首页相关路由/控制器
+    │   ├── controller/     # 首页控制器
+    │   │   └── index.go            # 首页控制器
+    │   └── route/          # 首页路由
+    │       └── app.go              # 首页路由注册
+    │
+    ├── middleware/         # 全局中间件
+    │   ├── cors.go                 # 跨域 CORS 中间件
+    │   ├── install.go              # 安装检测中间件
+    │   ├── ip.go                   # IP 访问控制中间件
+    │   ├── log.go                  # 请求日志中间件
+    │   ├── params.go               # 参数解析中间件
+    │   ├── qps.go                  # QPS 限流中间件
+    │   ├── tls.go                  # TLS/HTTPS 中间件
+    │   └── token.go                # Token 验证中间件
+    │
+    ├── model/              # 数据模型（与数据库交互）
+    │   ├── api-keys.go             # API 密钥模型
+    │   ├── article-group.go        # 文章分组模型
+    │   ├── article.go              # 文章模型
+    │   ├── attachment.go           # 附件模型
+    │   ├── auth-group.go           # 权限分组模型
+    │   ├── auth-pages.go           # 权限页面模型
+    │   ├── auth-rules.go           # 权限规则模型
+    │   ├── banner.go               # 轮播图模型
+    │   ├── base.go                 # 基础模型（公共方法、表初始化）
+    │   ├── comment.go              # 评论模型
+    │   ├── config.go               # 系统配置模型
+    │   ├── exp.go                  # 经验值模型
+    │   ├── ip-black.go             # IP 黑名单模型
+    │   ├── ip-white.go             # IP 白名单模型
+    │   ├── level.go                # 等级模型
+    │   ├── links-group.go          # 友链分组模型
+    │   ├── links.go                # 友链模型
+    │   ├── moments.go              # 动态模型
+    │   ├── pages.go                # 独立页面模型
+    │   ├── placard.go              # 公告模型
+    │   ├── qps-warn.go             # QPS 预警模型
+    │   ├── tags.go                 # 标签模型
+    │   ├── user-collects.go        # 用户收藏模型
+    │   ├── user-follows.go         # 用户关注模型
+    │   ├── user-likes.go           # 用户点赞模型
+    │   └── users.go                # 用户模型
+    │
+    ├── socket/             # WebSocket 相关（实时通信）
+    │   ├── controller/     # WebSocket 控制器
+    │   │   ├── base.go             # WebSocket 基础控制器
+    │   │   ├── index.go            # WebSocket 主控制器
+    │   │   ├── online.go           # 在线用户管理
+    │   │   ├── serialize.go        # 数据序列化
+    │   │   └── status.go           # 连接状态管理
+    │   ├── middleware/     # WebSocket 中间件
+    │   │   └── app.go              # WebSocket 中间件
+    │   └── route/          # WebSocket 路由
+    │       └── app.go              # WebSocket 路由注册
+    │
+    ├── timer/              # 定时任务
+    │   ├── device.go               # 设备定时任务
+    │   ├── log.go                  # 日志清理定时任务
+    │   └── run.go                  # 定时任务启动入口
+    │
+    └── validator/          # 数据验证器
+        ├── api-keys.go             # API 密钥验证器
+        ├── article-group.go        # 文章分组验证器
+        ├── article.go              # 文章验证器
+        ├── attachment.go           # 附件验证器
+        ├── auth-group.go           # 权限分组验证器
+        ├── auth-pages.go           # 权限页面验证器
+        ├── auth-rules.go           # 权限规则验证器
+        ├── banner.go               # 轮播图验证器
+        ├── base.go                 # 基础验证器
+        ├── comment.go              # 评论验证器
+        ├── config.go               # 系统配置验证器
+        ├── exp.go                  # 经验值验证器
+        ├── ip-black.go             # IP 黑名单验证器
+        ├── ip-white.go             # IP 白名单验证器
+        ├── level.go                # 等级验证器
+        ├── links-group.go          # 友链分组验证器
+        ├── links.go                # 友链验证器
+        ├── pages.go                # 独立页面验证器
+        ├── placard.go              # 公告验证器
+        ├── qps-warn.go             # QPS 预警验证器
+        ├── tags.go                 # 标签验证器
+        └── users.go                # 用户验证器
 ```
 
 ## 开发指南
@@ -378,8 +568,6 @@ A: 在配置文件中设置缓存相关参数，支持文件缓存、内存缓�
 ### 近期目标（短期）
 - [ ] PostgreSQL 数据库完整支持
 - [ ] SQLite 轻量级数据库支持
-- [ ] 完整的 API 文档自动生成（Swagger）
-- [ ] 后台管理系统完善（权限管理优化）
 
 ### 中期目标
 - [ ] 插件系统（支持第三方扩展）
@@ -414,3 +602,6 @@ A: 在配置文件中设置缓存相关参数，支持文件缓存、内存缓�
 原作者「陈兔子」：[https://github.com/racns](https://github.com/racns)<br>
 原开源仓库「已停更」：[https://github.com/inis-io/inis](https://github.com/inis-io/inis)<br>
 感谢所有为开源社区做出贡献的开发者！
+
+### 开源许可
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
