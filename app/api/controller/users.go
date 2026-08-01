@@ -435,13 +435,13 @@ func (this *Users) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Users{}
-	allow := []any{"id", "account", "password", "nickname", "avatar", "description", "gender", "json", "text", "status"}
+	allow := []any{"id", "account", "password", "nickname", "avatar", "title", "description", "gender", "json", "text", "status"}
 	async := utils.Async[map[string]any]()
 
 	root := this.meta.root(ctx)
 	// 越权 - 增加可选字段
 	if root {
-		allow = append(allow, "source", "remark", "title", "email", "phone")
+		allow = append(allow, "source", "remark", "email", "phone")
 	}
 
 	// 动态给结构体赋值
