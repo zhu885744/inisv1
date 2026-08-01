@@ -18,32 +18,7 @@ const ExpCacheKey = "SYSTEM_EXP_RULES"
 
 // GetExpConfig - 获取经验值配置（缓存优先）
 func GetExpConfig() map[string]facade.H {
-	// 优先从缓存获取
-	if facade.Cache.Has(ExpCacheKey) {
-		if data, ok := facade.Cache.Get(ExpCacheKey).(map[string]facade.H); ok {
-			return data
-		}
-	}
-
-	// 从数据库获取
-	item, _ := facade.DB.Model(&Config{}).Where("key", ExpCacheKey).Find()
-	if !utils.Is.Empty(item) {
-		// Find() 返回 map[string]any，json 字段也是 map[string]any
-		if jsonData, ok := item["json"].(map[string]any); ok {
-			// 转换为 map[string]facade.H
-			expConfig := make(map[string]facade.H)
-			for k, v := range jsonData {
-				if vMap, ok := v.(map[string]any); ok {
-					expConfig[k] = facade.H(vMap)
-				}
-			}
-			// 设置缓存
-			facade.Cache.Set(ExpCacheKey, expConfig)
-			return expConfig
-		}
-	}
-
-	// 返回默认配置
+	// 默认配置（始终作为兜底）
 	defaultConfig := map[string]facade.H{
 		"like":            {"name": "点赞", "value": 1, "daily_limit": 10},
 		"collect":         {"name": "收藏", "value": 1, "daily_limit": 10},
@@ -54,11 +29,44 @@ func GetExpConfig() map[string]facade.H {
 		"check-in":        {"name": "签到", "value": 10, "daily_limit": 1},
 		"moments":         {"name": "发布动态", "value": 50, "daily_limit": 1},
 		"article-create":  {"name": "发布文章", "value": 5, "daily_limit": 10},
-		"article-like":    {"name": "文章获赞", "value": 5, "daily_limit": 10},
-		"article-collect": {"name": "文章被收藏", "value": 5, "daily_limit": 10},
+		"article-like":    {"name": "内容获赞", "value": 5, "daily_limit": 10},
+		"article-collect": {"name": "内容被收藏", "value": 5, "daily_limit": 10},
 		"comment-create":  {"name": "发表评论", "value": 5, "daily_limit": 10},
 		"comment-like":    {"name": "评论获赞", "value": 5, "daily_limit": 10},
-		"user-like":       {"name": "用户点赞", "value": 5, "daily_limit": 10},
+	}
+
+	// 优先从缓存获取
+	if facade.Cache.Has(ExpCacheKey) {
+		if data, ok := facade.Cache.Get(ExpCacheKey).(map[string]facade.H); ok {
+			// 合并：以缓存为准，缺失的类型用默认配置补全
+			for k, v := range defaultConfig {
+				if _, exists := data[k]; !exists {
+					data[k] = v
+				}
+			}
+			return data
+		}
+	}
+
+	// 从数据库获取
+	item, _ := facade.DB.Model(&Config{}).Where("key", ExpCacheKey).Find()
+	if !utils.Is.Empty(item) {
+		if jsonData, ok := item["json"].(map[string]any); ok {
+			expConfig := make(map[string]facade.H)
+			for k, v := range jsonData {
+				if vMap, ok := v.(map[string]any); ok {
+					expConfig[k] = facade.H(vMap)
+				}
+			}
+			// 合并：以数据库为准，缺失的类型用默认配置补全
+			for k, v := range defaultConfig {
+				if _, exists := expConfig[k]; !exists {
+					expConfig[k] = v
+				}
+			}
+			facade.Cache.Set(ExpCacheKey, expConfig)
+			return expConfig
+		}
 	}
 
 	return defaultConfig
@@ -107,8 +115,7 @@ func (this *EXP) Add(table EXP) (err error) {
 	// 拦截异常
 	defer func() {
 		if bug := recover(); bug != nil {
-			facade.Log.Error(map[string]any{"error": bug}, "增加经验值失败")
-
+			facade.Log.Error(map[string]any{"error": bug, "type": table.Type, "uid": table.Uid}, "增加经验值失败")
 		}
 	}()
 
@@ -121,6 +128,7 @@ func (this *EXP) Add(table EXP) (err error) {
 
 	// 检查配置是否存在
 	if _, ok := expConfig[table.Type]; !ok {
+		facade.Log.Error(map[string]any{"type": table.Type, "uid": table.Uid}, "未知的经验值类型")
 		return errors.New("未知的经验值类型！")
 	}
 
@@ -189,10 +197,12 @@ func (this *EXP) Add(table EXP) (err error) {
 		_, err := facade.DB.Model(&EXP{}).Create(&table)
 
 		if err != nil {
+			facade.Log.Error(map[string]any{"error": err, "type": table.Type, "uid": table.Uid}, "经验值记录创建失败")
 			return err
 		}
 
 		_, _ = facade.DB.Model(&Users{}).Where("id", table.Uid).Inc("exp", table.Value)
+		facade.Log.Info(map[string]any{"uid": table.Uid, "type": table.Type, "value": table.Value, "description": table.Description}, "经验值增加成功")
 	}
 
 	// 对于基于对象的操作和其他类型，即使不增加经验值，也返回nil，这样操作可以继续

@@ -546,7 +546,6 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common",
 				"path=is-liked&type=login&name=检查是否已点赞",
 				"path=likes&type=login&name=获取我的点赞列表",
-				"path=daily-info&type=login&name=获取每日点赞信息",
 				"path=counts&type=common&name=批量查询点赞数量",
 			},
 			"POST": {

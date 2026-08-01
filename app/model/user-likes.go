@@ -4,7 +4,6 @@ import (
 	"errors"
 	"inis/app/facade"
 	"sync"
-	"time"
 
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -107,20 +106,17 @@ func (this *UserLikes) handleLikeExp() {
 		var page Pages
 		facade.DB.Model(&Pages{}).Where("id", this.TargetId).Find(&page)
 		authorId = page.Uid
-		expType = "user-like"
-	case "moment":
+		expType = "article-like"
+	case "moments":
 		var moment Moments
 		facade.DB.Model(&Moments{}).Where("id", this.TargetId).Find(&moment)
 		authorId = moment.Uid
-		expType = "user-like"
+		expType = "article-like"
 	case "comment":
 		var comment Comment
 		facade.DB.Model(&Comment{}).Where("id", this.TargetId).Find(&comment)
 		authorId = comment.Uid
 		expType = "comment-like"
-	case "user":
-		authorId = this.TargetId
-		expType = "user-like"
 	default:
 		return
 	}
@@ -151,19 +147,13 @@ func (this *UserLikes) Like(uid, targetId int, targetType string) (err error) {
 		return errors.New("已经点赞过了")
 	}
 
-	if targetType == "user" {
-		if !this.CheckDailyLimit(uid) {
-			return errors.New("每日点赞次数已达上限")
-		}
-	}
-
 	tx, err := facade.DB.Model(&UserLikes{}).Create(&UserLikes{
 		Uid:        uid,
 		TargetType: targetType,
 		TargetId:   targetId,
 	})
 
-	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
+	if err == nil && tx.RowsAffected > 0 && targetType == "moments" {
 		facade.DB.Model(&Moments{}).
 			Where("id", targetId).
 			UpdateColumn("likes", gorm.Expr("likes + 1"))
@@ -183,7 +173,7 @@ func (this *UserLikes) Unlike(uid, targetId int, targetType string) (err error) 
 		Where("target_id", targetId).
 		Delete()
 
-	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
+	if err == nil && tx.RowsAffected > 0 && targetType == "moments" {
 		facade.DB.Model(&Moments{}).
 			Where("id", targetId).
 			UpdateColumn("likes", gorm.Expr("GREATEST(likes - 1, 0)"))
@@ -222,52 +212,11 @@ func (this *UserLikes) GetLikesCount(targetId int, targetType string) int64 {
 	return count
 }
 
-func (this *UserLikes) GetReceivedLikesCount(uid int) int64 {
-	count, _ := facade.DB.Model(&UserLikes{}).
-		Where("target_type", "user").
-		Where("target_id", uid).
-		Count()
-	return count
-}
-
 func (this *UserLikes) GetUserLikesCount(uid int) int64 {
 	count, _ := facade.DB.Model(&UserLikes{}).
 		Where("uid", uid).
 		Count()
 	return count
-}
-
-func (this *UserLikes) CheckDailyLimit(uid int) bool {
-	limit := int64(this.GetDailyLimit())
-	count := this.GetDailyCount(uid)
-	return count < limit
-}
-
-func (this *UserLikes) GetDailyLimit() int {
-	expConfig := GetExpConfig()
-	if config, ok := expConfig["user-like"]; ok {
-		return cast.ToInt(config["daily_limit"])
-	}
-	return 10
-}
-
-func (this *UserLikes) GetDailyCount(uid int) int64 {
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
-	count, _ := facade.DB.Model(&UserLikes{}).
-		Where("uid", uid).
-		Where("target_type", "user").
-		Where("create_time >= ?", startOfDay).
-		Count()
-	return count
-}
-
-func (this *UserLikes) GetDailyInfo(uid int) facade.H {
-	return facade.H{
-		"limit":  this.GetDailyLimit(),
-		"count":  this.GetDailyCount(uid),
-		"remain": this.GetDailyLimit() - int(this.GetDailyCount(uid)),
-	}
 }
 
 func (this *UserLikes) GetLikesCounts(targetType string, targetIds []int) map[int]int64 {

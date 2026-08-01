@@ -50,18 +50,17 @@ func (this *UserLikes) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":        this.one,
-		"all":        this.all,
-		"sum":        this.sum,
-		"min":        this.min,
-		"max":        this.max,
-		"rand":       this.rand,
-		"count":      this.count,
-		"column":     this.column,
-		"is-liked":   this.isLiked,
-		"likes":      this.likes,
-		"daily-info": this.dailyInfo,
-		"counts":     this.counts,
+		"one":      this.one,
+		"all":      this.all,
+		"sum":      this.sum,
+		"min":      this.min,
+		"max":      this.max,
+		"rand":     this.rand,
+		"count":    this.count,
+		"column":   this.column,
+		"is-liked": this.isLiked,
+		"likes":    this.likes,
+		"counts":   this.counts,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -603,29 +602,25 @@ func (this *UserLikes) like(ctx *gin.Context) {
 		case "page":
 			page, _ := facade.DB.Model(&model.Pages{}).Where("id", targetId).Find()
 			authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
-			expType = "user-like"
-		case "moment":
+			expType = "article-like"
+		case "moments":
 			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", targetId).Find()
 			authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
-			expType = "user-like"
+			expType = "article-like"
 		case "comment":
 			comment, _ := facade.DB.Model(&model.Comment{}).Where("id", targetId).Find()
 			authorId = cast.ToInt(cast.ToStringMap(comment)["uid"])
 			expType = "comment-like"
-		case "user":
-			authorId = targetId
-			expType = "user-like"
 		default:
 			return
 		}
 
 		if authorId > 0 && authorId != uid {
 			_ = (&model.EXP{}).Add(model.EXP{
-				Uid:         authorId,
-				Type:        expType,
-				BindType:    targetType,
-				BindId:      targetId,
-				Description: expType + "奖励",
+				Uid:      authorId,
+				Type:     expType,
+				BindType: targetType,
+				BindId:   targetId,
 			})
 		}
 	}()
@@ -722,18 +717,6 @@ func (this *UserLikes) likes(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"list": utils.ArrayMapWithField(data, params["field"]), "count": count}, facade.Lang(ctx, "查询成功！"), 200)
-}
-
-func (this *UserLikes) dailyInfo(ctx *gin.Context) {
-	uid := this.meta.user(ctx).Id
-	if uid == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
-
-	dailyInfo := (&model.UserLikes{}).GetDailyInfo(uid)
-
-	this.json(ctx, gin.H{"daily": dailyInfo}, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *UserLikes) counts(ctx *gin.Context) {

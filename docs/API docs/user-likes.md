@@ -2,7 +2,7 @@
 
 ## 接口概述
 
-`user-likes` 控制器用于管理用户点赞数据，采用"存在即点赞"的设计模式：记录存在表示已点赞，删除记录表示取消点赞。支持点赞、取消点赞、检查点赞状态、获取点赞列表及每日点赞信息等功能。所有接口均支持缓存优化和权限控制。
+`user-likes` 控制器用于管理用户点赞数据，采用"存在即点赞"的设计模式：记录存在表示已点赞，删除记录表示取消点赞。支持点赞、取消点赞、检查点赞状态、获取点赞列表及批量查询等功能。所有接口均支持缓存优化和权限控制。
 
 ### 设计模式
 
@@ -16,7 +16,7 @@
 | 接口类型 | 说明 |
 | :--- | :--- |
 | **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、save、create、update |
-| **业务接口** | like（点赞）、unlike（取消点赞）、is-liked（检查是否已点赞）、likes（获取我的点赞列表）、daily-info（获取每日点赞信息）、counts（批量查询点赞数量） |
+| **业务接口** | like（点赞）、unlike（取消点赞）、is-liked（检查是否已点赞）、likes（获取我的点赞列表）、counts（批量查询点赞数量） |
 
 ---
 
@@ -43,7 +43,7 @@
 | :--- | :--- | :--- |
 | `id` | int | 主键，自增 |
 | `uid` | int | 用户ID |
-| `target_type` | string | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | 目标类型：article/page/moments/comment |
 | `target_id` | int | 目标ID |
 | `json` | any | JSON扩展数据 |
 | `text` | any | 文本扩展数据 |
@@ -288,7 +288,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -315,7 +315,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | 否 | 目标类型过滤：article/page/moment/comment/user |
+| `target_type` | string | 否 | 目标类型过滤：article/page/moments/comment |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
@@ -346,32 +346,7 @@
 
 **权限说明**: 需要登录
 
-#### 1.11 获取每日点赞信息 [业务接口]
-
-- **路径**: `/api/user-likes/daily-info`
-- **方法**: `GET`
-- **描述**: 获取当前用户每日点赞限制、已点赞次数和剩余次数
-
-**请求参数**: 无
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "查询成功！",
-    "data": {
-        "daily": {
-            "limit": 10,
-            "count": 3,
-            "remain": 7
-        }
-    }
-}
-```
-
-**权限说明**: 需要登录
-
-#### 1.12 批量查询点赞数量 [业务接口]
+#### 1.11 批量查询点赞数量 [业务接口]
 
 - **路径**: `/api/user-likes/counts`
 - **方法**: `GET`
@@ -381,7 +356,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
 | `target_ids` | string | **是** | 目标ID列表，逗号分隔 |
 
 **成功响应** (200):
@@ -473,7 +448,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -482,7 +457,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "code": 200,
     "msg": "点赞成功！",
     "data": {
-        "target_type": "moment",
+        "target_type": "moments",
         "target_id": 10
     }
 }
@@ -497,7 +472,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 }
 ```
 
-**权限说明**: 需要登录。对用户点赞（target_type=user）时受每日次数限制
+**权限说明**: 需要登录
 
 #### 2.4 取消点赞 [业务接口]
 
@@ -509,7 +484,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -518,7 +493,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "code": 200,
     "msg": "取消点赞成功！",
     "data": {
-        "target_type": "moment",
+        "target_type": "moments",
         "target_id": 10
     }
 }
@@ -569,7 +544,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment/user |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -578,7 +553,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
     "code": 200,
     "msg": "取消点赞成功！",
     "data": {
-        "target_type": "moment",
+        "target_type": "moments",
         "target_id": 10
     }
 }
@@ -746,13 +721,12 @@ const res = await request.get('/api/user-likes/likes', {
 | :--- | :--- |
 | `article` | 文章 |
 | `page` | 独立页面 |
-| `moment` | 动态 |
+| `moments` | 动态 |
 | `comment` | 评论 |
-| `user` | 用户 |
 
 ### 4. 点赞奖励机制
 - 用户点赞文章/页面/动态/评论后，会给作者增加经验值奖励
-- 奖励类型：article-like、comment-like、user-like
+- 奖励类型：article-like（内容获赞）、comment-like（评论获赞）
 - 奖励规则由经验值配置控制
 
 ### 5. 设计说明
@@ -760,12 +734,7 @@ const res = await request.get('/api/user-likes/likes', {
 - **无软删除**：取消点赞即物理删除记录，不存在回收站概念
 - **唯一约束**：`(uid, target_type, target_id)` 保证每个用户对同一目标只能有一条点赞记录
 
-### 6. 每日点赞限制
-- 对用户点赞（target_type=user）有每日次数限制
-- 默认每日10次，可通过经验值配置修改
-- 调用 `/api/user-likes/daily-info` 可查询当前限制和剩余次数
-
-### 7. 点赞/取消点赞特性
+### 6. 点赞/取消点赞特性
 - 点赞时如已存在记录，会返回"已经点赞过了"错误
 - 取消点赞不检查记录是否存在，直接执行删除操作
 - unlike 同时支持 POST 和 PUT 两种请求方式

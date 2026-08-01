@@ -607,7 +607,7 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 		case "page":
 			page, _ := facade.DB.Model(&model.Pages{}).Where("id", targetId).Find()
 			authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
-		case "moment":
+		case "moments":
 			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", targetId).Find()
 			authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
 		default:
@@ -616,11 +616,10 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 
 		if authorId > 0 && authorId != uid {
 			_ = (&model.EXP{}).Add(model.EXP{
-				Uid:         authorId,
-				Type:        "article-collect",
-				BindType:    targetType,
-				BindId:      targetId,
-				Description: "文章被收藏奖励",
+				Uid:      authorId,
+				Type:     "article-collect",
+				BindType: targetType,
+				BindId:   targetId,
 			})
 		}
 	}()

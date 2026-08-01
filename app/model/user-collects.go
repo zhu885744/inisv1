@@ -98,7 +98,7 @@ func (this *UserCollects) handleCollectExp() {
 		var page Pages
 		facade.DB.Model(&Pages{}).Where("id", this.TargetId).Find(&page)
 		authorId = page.Uid
-	case "moment":
+	case "moments":
 		var moment Moments
 		facade.DB.Model(&Moments{}).Where("id", this.TargetId).Find(&moment)
 		authorId = moment.Uid
@@ -112,7 +112,7 @@ func (this *UserCollects) handleCollectExp() {
 			Type:        "article-collect",
 			BindType:    this.TargetType,
 			BindId:      this.TargetId,
-			Description: "文章被收藏奖励",
+			Description: "内容被收藏奖励",
 		})
 	}
 }

@@ -74,11 +74,10 @@ func InitConfig() {
 			"check-in":        facade.H{"name": "签到", "value": 10, "daily_limit": 1},
 			"moments":         facade.H{"name": "发布动态", "value": 50, "daily_limit": 1},
 			"article-create":  facade.H{"name": "发布文章", "value": 5, "daily_limit": 10},
-			"article-like":    facade.H{"name": "文章获赞", "value": 5, "daily_limit": 10},
-			"article-collect": facade.H{"name": "文章被收藏", "value": 5, "daily_limit": 10},
+			"article-like":    facade.H{"name": "内容获赞", "value": 5, "daily_limit": 10},
+			"article-collect": facade.H{"name": "内容被收藏", "value": 5, "daily_limit": 10},
 			"comment-create":  facade.H{"name": "发表评论", "value": 5, "daily_limit": 10},
 			"comment-like":    facade.H{"name": "评论获赞", "value": 5, "daily_limit": 10},
-			"user-like":       facade.H{"name": "用户点赞", "value": 5, "daily_limit": 10},
 		}), Remark: "经验值规则配置"},
 	}
 

@@ -738,7 +738,7 @@ const res = await request.get('/api/user-collects/collects', {
 
 ### 4. 收藏奖励机制
 - 用户收藏文章/页面/动态后，会给作者增加经验值奖励
-- 奖励类型：article-collect
+- 奖励类型：article-collect（内容被收藏）
 - 奖励规则由经验值配置控制
 
 ### 5. 设计说明

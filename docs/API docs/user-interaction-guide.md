@@ -158,7 +158,7 @@ GET /api/user-follows/is-following?follow_uid=100
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `uid` | int | 否 | 目标用户 ID。不传则取当前登录用户 |
-| `target_type` | string | 否 | 筛选类型：`article` / `page` / `moment` / `comment` / `user` |
+| `target_type` | string | 否 | 筛选类型：`article` / `page` / `moments` / `comment` |
 | `field` | string | 否 | 返回字段 |
 
 - **请求示例**:

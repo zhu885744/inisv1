@@ -70,7 +70,7 @@ func (this *Comment) syncResult() (result map[string]any) {
 
 func (this *Comment) authorSync(result *any) {
 	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
-	*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "result"})
+	*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "title", "description", "result"})
 }
 
 func (this *Comment) articleSync(result *any) {
