@@ -10,6 +10,7 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -250,6 +251,7 @@ func (this *Attachment) IGET(ctx *gin.Context) {
 		"count":  this.count,
 		"column": this.column,
 		"list":   this.list,
+		"emoji":  this.emoji,
 	}
 	err := this.call(allow, method, ctx)
 	if err != nil {
@@ -1217,4 +1219,112 @@ func (this *Attachment) restore(ctx *gin.Context) {
 	} else {
 		this.json(ctx, gin.H{"success_ids": successIds, "failed_ids": failedIds, "errors": errors}, facade.Lang(ctx, "部分恢复成功！"), 207)
 	}
+}
+
+// emoji - 获取表情列表（自动扫描 public/assets/emoji 目录及子目录）
+func (this *Attachment) emoji(ctx *gin.Context) {
+	emojiDir := filepath.Join("public", "assets", "emoji")
+
+	// 支持指定分类，例如 ?category=qq
+	filterCategory := strings.TrimSpace(cast.ToString(this.params(ctx)["category"]))
+
+	categories, err := this.scanEmojiDir(emojiDir, filterCategory)
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "读取表情失败: %v", err.Error()), 500)
+		return
+	}
+
+	total := 0
+	for _, c := range categories {
+		if count, ok := c["count"].(int); ok {
+			total += count
+		}
+	}
+
+	this.json(ctx, gin.H{
+		"categories": categories,
+		"total":      total,
+	}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// scanEmojiDir - 扫描表情目录，返回各分类及其表情文件
+func (this *Attachment) scanEmojiDir(rootDir, filterCategory string) ([]facade.H, error) {
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// 支持的表情图片扩展名
+	allowExt := map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".svg": true, ".bmp": true,
+	}
+
+	var categories []facade.H
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		categoryName := entry.Name()
+		// 指定了分类时，仅返回该分类
+		if filterCategory != "" && categoryName != filterCategory {
+			continue
+		}
+
+		subDir := filepath.Join(rootDir, categoryName)
+		files, err := this.scanEmojiFiles(subDir, categoryName, allowExt)
+		if err != nil {
+			continue
+		}
+
+		categories = append(categories, facade.H{
+			"name":  categoryName,
+			"count": len(files),
+			"items": files,
+		})
+	}
+
+	return categories, nil
+}
+
+// scanEmojiFiles - 扫描指定分类目录内的表情文件
+func (this *Attachment) scanEmojiFiles(dir, categoryName string, allowExt map[string]bool) ([]facade.H, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []facade.H
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fileName := entry.Name()
+		ext := strings.ToLower(filepath.Ext(fileName))
+		if !allowExt[ext] {
+			continue
+		}
+
+		// 文件名（不含扩展名）作为表情名称，下划线/中划线转为可读形式
+		name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		// URL 路径（public 目录映射到站点根）
+		url := "/assets/emoji/" + categoryName + "/" + fileName
+
+		info, err := entry.Info()
+		size := int64(0)
+		if err == nil {
+			size = info.Size()
+		}
+
+		items = append(items, facade.H{
+			"name": name,
+			"file": fileName,
+			"url":  url,
+			"ext":  ext,
+			"size": size,
+		})
+	}
+
+	return items, nil
 }

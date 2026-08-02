@@ -453,10 +453,11 @@ func createAuthRules() (result []AuthRules) {
 				"path=rand&type=common&name=随机获取",
 				"path=count&type=common&name=查询数量",
 				"path=column&type=common&name=列查询",
-				"path=list&type=login&name=获取我的附件",
-			},
-			"POST": {
-				"path=save&type=login&name=保存数据",
+			"path=list&type=login&name=获取我的附件",
+			"path=emoji&type=common&name=获取表情列表",
+		},
+		"POST": {
+			"path=save&type=login&name=保存数据",
 				"path=create&type=login&name=添加数据",
 				"path=upload&type=login&name=上传附件",
 				"path=batch&type=login&name=批量上传附件",

@@ -61,7 +61,7 @@ func (this *UserFollows) followUser(wg *sync.WaitGroup, result *any, uid int) {
 	defer wg.Done()
 
 	user := make(map[string]any)
-	allow := []string{"id", "nickname", "avatar", "description", "result", "title", "exp"}
+	allow := []string{"id", "nickname", "avatar", "description", "json", "result", "title", "exp"}
 	item, _ := facade.DB.Model(&Users{}).Find(uid)
 
 	if !utils.Is.Empty(item) {

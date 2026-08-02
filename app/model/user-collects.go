@@ -78,7 +78,7 @@ func (this *UserCollects) author(wg *sync.WaitGroup, result *any) {
 
 	if uid > 0 {
 		user, _ := facade.DB.Model(&Users{}).Find(uid)
-		*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description"})
+		*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "json"})
 	}
 }
 

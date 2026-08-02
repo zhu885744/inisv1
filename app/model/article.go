@@ -153,7 +153,7 @@ func (this *Article) author(wg *sync.WaitGroup, result *any) {
 	defer wg.Done()
 
 	author := make(map[string]any)
-	allow := []string{"id", "nickname", "avatar", "description", "result", "title"}
+	allow := []string{"id", "nickname", "avatar", "description", "json", "result", "title"}
 	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
 
 	if !utils.Is.Empty(user) {

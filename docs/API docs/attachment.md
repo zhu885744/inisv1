@@ -9,7 +9,7 @@
 | 接口类型 | 说明 |
 | :--- | :--- |
 | **基础接口** | 支持15个基础接口：one、all、rand、count、sum、min、max、column、remove、delete、clear、restore、save、create、update |
-| **特殊接口** | 文件上传、文件类型检查、获取我的附件列表 |
+| **特殊接口** | 文件上传、文件类型检查、获取我的附件列表、获取表情列表 |
 
 > **接口规范说明**：`save` 接口为内部兼容接口，无ID时新增，有ID时更新。**推荐外部调用使用 `create`（新增）和 `update`（更新）**，语义更清晰。
 
@@ -327,6 +327,167 @@
 ```
 
 **权限说明**: 需要用户登录
+
+#### 1.10 获取表情列表 [特殊接口]
+
+- **路径**: `/api/attachment/emoji`
+- **方法**: `GET`
+- **描述**: 自动扫描 `public/assets/emoji` 目录及其子目录，返回所有表情分类与表情文件列表。前端可直接使用返回的 `url` 字段渲染表情图片。
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `category` | string | 否 | 指定分类名称，仅返回该分类的表情。不传则返回全部分类。例如 `qq`、`bilibili`、`tiktok` |
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "查询成功！",
+    "data": {
+        "categories": [
+            {
+                "name": "bilibili",
+                "count": 48,
+                "items": [
+                    {
+                        "name": "aggrieved",
+                        "file": "aggrieved.webp",
+                        "url": "/assets/emoji/bilibili/aggrieved.webp",
+                        "ext": ".webp",
+                        "size": 12345
+                    },
+                    {
+                        "name": "angry",
+                        "file": "angry.webp",
+                        "url": "/assets/emoji/bilibili/angry.webp",
+                        "ext": ".webp",
+                        "size": 12345
+                    }
+                ]
+            },
+            {
+                "name": "qq",
+                "count": 88,
+                "items": [
+                    {
+                        "name": "OK",
+                        "file": "OK.gif",
+                        "url": "/assets/emoji/qq/OK.gif",
+                        "ext": ".gif",
+                        "size": 12345
+                    }
+                ]
+            },
+            {
+                "name": "tiktok",
+                "count": 87,
+                "items": [
+                    {
+                        "name": "666",
+                        "file": "666.png",
+                        "url": "/assets/emoji/tiktok/666.png",
+                        "ext": ".png",
+                        "size": 12345
+                    }
+                ]
+            }
+        ],
+        "total": 223
+    }
+}
+```
+
+**返回字段说明**:
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `categories` | array | 表情分类列表 |
+| `categories[].name` | string | 分类名称（即 `public/assets/emoji` 下的子目录名，如 `bilibili`、`qq`、`tiktok`） |
+| `categories[].count` | int | 该分类下表情文件数量 |
+| `categories[].items` | array | 表情文件列表 |
+| `categories[].items[].name` | string | 表情名称（文件名不含扩展名） |
+| `categories[].items[].file` | string | 表情文件名（含扩展名） |
+| `categories[].items[].url` | string | 表情访问URL路径，可直接用于 `<img :src="url">` |
+| `categories[].items[].ext` | string | 文件扩展名（小写，如 `.webp`、`.gif`、`.png`） |
+| `categories[].items[].size` | int | 文件大小（字节） |
+| `total` | int | 所有分类表情文件总数 |
+
+**按分类查询示例**:
+```
+GET /api/attachment/emoji?category=qq
+```
+
+返回结果仅包含 `qq` 分类：
+```json
+{
+    "code": 200,
+    "msg": "查询成功！",
+    "data": {
+        "categories": [
+            {
+                "name": "qq",
+                "count": 88,
+                "items": [...]
+            }
+        ],
+        "total": 88
+    }
+}
+```
+
+**支持的文件类型**: `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`、`.svg`、`.bmp`
+
+**目录结构说明**:
+```
+public/assets/emoji/
+├── bilibili/       # B站表情包（.webp）
+│   ├── aggrieved.webp
+│   ├── angry.webp
+│   └── ...
+├── qq/             # QQ表情包（.gif）
+│   ├── OK.gif
+│   ├── aini.gif
+│   └── ...
+└── tiktok/         # 抖音表情包（.png）
+    ├── 666.png
+    ├── OK.png
+    └── ...
+```
+
+> 新增表情时，只需在 `public/assets/emoji/` 下新建分类目录并放入图片，接口会自动识别，无需重启或修改代码。
+
+**权限说明**: 公开接口，无需登录
+
+**前端调用示例**:
+
+```javascript
+// 获取全部表情
+const res = await axios.get('/api/attachment/emoji')
+const categories = res.data.data.categories
+
+// 获取指定分类表情
+const res = await axios.get('/api/attachment/emoji', {
+  params: { category: 'qq' }
+})
+
+// 渲染表情
+categories.forEach(category => {
+  category.items.forEach(emoji => {
+    // <img :src="emoji.url" :alt="emoji.name" />
+  })
+})
+```
+
+**错误响应** (500):
+```json
+{
+    "code": 500,
+    "msg": "读取表情失败: open public/assets/emoji: no such file or directory",
+    "data": null
+}
+```
 
 ---
 
