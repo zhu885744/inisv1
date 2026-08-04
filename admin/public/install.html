@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安装引导</title>
+    <style>
+        /* 全局样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --success-color: #10b981;
+            --success-hover: #059669;
+            --danger-color: #ef4444;
+            --danger-hover: #dc2626;
+            --warning-color: #f59e0b;
+            --warning-hover: #d97706;
+            --info-color: #3b82f6;
+            --info-hover: #2563eb;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #4b5563;
+            --border-color: #d1d5db;
+            --border-radius: 0.5rem;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        
+        /* 卡片样式 */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 600px;
+        }
+        
+        /* 标题样式 */
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            color: var(--text-primary);
+        }
+        
+        h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        /* 步骤指示器样式 */
+        .steps-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .step-number {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .step-active {
+            background-color: var(--primary-color);
+            color: #ffffff;
+        }
+        
+        .step-inactive {
+            background-color: #e5e7eb;
+            color: var(--text-secondary);
+        }
+        
+        .step-completed {
+            background-color: var(--success-color);
+            color: #ffffff;
+        }
+        
+        .step-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+            border: none;
+            cursor: pointer;
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: #ffffff;
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+        }
+        
+        .btn-secondary {
+            background-color: #e5e7eb;
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #d1d5db;
+        }
+        
+        .btn-success {
+            background-color: var(--success-color);
+            color: #ffffff;
+        }
+        
+        .btn-success:hover {
+            background-color: var(--success-hover);
+        }
+        
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: #ffffff;
+        }
+        
+        .btn-danger:hover {
+            background-color: var(--danger-hover);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* 提示框样式 */
+        .alert {
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+        }
+        
+        .alert-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+        }
+        
+        .alert-info {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .alert-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        /* 间距样式 */
+        .mt-4 {
+            margin-top: 1rem;
+        }
+        
+        .mt-6 {
+            margin-top: 1.5rem;
+        }
+        
+        .mb-4 {
+            margin-bottom: 1rem;
+        }
+        
+        .mb-6 {
+            margin-bottom: 1.5rem;
+        }
+        
+        .mb-8 {
+            margin-bottom: 2rem;
+        }
+        
+        .space-y-4 {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .flex {
+            display: flex;
+        }
+        
+        .flex-col {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .justify-center {
+            justify-content: center;
+        }
+        
+        .text-center {
+            text-align: center;
+        }
+        
+        /* 隐藏类 */
+        .hidden {
+            display: none;
+        }
+        
+        /* 文本样式 */
+        .text-sm {
+            font-size: 0.875rem;
+        }
+        
+        .text-lg {
+            font-size: 1.125rem;
+        }
+        
+        .font-medium {
+            font-weight: 500;
+        }
+        
+        .text-danger {
+            color: var(--danger-color);
+        }
+        
+        /* 宽度样式 */
+        .w-full {
+            width: 100%;
+        }
+        
+        /* 网格布局 */
+        .grid {
+            display: grid;
+        }
+        
+        .grid-cols-1 {
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+        }
+        
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        
+        .gap-4 {
+            gap: 1rem;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .steps-container {
+                gap: 0.5rem;
+            }
+            
+            .step-label {
+                font-size: 0.75rem;
+            }
+            
+            .grid-cols-2 {
+                grid-template-columns: repeat(1, minmax(0, 1fr));
+            }
+            
+            .card {
+                padding: 1rem;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .step-number {
+                width: 2rem;
+                height: 2rem;
+                font-size: 0.875rem;
+            }
+            
+            h1 {
+                font-size: 1.25rem;
+            }
+            
+            h2 {
+                font-size: 1.125rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>系统安装引导</h1>
+            
+            <!-- 安装步骤指示器 -->
+            <div class="steps-container">
+                <div class="step">
+                    <div id="step-1" class="step-number step-inactive">1</div>
+                    <span class="step-label">检查状态</span>
+                </div>
+                <div class="step">
+                    <div id="step-2" class="step-number step-inactive">2</div>
+                    <span class="step-label">连接数据库</span>
+                </div>
+                <div class="step">
+                    <div id="step-3" class="step-number step-inactive">3</div>
+                    <span class="step-label">初始化数据库</span>
+                </div>
+                <div class="step">
+                    <div id="step-4" class="step-number step-inactive">4</div>
+                    <span class="step-label">完成安装</span>
+                </div>
+            </div>
+            
+            <!-- 安装内容区域 -->
+            <div id="install-content">
+                <!-- 步骤一：检查安装锁状态 -->
+                <div id="check-step" class="install-step">
+                    <h2>检查安装状态</h2>
+                    <div class="alert alert-info">
+                        <p>系统将检查安装锁状态，确保您可以执行安装引导。</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="check-btn" class="btn btn-primary w-full">检查状态</button>
+                    </div>
+                </div>
+                
+                <!-- 步骤二：连接数据库 -->
+                <div id="connect-db-step" class="install-step hidden">
+                    <h2>连接数据库</h2>
+                    <form id="connect-db-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>数据库地址</label>
+                                <input type="text" name="hostname" value="localhost" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>数据库端口</label>
+                                <input type="number" name="hostport" value="3306" class="form-input">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>数据库名称 <span class="text-danger">*</span></label>
+                            <input type="text" name="database" required class="form-input">
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>数据库用户名 <span class="text-danger">*</span></label>
+                                <input type="text" name="username" required class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>数据库密码 <span class="text-danger">*</span></label>
+                                <input type="password" name="password" required class="form-input">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>字符集</label>
+                            <select name="charset" class="form-input">
+                                <option value="utf8mb4">utf8mb4 (推荐)</option>
+                                <option value="utf8">utf8</option>
+                                <option value="gb2312">gb2312</option>
+                                <option value="gbk">gbk</option>
+                                <option value="latin1">latin1</option>
+                            </select>
+                        </div>
+                        <div class="mt-6">
+                            <button type="submit" class="btn btn-primary w-full">连接数据库</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- 步骤三：初始化数据库 -->
+                <div id="init-db-step" class="install-step hidden">
+                    <h2>初始化数据库</h2>
+                    <div class="alert alert-info">
+                        <p>系统将初始化数据库表结构、默认数据，并自动创建管理员账号，请耐心等待。</p>
+                        <p class="mt-4">默认管理员账号：admin</p>
+                        <p>默认管理员密码：admin123456</p>
+                        <p class="mt-4 text-danger font-medium">提示：需要点击两次初始化按钮才可初始化成功</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="init-db-btn" class="btn btn-primary w-full">初始化数据库</button>
+                    </div>
+                </div>
+                
+                <!-- 步骤四：完成安装 -->
+                <div id="lock-step" class="install-step hidden">
+                    <h2>完成安装</h2>
+                    <div class="alert alert-warning">
+                        <p class="font-medium">重要提示：</p>
+                        <p>点击「完成安装」后，系统将锁定安装引导，防止二次安装。请确保所有步骤都已正确完成。</p>
+                    </div>
+                    <div class="mt-6">
+                        <button id="lock-btn" class="btn btn-success w-full">完成安装</button>
+                    </div>
+                </div>
+                
+                <!-- 安装完成页面 -->
+                <div id="complete-step" class="install-step hidden">
+                    <h2 class="text-center">安装完成</h2>
+                    <div class="alert alert-success text-center">
+                        <p class="text-lg font-medium">🎉 系统安装成功！</p>
+                        <p class="mt-4">您的系统已经成功安装并锁定，现在可以开始使用了。</p>
+                        <p class="mt-4">默认管理员账号：admin</p>
+                        <p>默认管理员密码：admin123456</p>
+                        <p class="mt-4 text-danger font-medium">提示：请在安装完成后，立即修改默认管理员密码，以保障系统安全。</p>
+                        <p class="text-danger font-medium">安装成功后需在系统根目录 /config/app.toml 文件中配置前端跨域域名，否则前端将无法正常访问。</p>
+                    </div>
+                    <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <a href="/" class="btn btn-primary">返回首页</a>
+                        <a href="https://zhuxu.asia/archives/83" class="btn btn-primary">查看系统文档</a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 消息提示区域 -->
+            <div id="message" class="mt-4 hidden"></div>
+        </div>
+    </div>
+    
+    <script>
+        // API基础URL
+        const API_BASE = '/dev/install';
+        
+        // 步骤元素
+        const steps = {
+            1: document.getElementById('step-1'),
+            2: document.getElementById('step-2'),
+            3: document.getElementById('step-3'),
+            4: document.getElementById('step-4')
+        };
+        
+        // 步骤内容
+        const stepContents = {
+            check: document.getElementById('check-step'),
+            connect: document.getElementById('connect-db-step'),
+            init: document.getElementById('init-db-step'),
+            lock: document.getElementById('lock-step'),
+            complete: document.getElementById('complete-step')
+        };
+        
+        // 消息区域
+        const message = document.getElementById('message');
+        
+        // 显示消息
+        function showMessage(text, type = 'info') {
+            message.className = `mt-4 alert alert-${type}`;
+            message.textContent = text;
+            message.classList.remove('hidden');
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                message.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // 更新步骤状态
+        function updateStepStatus(activeStep) {
+            // 重置所有步骤
+            for (let i = 1; i <= 4; i++) {
+                if (i < activeStep) {
+                    steps[i].className = 'step-number step-completed';
+                } else if (i === activeStep) {
+                    steps[i].className = 'step-number step-active';
+                } else {
+                    steps[i].className = 'step-number step-inactive';
+                }
+            }
+        }
+        
+        // 显示步骤内容
+        function showStepContent(step) {
+            // 隐藏所有步骤
+            Object.values(stepContents).forEach(content => {
+                if (content) {
+                    content.classList.add('hidden');
+                }
+            });
+            
+            // 显示当前步骤
+            if (stepContents[step]) {
+                stepContents[step].classList.remove('hidden');
+            }
+        }
+        
+        // 检查安装锁状态
+        document.getElementById('check-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/check`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.code === 200 && !data.data) {
+                        showMessage('安装锁状态正常，可以执行安装引导', 'success');
+                        updateStepStatus(2);
+                        showStepContent('connect');
+                    } else {
+                        showMessage('安装锁已锁定，请先解锁', 'danger');
+                    }
+                } else {
+                    showMessage('检查安装锁状态失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('检查安装锁状态失败:', error);
+            }
+        });
+        
+        // 连接数据库
+        document.getElementById('connect-db-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            
+            try {
+                const response = await fetch(`${API_BASE}/connect-db`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('数据库连接成功，配置已保存', 'success');
+                    updateStepStatus(3);
+                    showStepContent('init');
+                } else {
+                    showMessage(result.message || '数据库连接失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('连接数据库失败:', error);
+            }
+        });
+        
+        // 初始化数据库
+        document.getElementById('init-db-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/init-db`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: ''
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('数据库初始化成功，默认管理员账号已创建', 'success');
+                    updateStepStatus(4);
+                    showStepContent('lock');
+                } else {
+                    showMessage(result.message || '数据库初始化失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('初始化数据库失败:', error);
+            }
+        });
+        
+        // 上锁
+        document.getElementById('lock-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/lock`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: ''
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.code === 200) {
+                    showMessage('安装引导已锁定', 'success');
+                    updateStepStatus(4);
+                    showStepContent('complete');
+                } else {
+                    showMessage(result.message || '锁定失败', 'danger');
+                }
+            } catch (error) {
+                showMessage('网络错误，请稍后重试', 'danger');
+                console.error('锁定失败:', error);
+            }
+        });
+        
+        // 页面加载时检查安装锁状态
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/check`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.code === 200 && data.data) {
+                        // 已锁定，显示提示
+                        showMessage('安装引导已锁定，无法执行安装', 'danger');
+                        document.getElementById('check-btn').disabled = true;
+                        document.getElementById('check-btn').className = 'btn btn-secondary w-full';
+                    }
+                }
+            } catch (error) {
+                console.error('检查安装锁状态失败:', error);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,529 @@
+/* ==================== 全局样式重置与变量定义 - 开始 ==================== */
+:root {
+  /* 主题系统 - 核心变量 */
+  --theme: {
+    opacity: 1.5;
+    color: 255, 255, 255;
+    font-color: 0, 0, 0;
+    blur: blur(10px) saturate(160%);
+  };
+  --theme-opacity: 1.5;
+  --theme-color: 255, 255, 255;
+  --theme-font-color: 0, 0, 0;
+  --theme-blur: blur(10px) saturate(160%);
+
+  /* 辅助色系统 */
+  --assist-color: 64, 158, 255;
+  --assist-font-color: 43, 43, 43;
+  --assist-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+
+  /* 相反色系统 */
+  --vice-opacity: 0.55;
+  --vice-color: 48, 49, 51;
+  --vice-font-color: 43, 43, 43;
+
+  /* 品牌色系统 */
+  --inis-orange: 255, 112, 0;
+  --inis-yellow: 249, 200, 81;
+  --inis-gray: 138, 145, 159;
+  --inis-blue: 64, 158, 255;
+  --inis-brown: 182, 156, 102;
+
+  /* 通用样式变量 */
+  --icon-color: 80, 80, 80;
+  --menu-icon-color: 209, 209, 209;
+  --box-shadow: 0px 5px 40px 0px rgba(17, 58, 93, 0.1);
+  --box-shadow-light: 0 1px 2px 0px rgba(0, 0, 0, 0.05);
+  --box-shadow-normal: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --border-radius-sm: 4px;
+  --border-radius-md: 6px;
+  --border-radius-lg: 10px;
+  --border-radius-full: 50%;
+
+  /* Element UI 覆盖变量 */
+  --el-button-bg-color: #00a3ff;
+  --el-button-hover-bg-color: #008bd9;
+  --el-menu-item-height: 40px;
+  --el-switch-on-color: rgb(var(--assist-color));
+  --el-tabs-header-height: 30px;
+
+  /* Bootstrap 覆盖变量 */
+  --bs-info-rgb: 64, 158, 255;
+  --bs-danger-rgb: 220, 53, 69;
+}
+
+/* 基础样式重置 */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: rgb(var(--vice-font-color));
+  font-family: -apple-system, system-ui, BlinkMacSystemFont, "Helvetica Neue", PingFang SC, Hiragino Sans GB, Microsoft YaHei, Arial, sans-serif;
+  line-height: 1.5;
+}
+
+/* 主题激活状态全局样式 */
+body[inis-theme] {
+  background: #e4e4e4;
+  background-size: 20px 20px;
+  background-position: 50%;
+  width: 100% !important;
+  min-height: 100vh;
+}
+
+/* 选中文本样式 */
+body[inis-theme] ::selection,
+body[inis-theme] ::-moz-selection {
+  color: #000000;
+  background: rgba(var(--theme-color), var(--theme-opacity));
+}
+
+/* 通用工具类 */
+body[inis-theme] .row {
+  --bs-gutter-x: 16px;
+}
+
+body[inis-theme] .bg-theme {
+  background: rgba(var(--theme-color), var(--theme-opacity));
+  backdrop-filter: var(--theme-blur);
+}
+
+body[inis-theme] .bg-vice {
+  background: rgba(var(--vice-color), var(--vice-opacity));
+  backdrop-filter: var(--theme-blur);
+}
+
+body[inis-theme] .bg-assist {
+  background: rgba(var(--assist-color), var(--theme-opacity));
+  backdrop-filter: var(--theme-blur);
+}
+
+body[inis-theme] .box-shadow-light {
+  box-shadow: var(--box-shadow-light);
+}
+
+body[inis-theme] .box-shadow-wrap-normal {
+  box-shadow: var(--box-shadow-normal);
+}
+
+body[inis-theme] .text-orange {
+  color: rgb(var(--inis-orange));
+}
+
+body[inis-theme] .avatar-shadow {
+  border: 2px solid #fff;
+  box-shadow: 2px 2px 3px #e1e1e1;
+}
+
+body[inis-theme] .bg-white-only {
+  background-color: #f9f9f9;
+}
+
+body[inis-theme] .bg-image {
+  background-image: linear-gradient(90deg, #f5faff, #e8f2ff);
+}
+
+body[inis-theme] .text-bg-muted {
+  background: #fafafa;
+}
+
+body[inis-theme] .text-muted {
+  color: #888 !important;
+}
+
+body[inis-theme] .svg-icon {
+  outline: 0;
+}
+
+/* 分隔符样式 */
+body[inis-theme] .separator {
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.separator::after,
+.separator::before {
+  content: "";
+  background: #cbcbcb;
+  max-width: 20%;
+  height: 1px;
+  margin: 0 1em;
+  flex: 1;
+  width: 200px;
+}
+
+/* 红点动画 */
+body[inis-theme] .red-dot {
+  display: inline-block;
+  color: var(--bs-danger) !important;
+  top: -35px;
+  right: 0;
+  font-size: 40px;
+  font-style: normal;
+  position: absolute;
+  animation: red-dot 1s infinite;
+}
+
+@keyframes red-dot {
+  0%, 100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 标题下划线动画 */
+body[inis-theme] .h-title {
+  position: relative;
+  --width: 40px;
+}
+
+body[inis-theme] .h-title:after {
+  content: "";
+  bottom: 0;
+  background-color: rgb(var(--assist-color));
+  box-shadow: 1px 1px 3px -1px rgb(var(--assist-color));
+  border-radius: 5px;
+  height: 3px;
+  left: 0;
+  position: absolute;
+  top: auto;
+  transition: width 0.3s ease;
+  width: var(--width);
+}
+
+body[inis-theme] .h-title:hover:after {
+  width: calc(var(--width) * 2);
+}
+
+/* 背景图片容器 */
+.box-bg-image {
+  background-image: linear-gradient(170deg, rgba(36, 129, 250, 0.05) 0, #fff 60%, #fff 100%);
+}
+/* ==================== 全局样式重置与变量定义 - 结束 ==================== */
+
+/* ==================== 布局相关样式 - 开始 ==================== */
+/* 顶部导航 */
+body[inis-theme] #app .topnav {
+  background: rgba(var(--theme-color), var(--theme-opacity)) !important;
+  backdrop-filter: var(--theme-blur);
+  transform: translate(0);
+  transition: transform 0.3s ease;
+  box-shadow: var(--box-shadow);
+  position: fixed;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+}
+
+body[inis-theme] #app .topnav .navbar ul.el-menu {
+  height: 40px;
+}
+
+/* 底部页脚 */
+body[inis-theme] #footer {
+  backdrop-filter: var(--theme-blur);
+  background: rgba(var(--theme-color), var(--theme-opacity));
+  transform: translate(0);
+  transition: transform 0.3s ease;
+  box-shadow: 0px -5px 40px 0px rgba(17, 58, 93, 0.1);
+}
+
+/* 主容器 */
+body[inis-theme] .container-box {
+  margin-top: 70px;
+  margin-bottom: 70px;
+}
+
+/* 隐藏元素 */
+body[inis-theme] #pointer,
+body[inis-theme] #background {
+  display: none;
+}
+
+/* 弹窗父容器滚动修复 */
+body[inis-theme].el-popup-parent--hidden {
+  overflow: auto;
+}
+/* ==================== 布局相关样式 - 结束 ==================== */
+
+/* ==================== Element UI 组件定制 - 开始 ==================== */
+/* ---------- 开关组件 ---------- */
+body[inis-theme] .el-switch {
+  --el-switch-on-color: rgb(var(--assist-color));
+}
+
+/* ---------- 菜单组件 ---------- */
+body[inis-theme] .el-menu.custom .el-sub-menu .el-icon {
+  display: none;
+}
+
+body[inis-theme] .el-menu.custom .el-sub-menu .nav-icon svg path {
+  fill: #2B2B2B;
+}
+
+body[inis-theme] .el-menu-item,
+body[inis-theme] .el-sub-menu__title {
+  font-size: 13px;
+  padding: 0 10px !important;
+}
+
+body[inis-theme] .el-menu--horizontal {
+  border-bottom: unset;
+}
+
+body[inis-theme] .el-menu--horizontal > .el-menu-item.is-active {
+  border-bottom: unset;
+  color: unset !important;
+}
+
+body[inis-theme] .el-menu--horizontal > .el-menu-item {
+  border-bottom: unset;
+}
+
+body[inis-theme] .el-menu--horizontal .el-menu-item:not(.is-disabled):focus,
+body[inis-theme] .el-menu--horizontal .el-menu-item:not(.is-disabled):hover {
+  background-color: unset;
+  color: unset;
+}
+
+/* 下拉菜单项样式 */
+body[inis-theme] .el-menu--horizontal .el-menu--popup .el-menu-item {
+  margin: 0 10px;
+}
+
+body[inis-theme] .el-menu--horizontal .el-menu--popup .el-menu-item:not(.is-disabled):hover {
+  background: #f4f4f4;
+  border-radius: var(--border-radius-md);
+  transition: background-color 0.2s ease;
+}
+
+/* 水平菜单样式 */
+body[inis-theme] .el-menu--horizontal > .el-sub-menu .el-sub-menu__title,
+body[inis-theme] .el-menu--horizontal > .el-menu-item {
+  color: var(--theme-font-color);
+  border-bottom: unset;
+}
+
+body[inis-theme] .el-menu--horizontal .el-menu .el-menu-item.is-active,
+body[inis-theme] .el-menu--horizontal .el-menu .el-sub-menu.is-active > .el-sub-menu__title,
+body[inis-theme] .el-menu--horizontal .el-menu .el-menu-item,
+body[inis-theme] .el-menu--horizontal .el-menu .el-sub-menu__title {
+  color: var(--theme-font-color);
+}
+
+/* 弹出菜单样式 */
+body[inis-theme] .el-popper.is-light {
+  background: rgba(var(--theme-color), var(--theme-opacity)) !important;
+  backdrop-filter: var(--theme-blur);
+  -webkit-backdrop-filter: var(--theme-blur);
+  border: unset;
+  box-shadow: 0px 5px 40px 0px rgb(17 58 93 / 10%);
+}
+
+body[inis-theme] .el-sub-menu__title {
+  line-height: unset;
+}
+
+body[inis-theme] .el-menu .icon-none i,
+body[inis-theme] .el-menu .icon-none svg {
+  display: none;
+}
+
+/* ---------- 提示框组件 ---------- */
+body[inis-theme] .el-popper.is-dark span {
+  color: #fff !important;
+}
+
+body[inis-theme] .el-popper.is-dark .el-popper__arrow::before {
+  border: unset;
+  backdrop-filter: var(--vice-color);
+  background: rgba(var(--vice-color), calc(var(--vice-opacity) * 1.5)) !important;
+  border-color: rgba(var(--vice-color), calc(var(--vice-opacity) * 1.5)) !important;
+}
+
+/* ---------- 折叠面板组件 ---------- */
+body[inis-theme] .el-collapse {
+  border-top: unset;
+  border-bottom: unset;
+}
+
+body[inis-theme] .el-collapse-item__header,
+body[inis-theme] .el-collapse-item__wrap {
+  background: unset;
+  border-bottom: unset;
+}
+
+/* ---------- 上传组件 ---------- */
+body[inis-theme] .el-upload-list--picture .el-upload-list__item {
+  background-color: unset;
+  border-radius: unset;
+  padding: 6px;
+}
+
+body[inis-theme] .el-upload-list__item:hover {
+  background-color: rgba(var(--theme-color), var(--theme-opacity));
+  transition: background-color 0.2s ease;
+}
+
+body[inis-theme] .el-upload-list--picture .el-upload-list__item-thumbnail {
+  height: unset;
+  background-color: unset;
+}
+
+body[inis-theme] .custom.upload > .el-upload {
+  width: 100%;
+}
+
+/* 上传列表滚动样式 */
+body[inis-theme] .el-upload + .el-upload-list {
+  max-height: 300px;
+  overflow-y: scroll;
+  padding: 0 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+body[inis-theme] .el-upload + .el-upload-list::-webkit-scrollbar {
+  width: 4px;
+  height: 10px;
+  background-color: rgba(0, 0, 0, 0);
+}
+
+body[inis-theme] .el-upload + .el-upload-list::-webkit-scrollbar-thumb {
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.2);
+  transition: all 0.4s ease;
+}
+
+body[inis-theme] .el-upload + .el-upload-list::-webkit-scrollbar-track {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* ---------- 步骤条组件 ---------- */
+body[inis-theme] .el-steps--simple {
+  background: rgba(var(--theme-color), var(--theme-opacity)) !important;
+  backdrop-filter: var(--theme-blur);
+  -webkit-backdrop-filter: var(--theme-blur);
+}
+
+body[inis-theme] .el-step__title.is-finish {
+  color: rgb(var(--theme-font-color));
+}
+
+body[inis-theme] .el-step__title.is-process,
+body[inis-theme] .el-step__title.is-wait {
+  color: #DADDE2 !important;
+}
+
+body[inis-theme] .el-step.is-simple .el-step__arrow::after,
+body[inis-theme] .el-step.is-simple .el-step__arrow::before {
+  background-color: rgb(var(--theme-color));
+}
+
+/* ---------- 抽屉组件 ---------- */
+body[inis-theme] .el-drawer.mb-0 .el-drawer__header {
+  margin-bottom: 0;
+}
+
+body[inis-theme] .el-drawer.radius {
+  border-radius: 20px 20px 0 0;
+}
+
+body[inis-theme] .el-drawer.custom.side .el-drawer__body {
+  padding-top: 0;
+}
+
+body[inis-theme] .el-drawer.custom.side .el-menu {
+  border-right: unset;
+}
+
+body[inis-theme] .el-drawer.custom.side .el-drawer__header {
+  margin-bottom: 0.75rem !important;
+}
+
+body[inis-theme] .el-drawer.custom.side .nav-bg {
+  background: #f7f9fe;
+  box-shadow: var(--box-shadow-normal);
+}
+
+/* ---------- 遮罩组件 ---------- */
+body[inis-theme] .el-overlay {
+  animation: opacity-0-1 0.3s ease-in-out;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  background-color: rgba(0, 0, 0, 0.6);
+}
+
+body[inis-theme] .el-overlay.dialog-fade-leave-to {
+  animation: opacity-1-0 0.3s ease-in-out;
+}
+
+@keyframes opacity-0-1 {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes opacity-1-0 {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- 消息提示组件 ---------- */
+body[inis-theme] .el-message {
+  background-color: #fff;
+  border: none;
+  box-shadow: 0 6px 16px #00000014, 0 3px 6px -4px #0000001f, 0 9px 28px 8px #0000000d;
+  border-radius: var(--border-radius-md);
+}
+
+/* 核心：让输入框和按钮横向同行排列 */
+.input-with-button {
+  display: flex;
+  align-items: center; /* 垂直居中对齐 */
+  gap: 8px; /* 输入框和按钮的间距，可调整 */
+  width: 100%; /* 占满父容器宽度 */
+}
+
+/* 输入框占满剩余宽度，保证布局自适应 */
+.input-with-button .custom {
+  flex: 1;
+  min-width: 0; /* 解决 flex 布局下输入框宽度异常的问题 */
+}
+
+/* 按钮样式适配，匹配输入框高度 */
+.upload-btn {
+  white-space: nowrap; /* 防止按钮文字换行 */
+  padding: 8px 12px; /* 匹配 Element Plus 输入框默认高度 */
+  flex-shrink: 0; /* 按钮不被压缩 */
+}
+
+/* 保持表单标签的间距规范（可选，根据你的全局样式调整） */
+.form-label {
+  display: block; /* label 独占一行 */
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+/* ==================== Element UI 组件定制 - 结束 ==================== */

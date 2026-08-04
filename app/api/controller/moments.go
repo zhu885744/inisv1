@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/md5"
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"math"
@@ -18,11 +20,11 @@ type Moments struct {
 
 const (
 	momentsAllowFields = "content,images,location,json,text,publish_time,status"
-	momentsAllowQuery  = "id"
+	momentsAllowQuery  = "id,top,views"
 )
 
 var momentsAllowFieldsSlice = []any{"content", "images", "location", "json", "text", "publish_time", "status"}
-var momentsAllowQuerySlice = []any{"id"}
+var momentsAllowQuerySlice = []any{"id", "top", "views"}
 
 func (this *Moments) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
@@ -115,6 +117,7 @@ func (this *Moments) IPUT(ctx *gin.Context) {
 	allow := map[string]any{
 		"update":  this.update,
 		"restore": this.restore,
+		"set_top": this.setTop,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -188,6 +191,9 @@ func (this *Moments) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 更新动态浏览量
+	go this.updateViews(ctx, cast.ToStringMap(data))
+
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
@@ -198,7 +204,7 @@ func (this *Moments) all(ctx *gin.Context) {
 
 	params := this.params(ctx, map[string]any{
 		"page":  1,
-		"order": "create_time desc",
+		"order": "top desc, create_time desc",
 	})
 
 	table := model.Moments{}
@@ -294,7 +300,7 @@ func (this *Moments) create(ctx *gin.Context) {
 	allowFields := append([]any{}, momentsAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "audit")
+		allowFields = append(allowFields, "audit", "top")
 	}
 
 	status := cast.ToInt(params["status"])
@@ -356,7 +362,7 @@ func (this *Moments) update(ctx *gin.Context) {
 	allowFields := append([]any{}, momentsAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "audit")
+		allowFields = append(allowFields, "audit", "top")
 	}
 
 	status := cast.ToInt(params["status"])
@@ -715,6 +721,80 @@ func (this *Moments) commentCount(ctx *gin.Context) {
 
 	count, _ := query.Count()
 	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+func (this *Moments) setTop(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	ids := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	isTop := cast.ToInt(params["top"])
+
+	// 第一步：过滤出真实存在的动态ID（含已软删），并丢弃原查询链避免状态污染
+	checkQuery := facade.DB.Model(&model.Moments{}).WithTrashed().WhereIn("id", ids)
+	columnData, _ := checkQuery.Column("id")
+	ids = utils.Unity.Ids(columnData)
+
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+		return
+	}
+
+	// 第二步：使用全新的查询链执行更新，确保 WHERE 生效
+	// 直接使用 map 传入 Updates(map)，GORM 对 map 会写入零值（top=0 也能落库）
+	updateData := map[string]any{
+		"top":         isTop,
+		"last_update": time.Now().Unix(),
+	}
+	updateQuery := facade.DB.Model(&model.Moments{}).WithTrashed().WhereIn("id", ids)
+	tx, err := updateQuery.Update(updateData)
+
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "置顶设置失败！"), 400)
+		return
+	}
+
+	if tx != nil && tx.RowsAffected == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "置顶设置未生效，无记录被更新！"), 204)
+		return
+	}
+
+	topLabel := "取消置顶"
+	if isTop == 1 {
+		topLabel = "置顶设置"
+	}
+
+	this.json(ctx, gin.H{"ids": ids, "top": isTop}, facade.Lang(ctx, topLabel+"成功！"), 200)
+}
+
+func (this *Moments) updateViews(ctx *gin.Context, data map[string]any) {
+	if utils.Is.Empty(data["id"]) {
+		return
+	}
+
+	ip := ctx.ClientIP()
+	userAgent := ctx.Request.UserAgent()
+	momentID := cast.ToString(data["id"])
+
+	deviceKey := ip + userAgent
+	md5Hash := md5.Sum([]byte(deviceKey))
+	cacheKey := "moments_views_cd:" + momentID + ":" + fmt.Sprintf("%x", md5Hash)
+
+	if facade.Cache.Has(cacheKey) {
+		return
+	}
+
+	facade.DB.Model(&model.Moments{}).Where("id", data["id"]).Inc("views", 1)
+	facade.Cache.Set(cacheKey, true, 86400)
 }
 
 func (this *Moments) config(ctx *gin.Context) (result map[string]any) {

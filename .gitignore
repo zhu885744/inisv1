@@ -4,6 +4,5 @@
 /runtime
 /frontend
 /dist
-/thems
 *.exe*
 *.conf

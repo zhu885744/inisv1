@@ -1,0 +1,400 @@
+@keyframes fadenum {
+    0% {opacity:0;}
+    10% {opacity:0.1;}
+    20% {opacity:0.2;}
+    30% {opacity:0.3;}
+    40% {opacity:0.4;}
+    50% {opacity:0.5;}
+    60% {opacity:0.6;}
+    70% {opacity:0.7;}
+    80% {opacity:0.8;}
+    90% {opacity:0.9;}
+    100% {opacity:1;}
+}
+/*模糊渐入动画*/
+@keyframes fade-in {
+    0% {opacity:0;backdrop-filter:blur(0px);}
+    100% {opacity:1;backdrop-filter:blur(10px);}
+}
+@-webkit-keyframes fade-in {
+    0% {opacity:0;backdrop-filter:blur(0px);}
+    100% {opacity:1;backdrop-filter:blur(10px);}
+}
+@-moz-keyframes fade-in {
+    0% {opacity:0;backdrop-filter:blur(0px);}
+    100% {opacity:1;backdrop-filter:blur(10px);}
+}
+@-o-keyframes fade-in {
+    0% {opacity:0;backdrop-filter:blur(0px);}
+    100% {opacity:1;backdrop-filter:blur(10px);}
+}
+/*渐入动画*/
+@keyframes fade {
+    0% {opacity:0;}
+    100% {opacity:1;}
+}
+@-webkit-keyframes fade {
+    0% {opacity:0;}
+    100% {opacity:1;}
+}
+@-moz-keyframes fade {
+    0% {opacity:0;}
+    100% {opacity:1;}
+}
+@-o-keyframes fade {
+    0% {opacity:0;}
+    100% {opacity:1;}
+}
+
+/* 加载动画 */
+#v-load {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+#v-load .loading-word {
+	font-family:'楷体','Hiragino Sans GB',sans-serif
+}
+#v-load .loading-left-bg, #v-load .loading-right-bg {
+    position: absolute;
+	z-index:999998;
+	width:50%;
+	height:100%;
+	transition:all .7s cubic-bezier(.42,0,0,1.01);
+    background-color: rgb(255 255 255 / 30%);
+    backdrop-filter: var(--theme-blur);
+}
+#v-load .loading-left-bg{
+    border-radius: 10px 0 0 10px
+}
+#v-load .loading-right-bg {
+    right: 0;
+    border-radius: 0 10px 10px 0;
+}
+#v-load > .spinner-box {
+    position: absolute;
+	z-index:999999;
+	display:flex;
+	justify-content:center;
+	align-items:center;
+	width:100%;
+    height: 100%;
+}
+#v-load .spinner-box .loading-word {
+	position:absolute;
+	font-size:.95rem;
+	transform:translateY(64px);
+	text-align:center
+}
+#v-load * {
+    color: rgb(var(--loading-color)) !important;
+}
+
+#v-load {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+#v-load .loading-word {
+	font-family:'楷体','Hiragino Sans GB',sans-serif
+}
+#v-load .loading-left-bg, #v-load .loading-right-bg {
+    position: absolute;
+	z-index:999998;
+	width:50%;
+	height:100%;
+	transition:all .7s cubic-bezier(.42,0,0,1.01);
+    background-color: rgb(255 255 255 / 30%);
+    backdrop-filter: var(--theme-blur);
+}
+#v-load .loading-left-bg{
+    border-radius: 10px 0 0 10px
+}
+#v-load .loading-right-bg {
+    right: 0;
+    border-radius: 0 10px 10px 0;
+}
+#v-load > .spinner-box {
+    position: absolute;
+	z-index:999999;
+	display:flex;
+	justify-content:center;
+	align-items:center;
+	width:100%;
+    height: 100%;
+}
+#v-load .spinner-box .loading-word {
+	position:absolute;
+	font-size:.95rem;
+	transform:translateY(64px);
+	text-align:center
+}
+#v-load * {
+    color: rgb(var(--loading-color)) !important;
+}
+
+#v-lock * {
+    color: rgb(var(--loading-color)) !important;
+}
+#v-lock {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+#v-lock::after{
+    content: ' ';
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5em;
+    font-weight: bolder;
+    background-color: rgb(255 255 255 / 30%);
+    backdrop-filter: var(--theme-blur);
+}
+
+p.loading-title {
+	font-size:1.25rem;
+	margin:20px 10px 4px 10px
+}
+
+div.loaded div.loading-left-bg {
+    opacity: 0;
+}
+div.loaded.loading-done div.loading-left-bg {
+    animation: fadeOutLeft 0.4s ease;
+}
+div.loaded div.loading-right-bg {
+    opacity: 0;
+}
+div.loaded.loading-done div.loading-right-bg {
+    animation: fadeOutRight 0.4s ease;
+}
+
+@keyframes fadeOutLeft {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+@keyframes fadeOutRight {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+div.loaded div.spinner-box {
+	display:none!important
+}
+.loader {
+	position:absolute;
+	top:calc(50% - 32px);
+	left:calc(50% - 32px);
+	width:64px;
+	height:64px;
+	border-radius:50%;
+	perspective:800px;
+	transition:all .7s cubic-bezier(.42,0,0,1.01)
+}
+.loader .item {
+	position:absolute;
+	box-sizing:border-box;
+	width:100%;
+	height:100%;
+	border-radius:50%
+}
+.loader .item:first-child {
+	left:0;
+	top:0;
+	animation:rotate-one 1s linear infinite;
+	border-bottom:3px solid rgb(var(--loading-color))
+}
+.loader .item:nth-child(2) {
+	right:0;
+	top:0;
+	animation:rotate-two 1s linear infinite;
+	border-right:3px solid rgb(var(--loading-color))
+}
+.loader .item:nth-child(3) {
+	right:0;
+	bottom:0;
+	animation:rotate-three 1s linear infinite;
+	border-top:3px solid rgb(var(--loading-color))
+}
+@keyframes rotate-one {
+	0% { transform: rotateX(35deg) rotateY(-45deg) rotateZ(0) }
+    100% { transform:rotateX(35deg) rotateY(-45deg) rotateZ(360deg) }
+}
+@keyframes rotate-two {
+	0% { transform:rotateX(50deg) rotateY(10deg) rotateZ(0) }
+    100% { transform:rotateX(50deg) rotateY(10deg) rotateZ(360deg) }
+}
+@keyframes rotate-three {
+	0% { transform:rotateX(35deg) rotateY(55deg) rotateZ(0) }
+    100% { transform:rotateX(35deg) rotateY(55deg) rotateZ(360deg) }
+}
+
+/* 缩放头像 - 开始 */
+.avatar-scale{
+    --size: 280px;
+    --circle: 192, 41, 66;
+    --background: 236, 208, 120;
+    --border: 5px;
+    --scale: 1;
+    --option: content-box no-repeat center / calc(100% / var(--scale)) 100%;
+    --shrink: calc((var(--size) / var(--scale) - var(--size)) / 2 - var(--border));
+
+    width: var(--size);
+    height: var(--size);
+    cursor: pointer;
+    transition: 0.5s;
+    padding-top: 100px;
+    outline: var(--border) solid rgb(var(--circle));
+    outline-offset: calc(var(--shrink) + var(--border));
+    border-radius: 0 0 999px 999px;
+    transform: scale(var(--scale));
+    background: radial-gradient(circle closest-side,
+        rgb(var(--background)) calc(99% - var(--border)),
+        rgb(var(--circle)) calc(100% - var(--border)),
+        rgb(var(--circle)) 99%, transparent 100%
+    ) var(--option);
+    -webkit-mask: linear-gradient(#000, #000, #000) no-repeat center calc(0px - var(--shrink)) / calc(100% / var(--scale) - 2 * var(--border) ) 50%,
+        radial-gradient(circle closest-side, #000 99%, transparent) var(--option);
+    object-fit: contain;
+    box-sizing: content-box;
+}
+.avatar-scale:hover{
+    --scale: 1.35;
+}
+
+@keyframes mirror-scan {
+    0% { left: -200px;top: -300px; opacity: 1 }
+    to { left: -160px;top: 800px; opacity: 1 }
+}
+.mirror-scan{
+    overflow: hidden;
+    position: relative;
+    transition-duration: 5s;
+}
+.mirror-scan:before{
+    opacity: 0;
+    content: "";
+    height: 20px;
+    width: 1000px;
+    position: absolute;
+    transform: rotate(-45deg);
+    animation: mirror-scan 2s ease-in 2s infinite;
+    background-image: linear-gradient(180deg,transparent,hsla(0,0%,100%,.5),transparent);
+}
+
+/* ==================== 摇动 水平方向 - 开始 ==================== */
+@keyframes shake-horizontal {
+    10%, 90% {transform:translate3d(-1px,0,0);}
+    20%, 80% {transform:translate3d(2px,0,0);}
+    30%, 70% {transform:translate3d(-4px,0,0);}
+    40%, 60% {transform:translate3d(4px,0,0);}
+    50%, 50% {transform:translate3d(-4px,0,0);}
+}
+.shake-horizontal.active {
+    animation:shake-horizontal 0.8s cubic-bezier(.36,.07,.19,.97) both;
+    transform:translate3d(0,0,0);
+    backface-visibility:hidden;
+    perspective:1000px;
+}
+/* ==================== 摇动 水平方向 - 结束 ==================== */
+
+/* ==================== 摇动 细微 - 开始 ==================== */
+@keyframes shake-little {
+    0% {transform:translate(0,0)}
+    2% {transform:translate(-1px,1px)}
+    4% {transform:translate(-1px,-1px)}
+    6% {transform:translate(0,0)}
+    8% {transform:translate(1px,1px)}
+    10% {transform:translate(1px,-1px)}
+    12% {transform:translate(0,0)}
+    14% {transform:translate(-1px,1px)}
+    16% {transform:translate(-1px,-1px)}
+    18% {transform:translate(0,0)}
+    20% {transform:translate(1px,1px)}
+    22% {transform:translate(1px,-1px)}
+    24% {transform:translate(0,0)}
+    26% {transform:translate(-1px,1px)}
+    28% {transform:translate(-1px,-1px)}
+    30% {transform:translate(0,0)}
+    32% {transform:translate(1px,1px)}
+    34% {transform:translate(1px,-1px)}
+    36% {transform:translate(0,0)}
+    38% {transform:translate(-1px,1px)}
+    40% {transform:translate(-1px,-1px)}
+    42% {transform:translate(0,0)}
+    44% {transform:translate(1px,1px)}
+    46% {transform:translate(1px,-1px)}
+    48% {transform:translate(0,0)}
+    50% {transform:translate(-1px,1px)}
+    52% {transform:translate(-1px,-1px)}
+    54% {transform:translate(0,0)}
+    56% {transform:translate(1px,1px)}
+    58% {transform:translate(1px,-1px)}
+    60% {transform:translate(0,0)}
+    62% {transform:translate(-1px,1px)}
+    64% {transform:translate(-1px,-1px)}
+    66% {transform:translate(0,0)}
+    68% {transform:translate(1px,1px)}
+    70% {transform:translate(1px,-1px)}
+    72% {transform:translate(0,0)}
+    74% {transform:translate(-1px,1px)}
+    76% {transform:translate(-1px,-1px)}
+    78% {transform:translate(0,0)}
+    80% {transform:translate(1px,1px)}
+    82% {transform:translate(1px,-1px)}
+    84% {transform:translate(0,0)}
+    86% {transform:translate(-1px,1px)}
+    88% {transform:translate(-1px,-1px)}
+    90% {transform:translate(0,0)}
+    92% {transform:translate(1px,1px)}
+    94% {transform:translate(1px,-1px)}
+    96% {transform:translate(0,0)}
+    98% {transform:translate(-1px,1px)}
+    100% {transform:translate(-1px,-1px)}
+}
+.shake-little.active {
+    animation-name: shake-little;
+    animation-duration: 4s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: running;
+    transform: translate(0,0);
+}
+.shake-little-hover:hover {
+    animation-name: shake-little;
+    animation-duration: 4s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-play-state: running;
+    transform: translate(0,0);
+}
+/* ==================== 摇动 细微 - 结束 ==================== */
+
+.scale-up-top-left {
+	animation:scale-up-top-left 0.2s;
+}
+@keyframes scale-up-top-left {
+	0% {
+        transform:scale(.5);
+        transform-origin:top left
+    }
+    100% {
+        transform:scale(1);
+        transform-origin:top left
+    }
+}

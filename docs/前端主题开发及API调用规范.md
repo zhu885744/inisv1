@@ -2,37 +2,18 @@
 
 ## 一、前端主题开发规范
 
-### 1.1 主题目录结构
+分类、标签、文章等路径规范
+/archives/:id    文章详情
+/:key            独立页面
+/category/:key   分类详情
+/tag/:key        标签详情
 
-主题必须遵循以下目录结构：
 
-```
-themes/
-├── [theme-name]/                    # 主题名称（小写英文，连字符分隔）
-│   ├── src/                         # 源码目录
-│   │   ├── components/              # 公共组件
-│   │   │   ├── Header.vue           # 头部组件
-│   │   │   ├── Footer.vue           # 底部组件
-│   │   │   ├── Sidebar.vue          # 侧边栏组件
-│   │   │   └── ...
-│   │   ├── views/                   # 页面视图
-│   │   │   ├── index.vue            # 首页
-│   │   │   ├── article.vue          # 文章详情页
-│   │   │   ├── category.vue         # 分类页
-│   │   │   └── ...
-│   │   ├── layouts/                 # 布局组件
-│   │   │   ├── default.vue          # 默认布局
-│   │   │   └── fullscreen.vue       # 全屏布局
-│   │   ├── assets/                  # 静态资源
-│   │   │   ├── css/                 # 样式文件
-│   │   │   ├── js/                  # 自定义脚本
-│   │   │   └── images/              # 图片资源
-│   │   ├── utils/                   # 工具函数
-│   │   │   └── api.js               # API 封装
-│   │   └── config.js                # 主题配置
-│   ├── package.json                 # 依赖配置
-│   └── theme.config.js              # 主题元配置
-```
+表情包渲染规范
+/api/attachment/emoji   后端提供的表情包列表api
+需要按照下面规范，后端才能渲染表情
+[emoji:表情链接]
+
 
 ### 1.2 组件命名规范
 

@@ -15,6 +15,8 @@ type Moments struct {
 	Content     string                `gorm:"type:longtext; comment:内容; default:Null;" json:"content"`
 	Images      string                `gorm:"type:text; comment:图片; default:Null;" json:"images"`
 	Location    string                `gorm:"size:256; comment:位置; default:Null;" json:"location"`
+	Top         int                   `gorm:"type:int(12); comment:置顶; default:0;" json:"top"`
+	Views       int                   `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
 	Audit       int                   `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
 	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布; default:1;" json:"status"`
 	LastUpdate  int64                 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`

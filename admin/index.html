@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,maximum-scale=1,minimum-scale=1,viewport-fit=cover">
+    <title><%- VITE_TITLE %></title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.png">
+
+    <% if (MODE === 'production') { %>
+    <%- VITE_LIBS %>
+    <script async>
+        try {
+            // inis配置
+            globalThis.inis = JSON.parse('{{.INIS}}')
+        } catch(e) {
+            // 加载 /config.js 文件
+            !function(url){
+                var item    = document.createElement('script');
+                item.src    = url;
+                item.async  = !0;
+                item.onload = function(){this.remove()};
+                document.head.appendChild(item)
+            }('/config.js')
+        }
+    </script>
+    <% } %>
+    <% if (MODE === 'development') { %>
+    <!-- 配置文件 -->
+    <script src="/config.js" async></script>
+    <% } %>
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
