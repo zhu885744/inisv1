@@ -292,7 +292,7 @@
         <div v-if="!isSelf" class="card-body text-center py-5">
           <div class="empty-state">
             <i class="bi bi-lock"></i>
-            <p class="mt-3 text-muted">粉丝记录仅本人可见</p>
+            <p class="mt-3 text-muted">当前粉丝隐私保护中，不可见！</p>
           </div>
         </div>
         <div v-else-if="followersLoading" class="card-body text-center py-5">
@@ -312,6 +312,7 @@
                 :src="item.result?.follower?.avatar || defaultAvatar"
                 :frame="item.result?.follower?.json?.frame || ''"
                 size="48px"
+                :frame-scale="1.7"
                 class="social-avatar"
               />
               <div class="social-main">
@@ -323,6 +324,15 @@
               </div>
               <span class="social-arrow"><i class="bi bi-chevron-right"></i></span>
             </div>
+          </div>
+          <!-- 粉丝 无限加载底部状态 -->
+          <div ref="followersSentinelRef" class="infinite-scroll-sentinel border-top py-4"></div>
+          <div v-if="followersMoreLoading" class="text-center py-3 text-muted small">
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            加载中...
+          </div>
+          <div v-else-if="!followersHasMore && followerList.length > 0" class="text-center py-3 text-muted small">
+            —— 没有更多粉丝了 ——
           </div>
         </template>
         <div v-else class="card-body text-center py-5">
@@ -346,7 +356,7 @@
         <div v-if="!isSelf" class="card-body text-center py-5">
           <div class="empty-state">
             <i class="bi bi-lock"></i>
-            <p class="mt-3 text-muted">关注记录仅本人可见</p>
+            <p class="mt-3 text-muted">当前关注隐私保护中，不可见！</p>
           </div>
         </div>
         <div v-else-if="followingLoading" class="card-body text-center py-5">
@@ -366,6 +376,7 @@
                 :src="item.result?.followee?.avatar || defaultAvatar"
                 :frame="item.result?.followee?.json?.frame || ''"
                 size="48px"
+                :frame-scale="1.7"
                 class="social-avatar"
               />
               <div class="social-main">
@@ -377,6 +388,15 @@
               </div>
               <span class="social-arrow"><i class="bi bi-chevron-right"></i></span>
             </div>
+          </div>
+          <!-- 关注 无限加载底部状态 -->
+          <div ref="followingSentinelRef" class="infinite-scroll-sentinel border-top py-4"></div>
+          <div v-if="followingMoreLoading" class="text-center py-3 text-muted small">
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            加载中...
+          </div>
+          <div v-else-if="!followingHasMore && followingList.length > 0" class="text-center py-3 text-muted small">
+            —— 没有更多关注了 ——
           </div>
         </template>
         <div v-else class="card-body text-center py-5">
@@ -411,7 +431,7 @@
         <div v-if="!isSelf" class="card-body text-center py-5">
           <div class="empty-state">
             <i class="bi bi-lock"></i>
-            <p class="mt-3 text-muted">点赞记录仅本人可见</p>
+            <p class="mt-3 text-muted">当前点赞隐私保护中，不可见！</p>
           </div>
         </div>
         <div v-else-if="likesLoading" class="card-body text-center py-5">
@@ -434,14 +454,11 @@
                   </span>
                   <h6 class="article-title">
                     <template v-if="item._detail?.title">{{ item._detail.title }}</template>
-                    <template v-else-if="item._detail?.content">
-                      {{ truncateText(item._detail.content, 60) }}
-                    </template>
                     <template
                       v-else-if="item.target_type === 'user' && item.result?.author?.nickname"
                       >{{ item.result.author.nickname }}</template
                     >
-                    <template v-else>{{ item.result?.title || '未知内容' }}</template>
+                    
                   </h6>
                   <p
                     v-if="item._detail?.abstract || item._detail?.description"
@@ -460,7 +477,7 @@
                     "
                     class="article-desc"
                   >
-                    {{ truncateText(item._detail.content, 80) }}
+                    <span v-html="truncateAndRenderEmoji(item._detail.content, 80)"></span>
                   </p>
                   <p
                     v-else-if="
@@ -468,7 +485,7 @@
                     "
                     class="article-desc"
                   >
-                    {{ truncateText(item._detail.content, 80) }}
+                    <span v-html="truncateAndRenderEmoji(item._detail.content, 80)"></span>
                   </p>
                   <div class="article-footer">
                     <div class="article-meta">
@@ -497,23 +514,14 @@
               </div>
             </div>
           </div>
-          <!-- 点赞分页 -->
-          <div v-if="likesTotal > likesPageSize" class="card-pagination border-top">
-            <button
-              class="page-btn"
-              :disabled="likesPage <= 1 || likesLoading"
-              @click="changeLikesPage(likesPage - 1)"
-            >
-              <i class="bi bi-chevron-left"></i>
-            </button>
-            <span class="page-info">第 {{ likesPage }} / {{ Math.ceil(likesTotal / likesPageSize) }} 页 · 共 {{ likesTotal }} 条</span>
-            <button
-              class="page-btn"
-              :disabled="likesPage >= Math.ceil(likesTotal / likesPageSize) || likesLoading"
-              @click="changeLikesPage(likesPage + 1)"
-            >
-              <i class="bi bi-chevron-right"></i>
-            </button>
+          <!-- 点赞 无限加载底部状态 -->
+          <div ref="likesSentinelRef" class="infinite-scroll-sentinel border-top py-4"></div>
+          <div v-if="likesMoreLoading" class="text-center py-3 text-muted small">
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            加载中...
+          </div>
+          <div v-else-if="!likesHasMore && likesList.length > 0" class="text-center py-3 text-muted small">
+            —— 没有更多点赞了 ——
           </div>
         </template>
         <div v-else class="card-body text-center py-5">
@@ -548,7 +556,7 @@
         <div v-if="!isSelf" class="card-body text-center py-5">
           <div class="empty-state">
             <i class="bi bi-lock"></i>
-            <p class="mt-3 text-muted">收藏记录仅本人可见</p>
+            <p class="mt-3 text-muted">当前收藏隐私保护中，不可见！</p>
           </div>
         </div>
         <div v-else-if="collectsLoading" class="card-body text-center py-5">
@@ -571,14 +579,10 @@
                   </span>
                   <h6 class="article-title">
                     <template v-if="item._detail?.title">{{ item._detail.title }}</template>
-                    <template v-else-if="item._detail?.content">
-                      {{ truncateText(item._detail.content, 60) }}
-                    </template>
                     <template
                       v-else-if="item.target_type === 'user' && item.result?.author?.nickname"
                       >{{ item.result.author.nickname }}</template
                     >
-                    <template v-else>{{ item.result?.title || '未知内容' }}</template>
                   </h6>
                   <p
                     v-if="item._detail?.abstract || item._detail?.description"
@@ -597,7 +601,7 @@
                     "
                     class="article-desc"
                   >
-                    {{ truncateText(item._detail.content, 80) }}
+                    <span v-html="truncateAndRenderEmoji(item._detail.content, 80)"></span>
                   </p>
                   <p
                     v-else-if="
@@ -605,7 +609,7 @@
                     "
                     class="article-desc"
                   >
-                    {{ truncateText(item._detail.content, 80) }}
+                    <span v-html="truncateAndRenderEmoji(item._detail.content, 80)"></span>
                   </p>
                   <div class="article-footer">
                     <div class="article-meta">
@@ -634,23 +638,14 @@
               </div>
             </div>
           </div>
-          <!-- 收藏分页 -->
-          <div v-if="collectsTotal > collectsPageSize" class="card-pagination border-top">
-            <button
-              class="page-btn"
-              :disabled="collectsPage <= 1 || collectsLoading"
-              @click="changeCollectsPage(collectsPage - 1)"
-            >
-              <i class="bi bi-chevron-left"></i>
-            </button>
-            <span class="page-info">第 {{ collectsPage }} / {{ Math.ceil(collectsTotal / collectsPageSize) }} 页 · 共 {{ collectsTotal }} 条</span>
-            <button
-              class="page-btn"
-              :disabled="collectsPage >= Math.ceil(collectsTotal / collectsPageSize) || collectsLoading"
-              @click="changeCollectsPage(collectsPage + 1)"
-            >
-              <i class="bi bi-chevron-right"></i>
-            </button>
+          <!-- 收藏 无限加载底部状态 -->
+          <div ref="collectsSentinelRef" class="infinite-scroll-sentinel border-top py-4"></div>
+          <div v-if="collectsMoreLoading" class="text-center py-3 text-muted small">
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            加载中...
+          </div>
+          <div v-else-if="!collectsHasMore && collectsList.length > 0" class="text-center py-3 text-muted small">
+            —— 没有更多收藏了 ——
           </div>
         </template>
         <div v-else class="card-body text-center py-5">
@@ -680,7 +675,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, cache } from '@/utils/network'
 import LevelDisplay from '@/comps/custom/LevelDisplay.vue'
@@ -726,25 +721,47 @@ const followersLoading = ref(false)
 const followingLoading = ref(false)
 const likesLoading = ref(false)
 const collectsLoading = ref(false)
+// 「加载更多」专用状态（与首次加载 Loading 分离，避免头部 spinner 反复闪烁）
+const followersMoreLoading = ref(false)
+const followingMoreLoading = ref(false)
+const likesMoreLoading = ref(false)
+const collectsMoreLoading = ref(false)
+// 是否还有更多数据（false 时 IntersectionObserver 自动停手，不再触发请求）
+const followersHasMore = ref(true)
+const followingHasMore = ref(true)
+const likesHasMore = ref(true)
+const collectsHasMore = ref(true)
+// 四个哨兵 DOM 引用（对应模板里 ref="xxxSentinelRef" 的 div）
+const followersSentinelRef = ref(null)
+const followingSentinelRef = ref(null)
+const likesSentinelRef = ref(null)
+const collectsSentinelRef = ref(null)
+let scrollObserver = null
 
-// 点赞/收藏 细分 tab（文章 / 评论 / 动态 / 独立页 / 用户），去掉「全部」减少查询量
+// 粉丝 / 关注 分页状态
+const followersPage = ref(1)
+const followingPage = ref(1)
+const followersTotal = ref(0)
+const followingTotal = ref(0)
+const followersPageSize = 20
+const followingPageSize = 20
+
+// 点赞 / 收藏 分页 & sub-tab
+const likesPage = ref(1)
+const collectsPage = ref(1)
+const likesTotal = ref(0)
+const collectsTotal = ref(0)
+const likesPageSize = 10
+const collectsPageSize = 10
+const activeLikesSubTab = ref('article')
+const activeCollectsSubTab = ref('article')
+
+// 点赞/收藏 细分 tab（文章 / 评论 / 动态 ）
 const LIKE_TABS = [
   { key: 'article', label: '文章' },
   { key: 'comment', label: '评论' },
   { key: 'moment', label: '动态' },
-  { key: 'page', label: '独立页' },
-  { key: 'user', label: '用户' }
 ]
-const activeLikesSubTab = ref('article')
-const activeCollectsSubTab = ref('article')
-
-// 点赞/收藏 分页
-const likesPage = ref(1)
-const likesPageSize = 10
-const likesTotal = ref(0)
-const collectsPage = ref(1)
-const collectsPageSize = 10
-const collectsTotal = ref(0)
 
 // 当前登录用户
 const currentUser = computed(() => store.currentUser)
@@ -796,24 +813,30 @@ const switchTab = (tab) => {
   if (tab === 'articles') {
     loadArticles()
   } else if (tab === 'followers') {
+    followersPage.value = 1
+    followerList.value = []
+    followersHasMore.value = true
     if (isSelf.value) loadFollowersList()
   } else if (tab === 'following') {
+    followingPage.value = 1
+    followingList.value = []
+    followingHasMore.value = true
     if (isSelf.value) loadFollowingList()
   } else if (tab === 'likes') {
-    if (isSelf.value) {
-      activeLikesSubTab.value = 'article'
-      likesPage.value = 1
-      likesList.value = []
-      loadLikesList()
-    }
+    likesPage.value = 1
+    likesList.value = []
+    likesHasMore.value = true
+    activeLikesSubTab.value = 'article'
+    if (isSelf.value) loadLikesList()
   } else if (tab === 'collects') {
-    if (isSelf.value) {
-      activeCollectsSubTab.value = 'article'
-      collectsPage.value = 1
-      collectsList.value = []
-      loadCollectsList()
-    }
+    collectsPage.value = 1
+    collectsList.value = []
+    collectsHasMore.value = true
+    activeCollectsSubTab.value = 'article'
+    if (isSelf.value) loadCollectsList()
   }
+  // tab 切换后哨兵 DOM 可能刚渲染，nextTick 里重新 observe
+  nextTick(() => bindInfiniteScrollObserver())
 }
 
 const goToUser = (userId) => {
@@ -934,6 +957,56 @@ const formatNumber = (num) => {
 const truncateText = (text, maxLength = 100) => {
   if (!text) return ''
   return text.length <= maxLength ? text : text.substring(0, maxLength) + '...'
+}
+
+// 表情渲染：将 [emoji:url] 转换为 <img> 标签
+const renderEmoji = (text) => {
+  if (!text) return ''
+  let processed = String(text)
+  // 解析表情图片 [emoji:url]
+  processed = processed.replace(
+    /\[emoji:(https?:\/\/[^\]]+|\/[^\]]+)\]/g,
+    '<img src="$1" class="inline-emoji" style="width: 24px; height: 24px; vertical-align: middle; display: inline-block; object-fit: contain; margin: 0 1px;" loading="lazy">'
+  )
+  return processed
+}
+
+// 带表情渲染的文本截断：先截断再渲染表情，避免截断到表情标签中间
+const truncateAndRenderEmoji = (text, maxLength = 80) => {
+  if (!text) return ''
+  // 先按纯文本截断（保留 [...] 表情占位符完整）
+  const truncated = truncateTextPreserveEmoji(text, maxLength)
+  // 再渲染表情
+  return renderEmoji(truncated)
+}
+
+// 截断文本时，确保不会把 [emoji:url] 从中间切断
+const truncateTextPreserveEmoji = (text, maxLength = 100) => {
+  if (!text) return ''
+  const str = String(text)
+  if (str.length <= maxLength) return str
+
+  // 找到所有 [emoji:...] 的位置
+  const emojiRegex = /\[emoji:(https?:\/\/[^\]]+|\/[^\]]+)\]/g
+  const emojiPositions = []
+  let match
+  while ((match = emojiRegex.exec(str)) !== null) {
+    emojiPositions.push({
+      start: match.index,
+      end: match.index + match[0].length
+    })
+  }
+
+  // 如果 maxLength 落在某个表情标签内，则扩展截断点到该表情结束
+  let cutPoint = maxLength
+  for (const pos of emojiPositions) {
+    if (cutPoint > pos.start && cutPoint < pos.end) {
+      cutPoint = pos.end
+      break
+    }
+  }
+
+  return str.substring(0, cutPoint) + '...'
 }
 
 const parseTags = (tagsStr) => {
@@ -1236,47 +1309,95 @@ const loadCollectCount = async () => {
   }
 }
 
-const loadFollowersList = async () => {
+const loadFollowersList = async ({ append = false } = {}) => {
   if (!authorId.value) return
-  if (!isSelf.value) return
-  if (followerList.value.length > 0 && !followersLoading.value) return
-  followersLoading.value = true
+  // 仅本人可见：非本人直接返回，不发起请求
+  if (!isSelf.value) {
+    followerList.value = []
+    followersHasMore.value = false
+    return
+  }
+  // append 模式：使用更轻量的 MoreLoading；首次加载走头部 Loading
+  if (append) {
+    if (followersMoreLoading.value || !followersHasMore.value) return
+    followersMoreLoading.value = true
+  } else {
+    if (followersLoading.value) return
+    followersLoading.value = true
+  }
   try {
     const res = await request.get('/api/user-follows/followers', {
       uid: authorId.value,
-      page: 1,
-      limit: 999
+      page: followersPage.value,
+      limit: followersPageSize
     })
     if (res.code === 200 && res.data) {
-      followerList.value = res.data.data || []
+      const newRows = res.data.list || res.data.data || []
+      followersTotal.value = Number(res.data.count) || 0
+      if (append) {
+        // 追加模式：去重合并，避免 ID 重复展示
+        const exist = new Set(followerList.value.map((x) => String(x.id)))
+        for (const r of newRows) if (!exist.has(String(r.id))) followerList.value.push(r)
+      } else {
+        followerList.value = newRows
+      }
+      // 当页返回数量 < 每页大小：说明后端没更多了，直接设为无更多
+      if (newRows.length < followersPageSize) followersHasMore.value = false
+      // 兜底：已展示总数 >= 后端返回 count，也视为无更多
+      if (followersTotal.value > 0 && followerList.value.length >= followersTotal.value) {
+        followersHasMore.value = false
+      }
     }
   } catch (err) {
     console.error('加载粉丝列表失败:', err)
-    followerList.value = []
+    if (!append) followerList.value = []
   } finally {
-    followersLoading.value = false
+    if (append) followersMoreLoading.value = false
+    else followersLoading.value = false
   }
 }
 
-const loadFollowingList = async () => {
+const loadFollowingList = async ({ append = false } = {}) => {
   if (!authorId.value) return
-  if (!isSelf.value) return
-  if (followingList.value.length > 0 && !followingLoading.value) return
-  followingLoading.value = true
+  // 仅本人可见：非本人直接返回，不发起请求
+  if (!isSelf.value) {
+    followingList.value = []
+    followingHasMore.value = false
+    return
+  }
+  if (append) {
+    if (followingMoreLoading.value || !followingHasMore.value) return
+    followingMoreLoading.value = true
+  } else {
+    if (followingLoading.value) return
+    followingLoading.value = true
+  }
   try {
     const res = await request.get('/api/user-follows/following', {
       uid: authorId.value,
-      page: 1,
-      limit: 999
+      page: followingPage.value,
+      limit: followingPageSize
     })
     if (res.code === 200 && res.data) {
-      followingList.value = res.data.data || []
+      const newRows = res.data.list || res.data.data || []
+      followingTotal.value = Number(res.data.count) || 0
+      if (append) {
+        const exist = new Set(followingList.value.map((x) => String(x.id)))
+        for (const r of newRows) if (!exist.has(String(r.id))) followingList.value.push(r)
+      } else {
+        followingList.value = newRows
+      }
+      if (newRows.length < followingPageSize) followingHasMore.value = false
+      if (followingTotal.value > 0 && followingList.value.length >= followingTotal.value) {
+        followingHasMore.value = false
+      }
     }
   } catch (err) {
     console.error('加载关注列表失败:', err)
-    followingList.value = []
+    if (!append) followingList.value = []
   } finally {
-    followingLoading.value = false
+    if (append) followingMoreLoading.value = false
+    else followingLoading.value = false
   }
 }
 
@@ -1348,13 +1469,13 @@ const fillDetailMap = (type, map, r) => {
 }
 
 // 按类型批量拉取详情
-// 说明：基础控制器的 /all 接口自带分页机制（按 page/limit 切分），和「指定一组 ids 拉对应全部行」语义冲突
-//      （即使传了 ids=1..11，后端仍按当前 page=X 分页，可能返回 page=9，只拿到部分行）
-// 因此这里不再尝试 /all + ids 捷径，而是统一用 /one 分片并发，3 个一批 → 每页最多 10 条=4 批，QPS 可控
+// 新方案：使用 /all 接口的 MongoDB 风格 where 查询（where={"id":{"$in":[...]}}） + limit=999 一次拉全部
+//        对比旧的 /one 分片并发，每种 target_type 从 N 次请求降为 1 次，彻底规避 QPS 限流
 const fetchBatchDetails = async (type, ids) => {
   if (!type || !Array.isArray(ids) || ids.length === 0) return new Map()
-  const idArr = [...new Set(ids.map(String))]
+  const idArr = [...new Set(ids.map(Number).filter(Boolean))]
   const resultMap = new Map()
+  if (idArr.length === 0) return resultMap
 
   const endpointMap = {
     article: '/api/article',
@@ -1369,28 +1490,47 @@ const fetchBatchDetails = async (type, ids) => {
   const fieldMap = {
     article: 'id,title,abstract,content,views,create_time',
     comment: 'id,content,bind_id,bind_type,uid,create_time',
-    moment: 'id,content,images,location,uid,create_time',
+    moment: 'id,content,images,location,uid,create_time,top,views',
     page: 'id,title,content,views,create_time',
     user: 'id,nickname,avatar,description,exp'
   }
   const field = fieldMap[type] || ''
 
-  // ========== /one 分片并发（3 个一批） ==========
-  const CONCURRENCY = 3
+  try {
+    const where = JSON.stringify({ id: { $in: idArr } })
+    const params = {
+      where,
+      page: 1,
+      // 按实际 ID 数量请求，不再用 200 / 999 这种「全量」兜底数字，
+      // 避免用户在 DevTools 里看到 limit=200 误以为主分页是假的。
+      limit: idArr.length,
+      order: 'id desc'
+    }
+    if (field) params.field = field
 
-  for (let i = 0; i < idArr.length; i += CONCURRENCY) {
-    const chunk = idArr.slice(i, i + CONCURRENCY)
-    await Promise.all(
-      chunk.map(async (id) => {
-        try {
-          const params = field ? { id, field } : { id }
-          const res = await request.get(`${endpoint}/one`, params)
-          if (res.code === 200 && res.data && res.data.id !== undefined) {
-            fillDetailMap(type, resultMap, res.data)
-          }
-        } catch (_) { /* ignore per-item error */ }
-      })
-    )
+    const res = await request.get(`${endpoint}/all`, params)
+    let rows = []
+    if (res.code === 200) {
+      if (Array.isArray(res.data)) rows = res.data
+      else if (Array.isArray(res.data?.data)) rows = res.data.data
+      // 如果 all 被禁用或无结果，降级走 /one（一次并发 5 个兜底，非大流量场景）
+    }
+    if (rows.length === 0 && idArr.length <= 20) {
+      await Promise.all(
+        idArr.map(async (id) => {
+          try {
+            const p = field ? { id, field } : { id }
+            const oneRes = await request.get(`${endpoint}/one`, p)
+            if (oneRes.code === 200 && oneRes.data && oneRes.data.id !== undefined) {
+              rows.push(oneRes.data)
+            }
+          } catch (_) { /* ignore */ }
+        })
+      )
+    }
+    rows.forEach((r) => fillDetailMap(type, resultMap, r))
+  } catch (e) {
+    console.warn(`[fetchBatchDetails] ${type} 批量查询失败:`, e?.message || e)
   }
   return resultMap
 }
@@ -1426,7 +1566,9 @@ const switchLikesSubTab = (tabKey) => {
   activeLikesSubTab.value = tabKey
   likesPage.value = 1
   likesList.value = []
+  likesHasMore.value = true
   loadLikesList()
+  nextTick(() => bindInfiniteScrollObserver())
 }
 
 const switchCollectsSubTab = (tabKey) => {
@@ -1434,71 +1576,166 @@ const switchCollectsSubTab = (tabKey) => {
   activeCollectsSubTab.value = tabKey
   collectsPage.value = 1
   collectsList.value = []
+  collectsHasMore.value = true
   loadCollectsList()
+  nextTick(() => bindInfiniteScrollObserver())
 }
 
-const changeLikesPage = (page) => {
-  if (page < 1) return
-  likesPage.value = page
-  loadLikesList()
-}
-
-const changeCollectsPage = (page) => {
-  if (page < 1) return
-  collectsPage.value = page
-  loadCollectsList()
-}
-
-const loadLikesList = async () => {
+const loadLikesList = async ({ append = false } = {}) => {
   if (!authorId.value) return
-  if (!isSelf.value) return
-  likesLoading.value = true
+  // 仅本人可见：非本人直接返回，不发起请求
+  if (!isSelf.value) {
+    likesList.value = []
+    likesHasMore.value = false
+    return
+  }
+  if (append) {
+    if (likesMoreLoading.value || !likesHasMore.value) return
+    likesMoreLoading.value = true
+  } else {
+    if (likesLoading.value) return
+    likesLoading.value = true
+  }
   try {
     const params = {
       uid: authorId.value,
       page: likesPage.value,
-      limit: likesPageSize,
-      target_type: activeLikesSubTab.value
+      limit: likesPageSize
+    }
+    if (activeLikesSubTab.value) {
+      params.target_type = activeLikesSubTab.value
     }
     const res = await request.get('/api/user-likes/likes', params)
     if (res.code === 200 && res.data) {
-      const raw = res.data.list || []
+      const raw = res.data.list || res.data.data || []
       likesTotal.value = Number(res.data.count) || 0
-      likesList.value = await enrichInteractionList(raw)
+      const enriched = await enrichInteractionList(raw)
+      if (append) {
+        const exist = new Set(likesList.value.map((x) => String(x.id)))
+        for (const r of enriched) if (!exist.has(String(r.id))) likesList.value.push(r)
+      } else {
+        likesList.value = enriched
+      }
+      if (raw.length < likesPageSize) likesHasMore.value = false
+      if (likesTotal.value > 0 && likesList.value.length >= likesTotal.value) {
+        likesHasMore.value = false
+      }
     }
   } catch (err) {
     console.error('加载点赞列表失败:', err)
-    likesList.value = []
+    if (!append) likesList.value = []
   } finally {
-    likesLoading.value = false
+    if (append) likesMoreLoading.value = false
+    else likesLoading.value = false
   }
 }
 
-const loadCollectsList = async () => {
+const loadCollectsList = async ({ append = false } = {}) => {
   if (!authorId.value) return
   if (!isSelf.value) {
     collectsList.value = []
+    collectsTotal.value = 0
+    collectsHasMore.value = false
     return
   }
-  collectsLoading.value = true
+  if (append) {
+    if (collectsMoreLoading.value || !collectsHasMore.value) return
+    collectsMoreLoading.value = true
+  } else {
+    if (collectsLoading.value) return
+    collectsLoading.value = true
+  }
   try {
     const params = {
       page: collectsPage.value,
-      limit: collectsPageSize,
-      target_type: activeCollectsSubTab.value
+      limit: collectsPageSize
+    }
+    if (activeCollectsSubTab.value) {
+      params.target_type = activeCollectsSubTab.value
     }
     const res = await request.get('/api/user-collects/collects', params)
     if (res.code === 200 && res.data) {
-      const raw = res.data.list || []
+      const raw = res.data.list || res.data.data || []
       collectsTotal.value = Number(res.data.count) || 0
-      collectsList.value = await enrichInteractionList(raw)
+      const enriched = await enrichInteractionList(raw)
+      if (append) {
+        const exist = new Set(collectsList.value.map((x) => String(x.id)))
+        for (const r of enriched) if (!exist.has(String(r.id))) collectsList.value.push(r)
+      } else {
+        collectsList.value = enriched
+      }
+      if (raw.length < collectsPageSize) collectsHasMore.value = false
+      if (collectsTotal.value > 0 && collectsList.value.length >= collectsTotal.value) {
+        collectsHasMore.value = false
+      }
     }
   } catch (err) {
     console.error('加载收藏列表失败:', err)
-    collectsList.value = []
+    if (!append) collectsList.value = []
   } finally {
-    collectsLoading.value = false
+    if (append) collectsMoreLoading.value = false
+    else collectsLoading.value = false
   }
+}
+
+// 统一触发哨兵对应的「加载下一页」逻辑
+const loadMoreByActiveTab = async () => {
+  // 隐私保护：非本人访问时直接拦截，不触发任何「更多加载」
+  if (!isSelf.value) return
+  const tab = activeTab.value
+  if (tab === 'followers') {
+    if (followersMoreLoading.value || !followersHasMore.value) return
+    followersPage.value += 1
+    await loadFollowersList({ append: true })
+  } else if (tab === 'following') {
+    if (followingMoreLoading.value || !followingHasMore.value) return
+    followingPage.value += 1
+    await loadFollowingList({ append: true })
+  } else if (tab === 'likes') {
+    if (likesMoreLoading.value || !likesHasMore.value) return
+    likesPage.value += 1
+    await loadLikesList({ append: true })
+  } else if (tab === 'collects') {
+    if (collectsMoreLoading.value || !collectsHasMore.value) return
+    collectsPage.value += 1
+    await loadCollectsList({ append: true })
+  }
+}
+
+// 根据当前 activeTab 拿到真正需要观察的哨兵节点（只观察当前展示的那个，避免四个 tab 同时触发）
+const getActiveSentinel = () => {
+  const tab = activeTab.value
+  if (tab === 'followers') return followersSentinelRef.value
+  if (tab === 'following') return followingSentinelRef.value
+  if (tab === 'likes') return likesSentinelRef.value
+  if (tab === 'collects') return collectsSentinelRef.value
+  return null
+}
+
+const bindInfiniteScrollObserver = () => {
+  if (typeof IntersectionObserver === 'undefined') return
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+  }
+  scrollObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        // 只有「哨兵进入视口」且当前 tab 是它所属的 tab，才触发 loadMore
+        if (entry.isIntersecting) {
+          const target = entry.target
+          const activeNode = getActiveSentinel()
+          if (target === activeNode) {
+            loadMoreByActiveTab()
+          }
+        }
+      })
+    },
+    { root: null, rootMargin: '160px 0px', threshold: 0 }
+  )
+  // 四个哨兵都观察，但触发时会判断 activeTab，避免误触
+  ;[followersSentinelRef, followingSentinelRef, likesSentinelRef, collectsSentinelRef].forEach(
+    (r) => r.value && scrollObserver.observe(r.value)
+  )
 }
 
 // 监听路由参数变化
@@ -1524,6 +1761,19 @@ watch(() => route.params.id, () => {
     collectsPage.value = 1
     likesTotal.value = 0
     collectsTotal.value = 0
+    followersPage.value = 1
+    followingPage.value = 1
+    followersTotal.value = 0
+    followingTotal.value = 0
+    // 切用户时重置无限加载状态
+    followersHasMore.value = true
+    followingHasMore.value = true
+    likesHasMore.value = true
+    collectsHasMore.value = true
+    followersMoreLoading.value = false
+    followingMoreLoading.value = false
+    likesMoreLoading.value = false
+    collectsMoreLoading.value = false
     loadUserInfo()
     loadArticles()
     loadArticleCount()
@@ -1544,6 +1794,16 @@ onMounted(() => {
     loadLikeCount()
     loadCollectCount()
     checkIsFollowing()
+  }
+  // 首屏哨兵还没渲染（因为 activeTab 是 articles，粉丝/点赞的哨兵不在 DOM 里）
+  // 等用户切到对应 tab 时，switchTab 会通过 nextTick 重新 bind
+  nextTick(() => bindInfiniteScrollObserver())
+})
+
+onBeforeUnmount(() => {
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
   }
 })
 </script>
