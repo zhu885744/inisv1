@@ -1,6 +1,4 @@
 import { ref, onBeforeUnmount, getCurrentInstance } from 'vue'
-import utils from '@/utils/utils'
-import { getSync } from '@/utils/app'
 import { request } from '@/utils/network'
 
 const DEV = import.meta.env.DEV || false
@@ -23,10 +21,11 @@ const lastError = ref(null)
 /**
  * 获取WebSocket连接URL
  * - 优先直接读取 VITE_SOCKET 环境变量（完整地址，无论生产/开发）
- * - 兼容跨域场景，token通过query参数传递
+ * - ⚠️ 认证方案：不把 JWT 放在 URL query 里，避免被 access_log / DevTools / 错误上报 / 截图泄露
+ *   WebSocket 握手属于浏览器原生请求，同域/正确配置的跨域 Cookie 会自动带上，
+ *   后端应当优先从 Cookie（INIS_LOGIN_TOKEN）中读取凭证进行认证。
  */
 const getSocketUrl = () => {
-  const TOKEN_NAME = getSync('token_name') || 'INIS_LOGIN_TOKEN'
   const envSocket = import.meta.env.VITE_SOCKET
 
   let baseSocketUrl = ''
@@ -50,21 +49,6 @@ const getSocketUrl = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       baseSocketUrl = `${protocol}//${window.location.host}/socket`
     }
-  }
-
-  // 获取 token
-  let token = utils.get.cookie(TOKEN_NAME) || ''
-  if (!token) {
-    const authHeader = request.axios?.defaults?.headers?.common?.Authorization
-    if (authHeader) {
-      token = authHeader
-    }
-  }
-
-  // 拼接 query token（跨域场景要求）
-  if (token) {
-    const separator = baseSocketUrl.includes('?') ? '&' : '?'
-    return `${baseSocketUrl}${separator}${encodeURIComponent(TOKEN_NAME)}=${encodeURIComponent(token)}&token=${encodeURIComponent(token)}`
   }
 
   return baseSocketUrl

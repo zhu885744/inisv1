@@ -1,125 +1,121 @@
 <template>
   <div class="status-page mt-3">
-    <!-- 页头卡片 -->
-    <div class="card mb-3 shadow-sm">
+    <!-- ========== 页头卡片 ========== -->
+    <div class="card mb-3 border">
       <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
           <div>
-            <h1 class="card-title h4 mb-1">
-              <i class="bi bi-activity text-primary me-2"></i>服务器状态
+            <h1 class="h4 mb-1 d-flex align-items-center gap-2">
+              <i class="bi bi-activity text-primary"></i>服务器状态
             </h1>
-            <p class="card-subtitle text-muted small">通过 WebSocket 实时推送服务器运行数据</p>
+            <p class="text-muted small mb-0">通过 WebSocket 实时推送服务器运行数据</p>
           </div>
           <div class="d-flex align-items-center gap-3">
             <div class="d-flex align-items-center gap-2">
-              <span 
-                class="status-indicator rounded-circle d-inline-block"
-                :class="statusClass"
-              ></span>
-              <span class="small fw-medium" :class="statusTextClass">{{ statusText }}</span>
+              <span class="status-indicator rounded-circle" :class="statusClass"></span>
+              <span class="fw-medium" :class="statusTextClass">{{ statusText }}</span>
             </div>
-            <button 
+            <button
               class="btn btn-outline-primary btn-sm"
               @click="handleReconnect"
               :disabled="socketStore.isConnecting"
             >
-              <i class="bi bi-arrow-repeat me-1"></i>
-              重连
+              <i class="bi bi-arrow-repeat me-1"></i>重连
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 概览卡片行 -->
+    <!-- ========== 概览卡片行 ========== -->
     <div class="row g-3 mb-3">
       <div class="col-6 col-md-3">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-body">
-            <div class="d-flex align-items-center gap-2 text-muted mb-2">
+        <div class="card h-100 border">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex align-items-center gap-2 text-muted mb-2 border-bottom pb-2">
               <i class="bi bi-people-fill text-primary fs-5"></i>
-              <small>在线用户</small>
+              <small class="fw-medium">在线用户</small>
             </div>
-            <div class="fs-2 fw-bold mb-0">{{ socketStore.onlineCount }}</div>
+            <div class="fs-2 fw-bold mt-1">{{ socketStore.onlineCount }}</div>
           </div>
         </div>
       </div>
       <div class="col-6 col-md-3">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-body">
-            <div class="d-flex align-items-center gap-2 text-muted mb-2">
+        <div class="card h-100 border">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex align-items-center gap-2 text-muted mb-2 border-bottom pb-2">
               <i class="bi bi-diagram-3-fill text-info fs-5"></i>
-              <small>连接时长</small>
+              <small class="fw-medium">连接时长</small>
             </div>
-            <div class="fs-2 fw-bold mb-0">{{ formatDuration(socketStore.connectedAt) }}</div>
+            <div class="fs-2 fw-bold mt-1">{{ formatDuration(socketStore.connectedAt) }}</div>
           </div>
         </div>
       </div>
       <div class="col-6 col-md-3">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-body">
-            <div class="d-flex align-items-center gap-2 text-muted mb-2">
+        <div class="card h-100 border">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex align-items-center gap-2 text-muted mb-2 border-bottom pb-2">
               <i class="bi bi-heart-pulse-fill fs-5" :class="healthClass"></i>
-              <small>健康状态</small>
+              <small class="fw-medium">健康状态</small>
             </div>
-            <div class="fs-2 fw-bold mb-0" :class="healthClass">{{ healthText }}</div>
+            <div class="fs-2 fw-bold mt-1" :class="healthClass">{{ healthText }}</div>
           </div>
         </div>
       </div>
       <div class="col-6 col-md-3">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-body">
-            <div class="d-flex align-items-center gap-2 text-muted mb-2">
+        <div class="card h-100 border">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex align-items-center gap-2 text-muted mb-2 border-bottom pb-2">
               <i class="bi bi-clock-fill text-secondary fs-5"></i>
-              <small>系统时间</small>
+              <small class="fw-medium">系统时间</small>
             </div>
-            <div class="fs-2 fw-bold mb-0 font-monospace">{{ currentTime }}</div>
+            <div class="fs-2 fw-bold mt-1 font-monospace">{{ currentTime }}</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 应用信息卡片 -->
-    <div class="card mb-3 shadow-sm" v-if="socketStore.appInfo.app_name">
-      <div class="card-header py-3">
-        <h2 class="h6 mb-0 fw-bold">
-          <i class="bi bi-info-circle-fill text-primary me-2"></i>应用信息
+    <!-- ========== 应用信息 ========== -->
+    <div class="card mb-3 border" v-if="socketStore.appInfo.app_name">
+      <div class="card-header bg-transparent border-bottom py-3">
+        <h2 class="h6 mb-0 fw-bold d-flex align-items-center gap-2">
+          <i class="bi bi-info-circle-fill text-primary"></i>应用信息
         </h2>
       </div>
-      <div class="card-body">
-        <div class="row g-3">
-          <div class="col-6 col-md-3">
-            <div class="small text-muted mb-1">应用名称</div>
-            <div class="fw-semibold">{{ socketStore.appInfo.app_name }}</div>
+      <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">应用名称</span>
+            <span class="fw-semibold">{{ socketStore.appInfo.app_name }}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="small text-muted mb-1">Go 版本</div>
-            <div class="fw-semibold">{{ socketStore.appInfo.go_version }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">Go 版本</span>
+            <span class="fw-semibold">{{ socketStore.appInfo.go_version }}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="small text-muted mb-1">操作系统 / 架构</div>
-            <div class="fw-semibold">{{ socketStore.appInfo.os }} / {{ socketStore.appInfo.arch }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">操作系统 / 架构</span>
+            <span class="fw-semibold">{{ socketStore.appInfo.os }} / {{ socketStore.appInfo.arch }}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="small text-muted mb-1">CPU 核心数</div>
-            <div class="fw-semibold">{{ socketStore.appInfo.cpu_count }} 核</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">CPU 核心数</span>
+            <span class="fw-semibold">{{ socketStore.appInfo.cpu_count }} 核</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="small text-muted mb-1">协程数量</div>
-            <div class="fw-semibold">{{ socketStore.systemStatus?.resource?.goroutines || socketStore.appInfo.goroutines }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">协程数量</span>
+            <span class="fw-semibold">{{ socketStore.systemStatus?.resource?.goroutines || socketStore.appInfo.goroutines }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 数据库 + 缓存卡片行 -->
+    <!-- ========== 数据库 + 缓存 ========== -->
     <div class="row g-3 mb-3">
       <!-- 数据库 -->
       <div class="col-lg-6" v-if="socketStore.databaseStatus.connected !== undefined">
-        <div class="card h-100 shadow-sm">
-          <div class="card-header py-3 d-flex justify-content-between align-items-center">
-            <h2 class="h6 mb-0 fw-bold">
-              <i class="bi bi-database-fill text-primary me-2"></i>数据库
+        <div class="card h-100 border">
+          <div class="card-header bg-transparent border-bottom d-flex flex-wrap justify-content-between align-items-center py-3">
+            <h2 class="h6 mb-0 fw-bold d-flex align-items-center gap-2">
+              <i class="bi bi-database-fill text-primary"></i>数据库
             </h2>
             <div>
               <span class="badge rounded-pill" :class="socketStore.databaseStatus.connected ? 'bg-success' : 'bg-danger'">
@@ -129,57 +125,56 @@
             </div>
           </div>
           <div class="card-body">
+            <!-- 错误提示 -->
             <div v-if="socketStore.databaseStatus.error" class="alert alert-danger py-2 small mb-3">
               <i class="bi bi-exclamation-triangle-fill me-1"></i>
               {{ socketStore.databaseStatus.error }}
             </div>
 
-            <div class="row g-3" v-if="socketStore.databaseStatus.counts">
+            <!-- 统计数据网格 -->
+            <div v-if="socketStore.databaseStatus.counts" class="row g-2">
               <div class="col-sm-6">
-                <div class="list-group-item list-group-item-action border rounded p-3">
-                  <div class="d-flex w-100 justify-content-between mb-1">
+                <div class="border rounded p-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-muted">用户总数</small>
                   </div>
                   <div class="h5 mb-1">{{ socketStore.userStats.total ?? 0 }}</div>
-                  <small class="text-body-secondary">
+                  <small>
                     <span class="text-success">正常 {{ socketStore.userStats.normal ?? 0 }}</span>
                     <span class="mx-1 text-muted">·</span>
                     <span class="text-warning">冻结 {{ socketStore.userStats.frozen ?? 0 }}</span>
                   </small>
                 </div>
               </div>
-
               <div class="col-sm-6">
-                <div class="list-group-item list-group-item-action border rounded p-3">
-                  <div class="d-flex w-100 justify-content-between mb-1">
+                <div class="border rounded p-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-muted">活跃用户 (30天)</small>
                   </div>
                   <div class="h5 mb-1">{{ socketStore.userStats.active ?? 0 }}</div>
-                  <small class="text-body-secondary">最近 30 天内登录过</small>
+                  <small class="text-muted">最近 30 天内登录</small>
                 </div>
               </div>
-
               <div class="col-sm-6">
-                <div class="list-group-item list-group-item-action border rounded p-3">
-                  <div class="d-flex w-100 justify-content-between mb-1">
+                <div class="border rounded p-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-muted">文章</small>
                   </div>
                   <div class="h5 mb-1">{{ socketStore.articleStats.total ?? 0 }}</div>
-                  <small class="text-body-secondary">
+                  <small>
                     <span class="text-success">已发布 {{ socketStore.articleStats.published ?? 0 }}</span>
                     <span class="mx-1 text-muted">·</span>
                     <span class="text-muted">草稿 {{ socketStore.articleStats.draft ?? 0 }}</span>
                   </small>
                 </div>
               </div>
-
               <div class="col-sm-6">
-                <div class="list-group-item list-group-item-action border rounded p-3">
-                  <div class="d-flex w-100 justify-content-between mb-1">
+                <div class="border rounded p-3 h-100">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-muted">动态</small>
                   </div>
                   <div class="h5 mb-1">{{ socketStore.momentStats.total ?? 0 }}</div>
-                  <small class="text-body-secondary">
+                  <small>
                     <span class="text-success">已发布 {{ socketStore.momentStats.published ?? 0 }}</span>
                     <span class="mx-1 text-muted">·</span>
                     <span class="text-muted">草稿 {{ socketStore.momentStats.draft ?? 0 }}</span>
@@ -188,26 +183,29 @@
               </div>
             </div>
 
-            <div class="list-group list-group-horizontal mt-3 gap-2 flex-wrap" v-if="socketStore.databaseStatus.counts" style="border:0;">
-              <div class="list-group-item flex-fill text-center rounded">
-                <div class="small text-muted mb-1">评论</div>
-                <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.comments) }}</div>
-              </div>
-              <div class="list-group-item flex-fill text-center rounded">
-                <div class="small text-muted mb-1">附件</div>
-                <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.attachments) }}</div>
-              </div>
-              <div class="list-group-item flex-fill text-center rounded">
-                <div class="small text-muted mb-1">标签</div>
-                <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.tags) }}</div>
-              </div>
-              <div class="list-group-item flex-fill text-center rounded">
-                <div class="small text-muted mb-1">页面</div>
-                <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.pages) }}</div>
-              </div>
-              <div class="list-group-item flex-fill text-center rounded">
-                <div class="small text-muted mb-1">友链</div>
-                <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.links) }}</div>
+            <!-- 其他计数（横向列表） -->
+            <div v-if="socketStore.databaseStatus.counts" class="mt-3">
+              <div class="d-flex flex-wrap gap-2">
+                <div class="border rounded px-3 py-2 flex-fill text-center">
+                  <div class="small text-muted">评论</div>
+                  <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.comments) }}</div>
+                </div>
+                <div class="border rounded px-3 py-2 flex-fill text-center">
+                  <div class="small text-muted">附件</div>
+                  <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.attachments) }}</div>
+                </div>
+                <div class="border rounded px-3 py-2 flex-fill text-center">
+                  <div class="small text-muted">标签</div>
+                  <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.tags) }}</div>
+                </div>
+                <div class="border rounded px-3 py-2 flex-fill text-center">
+                  <div class="small text-muted">页面</div>
+                  <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.pages) }}</div>
+                </div>
+                <div class="border rounded px-3 py-2 flex-fill text-center">
+                  <div class="small text-muted">友链</div>
+                  <div class="fw-bold">{{ formatNumber(socketStore.databaseStatus.counts.links) }}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -216,14 +214,14 @@
 
       <!-- 缓存 -->
       <div class="col-lg-6" v-if="socketStore.cacheStatus.enabled !== undefined">
-        <div class="card h-100 shadow-sm">
-          <div class="card-header py-3">
-            <h2 class="h6 mb-0 fw-bold">
-              <i class="bi bi-hdd-rack-fill text-info me-2"></i>缓存服务
+        <div class="card h-100 border">
+          <div class="card-header bg-transparent border-bottom py-3">
+            <h2 class="h6 mb-0 fw-bold d-flex align-items-center gap-2">
+              <i class="bi bi-hdd-rack-fill text-info"></i>缓存服务
             </h2>
           </div>
           <div class="card-body">
-            <div class="mb-3 d-flex justify-content-between align-items-center">
+            <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
               <div>
                 <span class="badge rounded-pill me-2" :class="socketStore.cacheStatus.enabled ? 'bg-primary' : 'bg-secondary'">
                   {{ socketStore.cacheStatus.enabled ? '已启用' : '已禁用' }}
@@ -231,10 +229,10 @@
                 <span class="badge rounded-pill bg-info me-2" v-if="socketStore.cacheStatus.type">
                   {{ socketStore.cacheStatus.type.toUpperCase() }}
                 </span>
+                <span class="badge rounded-pill" :class="socketStore.cacheStatus.working ? 'bg-success' : 'bg-danger'">
+                  {{ socketStore.cacheStatus.working ? '工作正常' : '工作异常' }}
+                </span>
               </div>
-              <span class="badge rounded-pill" :class="socketStore.cacheStatus.working ? 'bg-success' : 'bg-danger'">
-                {{ socketStore.cacheStatus.working ? '工作正常' : '工作异常' }}
-              </span>
             </div>
 
             <div v-if="socketStore.cacheStatus.error" class="alert alert-danger py-2 small mb-0">
@@ -250,127 +248,111 @@
       </div>
     </div>
 
-    <!-- 系统资源卡片 -->
-    <div class="card mb-3 shadow-sm" v-if="socketStore.resourceUsage.memory || socketStore.resourceUsage.cpu">
-      <div class="card-header py-3">
-        <h2 class="h6 mb-0 fw-bold">
-          <i class="bi bi-cpu-fill text-warning me-2"></i>系统资源
+    <!-- ========== 系统资源 ========== -->
+    <div class="card mb-3 border" v-if="socketStore.resourceUsage.memory || socketStore.resourceUsage.cpu">
+      <div class="card-header bg-transparent border-bottom py-3">
+        <h2 class="h6 mb-0 fw-bold d-flex align-items-center gap-2">
+          <i class="bi bi-cpu-fill text-warning"></i>系统资源
         </h2>
       </div>
-      <div class="card-body">
-        <div class="row g-4">
+      <div class="card-body p-0">
+        <div class="list-group list-group-flush">
           <!-- CPU -->
-          <div class="col-md-6">
-            <div class="card border bg-light-subtle h-100">
-              <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-cpu-fill text-warning"></i>
-                    <h3 class="h6 mb-0 fw-semibold">CPU</h3>
-                    <span class="badge bg-light text-secondary border">{{ socketStore.cpuInfo.count }} 核</span>
-                  </div>
-                  <span class="fs-5 fw-bold" :class="usageClass(cpuUsagePercent)">{{ socketStore.cpuInfo.usage || '0%' }}</span>
-                </div>
-                <div class="progress mb-3" style="height: 0.5rem;">
-                  <div class="progress-bar" :class="progressClass(cpuUsagePercent)" :style="{ width: socketStore.cpuInfo.usage || '0%' }" role="progressbar"></div>
-                </div>
-                <div class="small text-muted mb-2">型号: {{ socketStore.cpuInfo.model || '-' }}</div>
-                <div class="d-flex flex-wrap gap-3 small">
-                  <span><i class="bi bi-graph-up me-1"></i>1分负载 <b>{{ socketStore.cpuInfo.load_1m ?? '-' }}</b></span>
-                  <span><i class="bi bi-graph-up me-1"></i>5分 <b>{{ socketStore.cpuInfo.load_5m ?? '-' }}</b></span>
-                  <span><i class="bi bi-graph-up me-1"></i>15分 <b>{{ socketStore.cpuInfo.load_15m ?? '-' }}</b></span>
-                </div>
+          <div class="list-group-item py-3" v-if="socketStore.cpuInfo.usage">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-cpu-fill text-warning"></i>
+                <span class="fw-semibold">CPU</span>
+                <span class="badge text-secondary border">{{ socketStore.cpuInfo.count }} 核</span>
               </div>
+              <span class="fw-bold" :class="usageClass(cpuUsagePercent)">{{ socketStore.cpuInfo.usage || '0%' }}</span>
+            </div>
+            <div class="progress mb-2" style="height: 0.5rem;">
+              <div class="progress-bar" :class="progressClass(cpuUsagePercent)" :style="{ width: socketStore.cpuInfo.usage || '0%' }" role="progressbar"></div>
+            </div>
+            <div class="small text-muted mb-1">型号: {{ socketStore.cpuInfo.model || '-' }}</div>
+            <div class="d-flex flex-wrap gap-3 small">
+              <span><i class="bi bi-graph-up me-1"></i>1分负载 <b>{{ socketStore.cpuInfo.load_1m ?? '-' }}</b></span>
+              <span><i class="bi bi-graph-up me-1"></i>5分 <b>{{ socketStore.cpuInfo.load_5m ?? '-' }}</b></span>
+              <span><i class="bi bi-graph-up me-1"></i>15分 <b>{{ socketStore.cpuInfo.load_15m ?? '-' }}</b></span>
             </div>
           </div>
 
           <!-- 内存 -->
-          <div class="col-md-6">
-            <div class="card border bg-light-subtle h-100">
-              <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-memory-fill text-primary"></i>
-                    <h3 class="h6 mb-0 fw-semibold">系统内存</h3>
-                  </div>
-                  <span class="fs-5 fw-bold" :class="usageClass(memoryUsagePercent)">{{ socketStore.memoryInfo.system_usage || '0%' }}</span>
-                </div>
-                <div class="progress mb-3" style="height: 0.5rem;">
-                  <div class="progress-bar" :class="progressClass(memoryUsagePercent)" :style="{ width: socketStore.memoryInfo.system_usage || '0%' }" role="progressbar"></div>
-                </div>
-                <div class="d-flex justify-content-between small text-muted mb-2">
-                  <span>已用 <b class="text-body">{{ socketStore.memoryInfo.system_used || '-' }}</b></span>
-                  <span>总量 <b class="text-body">{{ socketStore.memoryInfo.system_total || '-' }}</b></span>
-                </div>
-                <div class="d-flex flex-wrap gap-3 small">
-                  <span class="text-info"><i class="bi bi-box-seam me-1"></i>Go内存 <b>{{ socketStore.memoryInfo.alloc || '-' }}</b></span>
-                  <span class="text-secondary"><i class="bi bi-recycle me-1"></i>GC <b>{{ socketStore.memoryInfo.gc_count ?? 0 }}</b> 次</span>
-                </div>
+          <div class="list-group-item py-3" v-if="socketStore.memoryInfo.system_usage">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-boxes text-primary"></i>
+                <span class="fw-semibold">系统内存</span>
               </div>
+              <span class="fw-bold" :class="usageClass(memoryUsagePercent)">{{ socketStore.memoryInfo.system_usage || '0%' }}</span>
+            </div>
+            <div class="progress mb-2" style="height: 0.5rem;">
+              <div class="progress-bar" :class="progressClass(memoryUsagePercent)" :style="{ width: socketStore.memoryInfo.system_usage || '0%' }" role="progressbar"></div>
+            </div>
+            <div class="d-flex justify-content-between small text-muted mb-2">
+              <span>已用 <b class="text-body">{{ socketStore.memoryInfo.system_used || '-' }}</b></span>
+              <span>总量 <b class="text-body">{{ socketStore.memoryInfo.system_total || '-' }}</b></span>
+            </div>
+            <div class="d-flex flex-wrap gap-3 small">
+              <span class="text-info"><i class="bi bi-box-seam me-1"></i>Go内存 <b>{{ socketStore.memoryInfo.alloc || '-' }}</b></span>
+              <span class="text-secondary"><i class="bi bi-recycle me-1"></i>GC <b>{{ socketStore.memoryInfo.gc_count ?? 0 }}</b> 次</span>
             </div>
           </div>
 
           <!-- 磁盘 -->
-          <div class="col-md-6" v-if="socketStore.diskInfo.total">
-            <div class="card border bg-light-subtle h-100">
-              <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-device-hdd-fill text-success"></i>
-                    <h3 class="h6 mb-0 fw-semibold">磁盘</h3>
-                    <span class="badge bg-light text-secondary border">{{ socketStore.diskInfo.fs_type || '' }}</span>
-                  </div>
-                  <span class="fs-5 fw-bold" :class="usageClass(diskUsagePercent)">{{ socketStore.diskInfo.usage || '0%' }}</span>
-                </div>
-                <div class="progress mb-3" style="height: 0.5rem;">
-                  <div class="progress-bar" :class="progressClass(diskUsagePercent)" :style="{ width: socketStore.diskInfo.usage || '0%' }" role="progressbar"></div>
-                </div>
-                <div class="d-flex justify-content-between small text-muted mb-2 flex-wrap">
-                  <span>已用 <b class="text-body">{{ socketStore.diskInfo.used || '-' }}</b></span>
-                  <span>可用 <b class="text-body">{{ socketStore.diskInfo.free || '-' }}</b></span>
-                  <span>总量 <b class="text-body">{{ socketStore.diskInfo.total || '-' }}</b></span>
-                </div>
-                <div class="d-flex flex-wrap gap-3 small">
-                  <span class="text-primary"><i class="bi bi-download me-1"></i>读 <b>{{ socketStore.diskInfo.read_per_sec || '-' }}/s</b></span>
-                  <span class="text-danger"><i class="bi bi-upload me-1"></i>写 <b>{{ socketStore.diskInfo.write_per_sec || '-' }}/s</b></span>
-                  <span>IO延迟 <b>{{ socketStore.diskInfo.io_latency || '-' }}</b></span>
-                </div>
+          <div class="list-group-item py-3" v-if="socketStore.diskInfo.total">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-device-hdd-fill text-success"></i>
+                <span class="fw-semibold">磁盘</span>
+                <span class="badge text-secondary border">{{ socketStore.diskInfo.fs_type || '' }}</span>
               </div>
+              <span class="fw-bold" :class="usageClass(diskUsagePercent)">{{ socketStore.diskInfo.usage || '0%' }}</span>
+            </div>
+            <div class="progress mb-2" style="height: 0.5rem;">
+              <div class="progress-bar" :class="progressClass(diskUsagePercent)" :style="{ width: socketStore.diskInfo.usage || '0%' }" role="progressbar"></div>
+            </div>
+            <div class="d-flex justify-content-between small text-muted mb-2 flex-wrap">
+              <span>已用 <b class="text-body">{{ socketStore.diskInfo.used || '-' }}</b></span>
+              <span>可用 <b class="text-body">{{ socketStore.diskInfo.free || '-' }}</b></span>
+              <span>总量 <b class="text-body">{{ socketStore.diskInfo.total || '-' }}</b></span>
+            </div>
+            <div class="d-flex flex-wrap gap-3 small">
+              <span class="text-primary"><i class="bi bi-download me-1"></i>读 <b>{{ socketStore.diskInfo.read_per_sec || '-' }}/s</b></span>
+              <span class="text-danger"><i class="bi bi-upload me-1"></i>写 <b>{{ socketStore.diskInfo.write_per_sec || '-' }}/s</b></span>
+              <span>IO延迟 <b>{{ socketStore.diskInfo.io_latency || '-' }}</b></span>
             </div>
           </div>
 
           <!-- 网络 -->
-          <div class="col-md-6" v-if="socketStore.networkInfo.bytes_sent">
-            <div class="card border bg-light-subtle h-100">
-              <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-wifi-fill text-info"></i>
-                    <h3 class="h6 mb-0 fw-semibold">网络</h3>
-                  </div>
-                  <div class="d-flex gap-3 small fw-medium">
-                    <span class="text-success"><i class="bi bi-arrow-up me-1"></i>{{ socketStore.networkInfo.up || '-' }}/s</span>
-                    <span class="text-primary"><i class="bi bi-arrow-down me-1"></i>{{ socketStore.networkInfo.down || '-' }}/s</span>
-                  </div>
-                </div>
-                <div class="row g-2 small mt-2">
-                  <div class="col-6">
-                    <div class="text-muted">总发送</div>
-                    <div class="fw-semibold">{{ socketStore.networkInfo.total_sent || '-' }}</div>
-                  </div>
-                  <div class="col-6">
-                    <div class="text-muted">总接收</div>
-                    <div class="fw-semibold">{{ socketStore.networkInfo.total_received || '-' }}</div>
-                  </div>
-                  <div class="col-6">
-                    <div class="text-muted">发送包数</div>
-                    <div class="fw-semibold">{{ formatNumber(socketStore.networkInfo.packets_sent) }}</div>
-                  </div>
-                  <div class="col-6">
-                    <div class="text-muted">接收包数</div>
-                    <div class="fw-semibold">{{ formatNumber(socketStore.networkInfo.packets_recv) }}</div>
-                  </div>
-                </div>
+          <div class="list-group-item py-3" v-if="socketStore.networkInfo.bytes_sent">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-bar-chart-fill text-info"></i>
+                <span class="fw-semibold">网络</span>
+              </div>
+              <div class="d-flex gap-3 small fw-medium">
+                <span class="text-success"><i class="bi bi-arrow-up me-1"></i>{{ socketStore.networkInfo.up || '-' }}/s</span>
+                <span class="text-primary"><i class="bi bi-arrow-down me-1"></i>{{ socketStore.networkInfo.down || '-' }}/s</span>
+              </div>
+            </div>
+            <div class="row g-2 small">
+              <div class="col-6">
+                <div class="text-muted">总发送</div>
+                <div class="fw-semibold">{{ socketStore.networkInfo.total_sent || '-' }}</div>
+              </div>
+              <div class="col-6">
+                <div class="text-muted">总接收</div>
+                <div class="fw-semibold">{{ socketStore.networkInfo.total_received || '-' }}</div>
+              </div>
+              <div class="col-6">
+                <div class="text-muted">发送包数</div>
+                <div class="fw-semibold">{{ formatNumber(socketStore.networkInfo.packets_sent) }}</div>
+              </div>
+              <div class="col-6">
+                <div class="text-muted">接收包数</div>
+                <div class="fw-semibold">{{ formatNumber(socketStore.networkInfo.packets_recv) }}</div>
               </div>
             </div>
           </div>
@@ -378,45 +360,41 @@
       </div>
     </div>
 
-    <!-- 系统信息卡片 -->
-    <div class="card mb-3 shadow-sm" v-if="socketStore.systemInfo.os || socketStore.systemStatus?.info?.current_time">
-      <div class="card-header py-3">
-        <h2 class="h6 mb-0 fw-bold">
-          <i class="bi bi-window-stack text-secondary me-2"></i>系统信息
+    <!-- ========== 系统信息 ========== -->
+    <div class="card mb-3 border" v-if="socketStore.systemInfo.os || socketStore.systemStatus?.info?.current_time">
+      <div class="card-header bg-transparent border-bottom py-3">
+        <h2 class="h6 mb-0 fw-bold d-flex align-items-center gap-2">
+          <i class="bi bi-window-stack text-secondary"></i>系统信息
         </h2>
       </div>
-      <div class="card-body">
-        <div class="row g-3">
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">操作系统</div>
-            <div class="fw-semibold">{{ socketStore.systemInfo.os || '-' }}</div>
+      <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">操作系统</span>
+            <span class="fw-semibold">{{ socketStore.systemInfo.os || '-' }}</span>
           </div>
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">系统版本</div>
-            <div class="fw-semibold">{{ socketStore.systemInfo.os_version || '-' }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">系统版本</span>
+            <span class="fw-semibold">{{ socketStore.systemInfo.os_version || '-' }}</span>
           </div>
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">内核版本</div>
-            <div class="fw-semibold">{{ socketStore.systemInfo.kernel || '-' }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">内核版本</span>
+            <span class="fw-semibold">{{ socketStore.systemInfo.kernel || '-' }}</span>
           </div>
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">启动时间</div>
-            <div class="fw-semibold">{{ socketStore.systemInfo.boot_time || '-' }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">启动时间</span>
+            <span class="fw-semibold">{{ socketStore.systemInfo.boot_time || '-' }}</span>
           </div>
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">服务端时间</div>
-            <div class="fw-semibold">{{ socketStore.appInfo.current_time || '-' }}</div>
-          </div>
-          <div class="col-6 col-md-4">
-            <div class="small text-muted mb-1">Socket 客户端ID</div>
-            <div class="fw-semibold font-monospace text-break" style="font-size:0.8rem;">{{ socketStore.clientId || '-' }}</div>
+          <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center py-3">
+            <span class="text-muted small">服务端时间</span>
+            <span class="fw-semibold">{{ socketStore.appInfo.current_time || '-' }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 无数据 / 连接异常卡片 -->
-    <div class="card mb-3 shadow-sm" v-if="!socketStore.systemStatus && socketStore.isConnected">
+    <!-- ========== 加载中 ========== -->
+    <div class="card mb-3 border" v-if="!socketStore.systemStatus && socketStore.isConnected">
       <div class="card-body text-center py-5">
         <div class="spinner-border text-primary mb-3" style="width: 2.5rem; height: 2.5rem;" role="status">
           <span class="visually-hidden">加载中...</span>
@@ -425,14 +403,14 @@
       </div>
     </div>
 
-    <div class="card mb-3 shadow-sm border-danger" v-if="!socketStore.isConnected && !socketStore.isConnecting">
+    <!-- ========== 未连接 ========== -->
+    <div class="card mb-3 border border-danger" v-if="!socketStore.isConnected && !socketStore.isConnecting">
       <div class="card-body text-center py-5 px-4">
         <i class="bi bi-plug text-secondary display-4 d-block mb-3"></i>
         <h3 class="h5 mb-3 fw-bold">Socket 未连接</h3>
         <p class="text-muted mb-4">无法实时获取服务器状态，请检查网络或手动重连</p>
         <button class="btn btn-primary px-4" @click="handleReconnect">
-          <i class="bi bi-arrow-repeat me-2"></i>
-          重新连接
+          <i class="bi bi-arrow-repeat me-2"></i>重新连接
         </button>
       </div>
     </div>
@@ -560,6 +538,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 状态指示灯 */
 .status-indicator {
   width: 10px;
   height: 10px;

@@ -163,6 +163,11 @@
                     <i class="bi bi-palette me-1"></i>站点配置
                   </router-link>
                 </li>
+                <li v-if="isAdmin">
+                  <router-link class="dropdown-item" to="/status">
+                    <i class="bi bi-activity me-1"></i>服务器状态
+                  </router-link>
+                </li>
                 <li>
                   <button class="dropdown-item" @click="clearCache()">
                     <i class="bi bi-trash3 me-1"></i>清除缓存
@@ -358,6 +363,9 @@
             </router-link>
             <router-link v-if="isAdmin" class="btn btn-outline-secondary text-center" to="/functions" @click="closeSidebar">
               <i class="bi bi-palette me-1"></i>主题设置
+            </router-link>
+            <router-link v-if="isAdmin" class="btn btn-outline-secondary text-center" to="/status" @click="closeSidebar">
+              <i class="bi bi-activity me-1"></i>服务器状态
             </router-link>
             <button class="btn btn-outline-secondary text-center" type="button" @click="clearCache()">
               <i class="bi bi-trash3 me-1"></i>清除缓存

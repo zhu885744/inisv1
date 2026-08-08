@@ -1,21 +1,21 @@
 <template>
-    <i-nav ref="navRef"></i-nav>
-    <div class="container width">
-      <router-view key="$route.fullPath" v-slot="{ Component }">
-        <transition name="slide-fade" mode="out-in">
-          <div class="router-view-wrapper">
-            <component :is="Component" />
-          </div>
-        </transition>
-      </router-view>
-    </div>
+  <i-nav ref="navRef"></i-nav>
+  <div class="container width">
+    <router-view v-slot="{ Component, route }">
+      <transition name="slide-fade" mode="out-in">
+        <div :key="route.fullPath" class="router-view-wrapper">
+          <component :is="Component" />
+        </div>
+      </transition>
+    </router-view>
+  </div>
   <i-footer></i-footer>
   <i-float-buttons></i-float-buttons>
   <upgrade-page></upgrade-page>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import upgradePage from '@/comps/upgrade/page.vue'
 import iNav from '@/views/index/layout/nav.vue'
 import iFooter from '@/views/index/layout/footer.vue'
@@ -95,10 +95,8 @@ const injectCustomCode = async () => {
 }
 
 const initSocketConnection = () => {
-  // 等待 baseURL 就绪后再连接
   const tryConnect = (attempt = 0) => {
     const baseUrl = request.getBaseURL()
-    // baseURL 已就绪或已达到最大等待次数（50次 * 100ms = 5秒）
     if (baseUrl || attempt >= 50) {
       socketStore.init()
       return
@@ -110,7 +108,6 @@ const initSocketConnection = () => {
 
 const initAfterMount = async () => {
   await injectCustomCode()
-  // 全局常态化 Socket 连接
   initSocketConnection()
 }
 
@@ -124,33 +121,31 @@ onMounted(async () => {
 .fade-leave-active {
   transition: opacity 0.25s ease;
 }
-
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
 }
 
+/* 缩放 + 左右滑动淡入淡出 */
 .slide-fade-enter-active {
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
-
 .slide-fade-leave-active {
-  transition: all 0.25s ease-in;
+  transition: all 0.35s ease-in;
 }
-
 .slide-fade-enter-from {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(-30px); /* 从左边来 */
 }
-
 .slide-fade-leave-to {
   opacity: 0;
-  transform: translateX(-20px);
+  transform: translateX(30px);  /* 往右边走 */
 }
 
 .router-view-wrapper {
   width: 100%;
   min-height: calc(100vh - 200px);
+  will-change: transform, opacity;
 }
 
 @media (prefers-reduced-motion: reduce) {
