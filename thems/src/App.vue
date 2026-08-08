@@ -21,9 +21,11 @@ import iNav from '@/views/index/layout/nav.vue'
 import iFooter from '@/views/index/layout/footer.vue'
 import iFloatButtons from '@/comps/custom/i-float-buttons.vue'
 import { useCommStore } from '@/store/comm'
+import { useSocketStore } from '@/store/socket'
 import { request } from '@/utils/network'
 
 const store = useCommStore()
+const socketStore = useSocketStore()
 const customCodeInjected = ref(false)
 
 const injectCustomCode = async () => {
@@ -92,8 +94,24 @@ const injectCustomCode = async () => {
   }
 }
 
+const initSocketConnection = () => {
+  // 等待 baseURL 就绪后再连接
+  const tryConnect = (attempt = 0) => {
+    const baseUrl = request.getBaseURL()
+    // baseURL 已就绪或已达到最大等待次数（50次 * 100ms = 5秒）
+    if (baseUrl || attempt >= 50) {
+      socketStore.init()
+      return
+    }
+    setTimeout(() => tryConnect(attempt + 1), 100)
+  }
+  tryConnect()
+}
+
 const initAfterMount = async () => {
   await injectCustomCode()
+  // 全局常态化 Socket 连接
+  initSocketConnection()
 }
 
 onMounted(async () => {

@@ -176,6 +176,13 @@ const routes = [
     component: () => import('@/views/index/pages/functions.vue'),
     meta: { title: '主题设置', requiresAuth: true, isAdmin: true }
   },
+  // ========== 服务器状态路由 ==========
+  {
+    path: '/status',
+    name: '服务器状态',
+    component: () => import('@/views/index/pages/status.vue'),
+    meta: { title: '服务器状态', requiresAuth: true, isAdmin: true }
+  },
   // ========== 404兜底路由（必须放在最后） ==========
   {
     path: '/:pathMatch(.*)*',
