@@ -21,7 +21,6 @@ inis 是一款基于 Go 语言开发的高性能内容管理系统（CMS），�
 
 ## 快速开始
 后端主程序开源仓库：[inisv1](https://github.com/zhu885744/inisv1)<br>
-默认主题Github开源仓库：[xiao-inisv1-vue](https://github.com/zhu885744/xiao-inisv1-vue)
 
 ### 开发环境运行
 #### 步骤 1：安装依赖
@@ -99,9 +98,6 @@ bee pack -ba="-ldflags -s -w"
 | 数据库连接失败 | 数据库配置错误 | 检查数据库连接信息和权限 |
 | 404 错误 | 主题文件未部署 | 确保主题文件已正确部署到 `public` 目录 |
 | 502 错误 | 应用未运行或端口错误 | 检查应用运行状态和 Nginx 配置 |
-
-> 系统默认提供一个默认主题，内置完整的管理后台
-> Github开源仓库：[xiao-inisv1-vue](https://github.com/zhu885744/xiao-inisv1-vue)
 
 ## 系统架构
 
@@ -309,7 +305,8 @@ inisv1/
 ├── inis.sh                 # Linux 安装脚本
 ├── install.lock            # 安装锁文件（标记是否完成初始化）
 ├── main.go                 # 程序入口文件
-│
+├── themes/                 # 主题目录，包含所有主题文件
+├── admin/                  # 完整的管理后台文件
 ├── config/                 # 配置文件目录
 │   ├── .gitignore          # 配置目录的 Git 忽略规则（忽略 sms.toml 等敏感配置）
 │   ├── app.go              # 应用配置核心逻辑（启动服务、读取配置等）
@@ -373,9 +370,6 @@ inisv1/
 │       │   ├── bilibili/   # B站表情包（webp 格式）
 │       │   ├── qq/         # QQ 表情包（gif 格式）
 │       │   └── tiktok/     # 抖音表情包（png 格式）
-│       └── rand/           # 随机资源
-│           ├── avatar/     # 默认头像
-│           └── imgs.txt    # 随机图片列表
 │
 └── app/                    # 核心业务代码目录
     │
