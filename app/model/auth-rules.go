@@ -167,6 +167,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=rand&type=common",
 				"path=count&type=common",
 				"path=column&type=common",
+				"path=blackroom&type=common&name=小黑屋公示",
 			},
 			"PUT": {
 				"restore",
@@ -174,9 +175,14 @@ func createAuthRules() (result []AuthRules) {
 				"path=email&type=login&name=修改邮箱",
 				"path=phone&type=login&name=修改手机号",
 				"path=status&type=login&name=修改用户状态",
+				"path=ban&name=封禁用户",
+				"path=unban&name=解封用户",
+				"path=appeal-handle&name=处理申诉",
 			},
 			"POST": {
 				"create", "save",
+				"path=appeal&type=login&name=用户申诉",
+				"path=appeal-public&type=common&name=封禁用户公开申诉",
 			},
 			"DELETE": {"remove", "delete", "clear", "path=destroy&type=login&name=注销账户"},
 		},

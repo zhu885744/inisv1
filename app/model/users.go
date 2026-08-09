@@ -28,6 +28,11 @@ type Users struct {
 	Exp         int    `gorm:"type:int(32); comment:经验值; default:0;" json:"exp"`
 	Source      string `gorm:"size:32; default:'default'; comment:注册来源;" json:"source"`
 	Remark      string `gorm:"comment:备注; default:Null;" json:"remark"`
+	// 封禁相关字段
+	BanCount     int   `gorm:"type:int(32); default:0; comment:累计封禁次数;" json:"ban_count"`
+	CurrentBanId int   `gorm:"type:int(32); default:0; comment:当前生效封禁记录ID;" json:"current_ban_id"`
+	LastBanAt    int64 `gorm:"comment:最后封禁时间; default:0;" json:"last_ban_at"`
+	Restrictions int   `gorm:"type:int(32); default:0; comment:权限限制位掩码（0=无限制）;" json:"restrictions"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -201,19 +206,21 @@ func (this *Users) Rules(uid any) (slice []any) {
 // result - 返回结果
 func (this *Users) result() (result map[string]any) {
 
-	var auth, level any
+	var auth, level, ban any
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(3)
 
 	go this.auth(&wg, &auth)
 	go this.level(&wg, &level)
+	go this.banInfo(&wg, &ban)
 
 	wg.Wait()
 
 	return map[string]any{
 		"auth":  auth,
 		"level": level,
+		"ban":   ban,
 	}
 }
 
@@ -311,4 +318,31 @@ func (this *Users) Destroy(uid any) {
 	for _, table := range tables {
 		go facade.DB.Model(&table).WithTrashed().Where("uid", uid).Delete()
 	}
+}
+
+// banInfo - 解析用户封禁信息
+func (this *Users) banInfo(wg *sync.WaitGroup, result *any) {
+
+	defer wg.Done()
+
+	banInfo := map[string]any{
+		"is_banned":    false,
+		"ban_count":    this.BanCount,
+		"restrictions": this.Restrictions,
+		"record":       nil,
+	}
+
+	// 检查是否有当前生效的封禁记录
+	if this.CurrentBanId > 0 {
+		record, _ := facade.DB.Model(&UserBanRecords{}).Find(this.CurrentBanId)
+		if !utils.Is.Empty(record) {
+			banRecord := cast.ToStringMap(record)
+			if cast.ToInt(banRecord["status"]) == BanStatusActive {
+				banInfo["is_banned"] = true
+				banInfo["record"] = record
+			}
+		}
+	}
+
+	*result = banInfo
 }

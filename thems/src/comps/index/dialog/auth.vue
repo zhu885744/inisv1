@@ -1189,6 +1189,16 @@ const method = {
                 return
             }
 
+            // 封禁检查（403）
+            if (code === 403 && msg.includes('封禁')) {
+                showNotification(msg, 'error')
+                // 显示申诉入口
+                setTimeout(() => {
+                    toast.warning('如对封禁有异议，可前往 <a href="/appeal">申诉页面</a> 提交申诉')
+                }, 500)
+                return
+            }
+
             method.animation()
             showNotification(msg || '登录失败，请检查账号密码', 'error')
             method.clearCache()

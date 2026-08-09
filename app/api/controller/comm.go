@@ -180,6 +180,33 @@ func (this *Comm) login(ctx *gin.Context) {
 		return
 	}
 
+	// 检查账号是否处于封禁状态（限制登录）
+	if table.Restrictions&model.BanTypeLogin != 0 && table.CurrentBanId > 0 {
+		banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(table.CurrentBanId)
+		if !utils.Is.Empty(banRecord) {
+			banMap := cast.ToStringMap(banRecord)
+			if cast.ToInt(banMap["status"]) == model.BanStatusActive {
+				reason := cast.ToString(banMap["reason"])
+				duration := cast.ToInt(banMap["duration"])
+				expiresAt := cast.ToInt64(banMap["expires_at"])
+
+				msg := fmt.Sprintf("您的账号已被封禁！原因：%s", reason)
+				if duration > 0 {
+					remainingDays := (expiresAt - time.Now().Unix()) / 86400
+					if remainingDays > 0 {
+						msg += fmt.Sprintf("，剩余 %d 天", remainingDays)
+					} else {
+						msg += "，将于今日解封"
+					}
+				} else {
+					msg = fmt.Sprintf("您的账号已被永久封禁！原因：%s", reason)
+				}
+				this.json(ctx, nil, facade.Lang(ctx, msg), 403)
+				return
+			}
+		}
+	}
+
 	if utils.Is.Empty(table.Password) {
 		this.json(ctx, nil, facade.Lang(ctx, "该帐号未设置密码，请切换登录方式！"), 400)
 		return

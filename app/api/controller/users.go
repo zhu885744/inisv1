@@ -25,14 +25,15 @@ func (this *Users) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":    this.one,
-		"all":    this.all,
-		"sum":    this.sum,
-		"min":    this.min,
-		"max":    this.max,
-		"rand":   this.rand,
-		"count":  this.count,
-		"column": this.column,
+		"one":       this.one,
+		"all":       this.all,
+		"sum":       this.sum,
+		"min":       this.min,
+		"max":       this.max,
+		"rand":      this.rand,
+		"count":     this.count,
+		"column":    this.column,
+		"blackroom": this.blackroom,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -49,8 +50,10 @@ func (this *Users) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"save":   this.save,
-		"create": this.create,
+		"save":          this.save,
+		"create":        this.create,
+		"appeal":        this.appeal,
+		"appeal-public": this.appealPublic,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -69,11 +72,14 @@ func (this *Users) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"update":  this.update,
-		"restore": this.restore,
-		"email":   this.email,
-		"phone":   this.phone,
-		"status":  this.status, // 新增：状态修改接口
+		"update":        this.update,
+		"restore":       this.restore,
+		"email":         this.email,
+		"phone":         this.phone,
+		"status":        this.status,
+		"ban":           this.ban,
+		"unban":         this.unban,
+		"appeal-handle": this.appealHandle,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -1211,4 +1217,753 @@ func (this *Users) destroy(ctx *gin.Context) {
 	facade.Log.Info(map[string]any{"user_id": user.Id, "email": user.Email, "phone": user.Phone}, "用户注销账户")
 
 	this.json(ctx, nil, facade.Lang(ctx, "注销成功！"), 200)
+}
+
+// ========================= 封禁系统 =========================
+
+// ban 管理员封禁用户
+func (this *Users) ban(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	// 权限检查 - 仅管理员
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	if utils.Is.Empty(params["uid"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid"), 400)
+		return
+	}
+
+	uid := cast.ToInt(params["uid"])
+	if uid == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止封禁系统管理员！"), 403)
+		return
+	}
+
+	// 检查目标用户是否存在
+	targetUser, _ := facade.DB.Model(&model.Users{}).Find(uid)
+	if utils.Is.Empty(targetUser) {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
+		return
+	}
+	targetMap := cast.ToStringMap(targetUser)
+
+	// 检查是否已在封禁中
+	if cast.ToInt(targetMap["current_ban_id"]) > 0 {
+		existRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(cast.ToInt(targetMap["current_ban_id"]))
+		if !utils.Is.Empty(existRecord) {
+			if cast.ToInt(cast.ToStringMap(existRecord)["status"]) == model.BanStatusActive {
+				this.json(ctx, nil, facade.Lang(ctx, "该用户已在封禁中，请先解封后再操作！"), 400)
+				return
+			}
+		}
+	}
+
+	// 封禁类型位掩码，默认全封禁
+	banType := cast.ToInt(params["ban_type"])
+	if banType <= 0 || banType > 31 {
+		banType = model.BanTypeAll
+	}
+
+	// 时长：0=永久，其他按天数；若未提供且非永久，启用手动指定或自动梯度
+	duration := cast.ToInt(params["duration"])
+	autoGradient := cast.ToBool(params["auto_gradient"])
+
+	if duration == 0 && !autoGradient && !utils.Is.Empty(params["duration"]) {
+		// 明确指定了 0 = 永久
+	} else if autoGradient || utils.Is.Empty(params["duration"]) {
+		// 自动梯度封禁：根据累计封禁次数决定时长
+		// 首次1天 二次7天 三次15天 四次30天 五次及以上永久
+		banCount := cast.ToInt(targetMap["ban_count"])
+		switch banCount {
+		case 0:
+			duration = 1 // 首次1天
+		case 1:
+			duration = 7 // 二次7天
+		case 2:
+			duration = 15 // 三次15天
+		case 3:
+			duration = 30 // 四次30天
+		default:
+			duration = 0 // 五次及以上永久
+		}
+	}
+
+	// 封禁原因
+	reason := cast.ToString(params["reason"])
+	if utils.Is.Empty(reason) {
+		reason = "违反社区规定"
+	}
+
+	// 证据
+	evidence := cast.ToString(params["evidence"])
+
+	// 操作人信息
+	operator := this.user(ctx)
+	operatorIp := ctx.ClientIP()
+	operatorUa := ctx.Request.UserAgent()
+
+	now := time.Now().Unix()
+	violationNum := cast.ToInt(targetMap["ban_count"]) + 1
+
+	// 计算过期时间
+	var expiresAt int64
+	if duration > 0 {
+		expiresAt = now + int64(duration)*86400
+	}
+
+	// 创建封禁记录
+	record := model.UserBanRecords{
+		Uid:          uid,
+		OperatorId:   operator.Id,
+		BanType:      banType,
+		Reason:       reason,
+		Evidence:     evidence,
+		Duration:     duration,
+		BanTime:      now,
+		ExpiresAt:    expiresAt,
+		ViolationNum: violationNum,
+		Status:       model.BanStatusActive,
+		OperatorIp:   operatorIp,
+		OperatorUa:   operatorUa,
+		CreateTime:   now,
+		UpdateTime:   now,
+	}
+
+	// 事务：创建记录 + 更新用户状态
+	_, err := facade.DB.Model(&record).Create(&record)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 更新用户封禁信息
+	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
+	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+		"ban_count":      violationNum,
+		"current_ban_id": record.Id,
+		"last_ban_at":    now,
+		"restrictions":   banType,
+	})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 清除目标用户的缓存，强制下线
+	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
+	facade.Cache.DelPrefix(fmt.Sprintf("[token][%v]", tokenName))
+
+	// 删除列表缓存
+	go this.delCache()
+
+	// 审计日志
+	facade.Log.Info(map[string]any{
+		"uid":           uid,
+		"operator_id":   operator.Id,
+		"ban_type":      banType,
+		"reason":        reason,
+		"duration":      duration,
+		"expires_at":    expiresAt,
+		"violation_num": violationNum,
+		"operator_ip":   operatorIp,
+		"operator_ua":   operatorUa,
+	}, "管理员封禁用户")
+
+	this.json(ctx, gin.H{"id": record.Id}, facade.Lang(ctx, "封禁成功！"), 200)
+}
+
+// unban 管理员解封用户
+func (this *Users) unban(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	// 权限检查 - 仅管理员
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	uid := cast.ToInt(params["uid"])
+	recordId := cast.ToInt(params["record_id"])
+
+	if uid == 0 && recordId == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid 或 record_id"), 400)
+		return
+	}
+
+	// 如果提供了 record_id，直接查找记录
+	if recordId > 0 {
+		this.unbanByRecordId(ctx, recordId)
+		return
+	}
+
+	// 根据 uid 查找当前生效的封禁记录
+	targetUser, _ := facade.DB.Model(&model.Users{}).Find(uid)
+	if utils.Is.Empty(targetUser) {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
+		return
+	}
+	targetMap := cast.ToStringMap(targetUser)
+	currentBanId := cast.ToInt(targetMap["current_ban_id"])
+
+	if currentBanId == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "该用户当前未被封禁！"), 400)
+		return
+	}
+
+	this.unbanByRecordId(ctx, currentBanId)
+}
+
+// unbanByRecordId 根据封禁记录ID解封
+func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
+
+	operator := this.user(ctx)
+	now := time.Now().Unix()
+
+	// 查找封禁记录
+	record, _ := facade.DB.Model(&model.UserBanRecords{}).Find(recordId)
+	if utils.Is.Empty(record) {
+		this.json(ctx, nil, facade.Lang(ctx, "封禁记录不存在！"), 404)
+		return
+	}
+	recordMap := cast.ToStringMap(record)
+
+	if cast.ToInt(recordMap["status"]) != model.BanStatusActive {
+		this.json(ctx, nil, facade.Lang(ctx, "该封禁记录非生效中状态！"), 400)
+		return
+	}
+
+	uid := cast.ToInt(recordMap["uid"])
+
+	// 更新封禁记录状态
+	_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
+		"status":     model.BanStatusRevoked,
+		"unban_time": now,
+	})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 恢复用户状态
+	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+		"current_ban_id": 0,
+		"restrictions":   0,
+	})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 清除用户缓存
+	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
+	go this.delCache()
+
+	// 审计日志
+	facade.Log.Info(map[string]any{
+		"uid":         uid,
+		"record_id":   recordId,
+		"operator_id": operator.Id,
+		"operator_ip": ctx.ClientIP(),
+		"operator_ua": ctx.Request.UserAgent(),
+	}, "管理员解封用户")
+
+	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "解封成功！"), 200)
+}
+
+// blackroom 小黑屋公示 - 公开接口
+func (this *Users) blackroom(ctx *gin.Context) {
+
+	code := 204
+	msg := []string{"无数据！", ""}
+	var data any
+
+	params := this.params(ctx, map[string]any{
+		"page":  1,
+		"order": "create_time desc",
+	})
+
+	page := cast.ToInt(params["page"])
+	limit := this.meta.limit(ctx)
+
+	var records []model.UserBanRecords
+	mold := facade.DB.Model(&records)
+	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
+
+	cacheName := this.cache.name(ctx)
+	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
+		msg[1] = "（来自缓存）"
+		data = facade.Cache.Get(cacheName)
+	} else {
+		count, _ := mold.Count()
+		items, _ := mold.Order(params["order"]).Limit(limit).Page(page).Select()
+
+		// 脱敏处理：用户昵称脱敏
+		dataList := cast.ToSlice(items)
+		for i, val := range dataList {
+			itemMap := cast.ToStringMap(val)
+			// 对封禁用户昵称脱敏
+			if result, ok := itemMap["result"].(map[string]any); ok {
+				if user, ok := result["user"].(map[string]any); ok {
+					if nickname, ok := user["nickname"].(string); ok && nickname != "" {
+						runes := []rune(nickname)
+						if len(runes) > 2 {
+							user["nickname"] = string(runes[0]) + "***" + string(runes[len(runes)-1])
+						} else if len(runes) > 1 {
+							user["nickname"] = string(runes[0]) + "*"
+						}
+						result["user"] = user
+						itemMap["result"] = result
+						dataList[i] = itemMap
+					}
+				}
+			}
+		}
+
+		data = gin.H{
+			"data":  dataList,
+			"count": count,
+			"page":  math.Ceil(float64(count) / float64(limit)),
+		}
+
+		if this.cache.enable(ctx) {
+			go facade.Cache.Set(cacheName, data)
+		}
+	}
+
+	if !utils.Is.Empty(data) {
+		code = 200
+		msg[0] = "数据请求成功！"
+	}
+
+	// 如果 data 是 gin.H，直接返回
+	if h, ok := data.(gin.H); ok {
+		this.json(ctx, h, facade.Lang(ctx, strings.Join(msg, "")), code)
+		return
+	}
+
+	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// appeal 用户申诉
+func (this *Users) appeal(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	user := this.user(ctx)
+
+	if user.Id == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	recordId := cast.ToInt(params["record_id"])
+	appealContent := cast.ToString(params["content"])
+
+	if recordId == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "record_id"), 400)
+		return
+	}
+
+	if utils.Is.Empty(appealContent) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "申诉内容"), 400)
+		return
+	}
+
+	// 检查封禁记录是否存在且属于当前用户
+	record, _ := facade.DB.Model(&model.UserBanRecords{}).Find(recordId)
+	if utils.Is.Empty(record) {
+		this.json(ctx, nil, facade.Lang(ctx, "封禁记录不存在！"), 404)
+		return
+	}
+	recordMap := cast.ToStringMap(record)
+
+	if cast.ToInt(recordMap["uid"]) != user.Id {
+		this.json(ctx, nil, facade.Lang(ctx, "无权操作此封禁记录！"), 403)
+		return
+	}
+
+	// 只有生效中的封禁才能申诉
+	if cast.ToInt(recordMap["status"]) != model.BanStatusActive {
+		this.json(ctx, nil, facade.Lang(ctx, "当前封禁状态不允许申诉！"), 400)
+		return
+	}
+
+	// 五次及以上违规（永久封禁）禁止申诉
+	if cast.ToInt(recordMap["violation_num"]) >= 5 {
+		this.json(ctx, nil, facade.Lang(ctx, "该封禁为永久封禁且违规次数已达上限，禁止申诉！"), 403)
+		return
+	}
+
+	// 更新封禁记录为申诉中
+	now := time.Now().Unix()
+	_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
+		"status":         model.BanStatusAppealed,
+		"appeal_content": appealContent,
+		"appeal_time":    now,
+	})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 清除缓存
+	facade.Cache.Del(fmt.Sprintf("user[%v]", user.Id))
+	go this.delCache()
+
+	// 审计日志
+	facade.Log.Info(map[string]any{
+		"uid":       user.Id,
+		"record_id": recordId,
+		"content":   appealContent,
+	}, "用户提交封禁申诉")
+
+	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已提交，请耐心等待管理员审核！"), 200)
+}
+
+// appealHandle 管理员处理申诉（通过或驳回）
+func (this *Users) appealHandle(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	// 权限检查 - 仅管理员
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	recordId := cast.ToInt(params["record_id"])
+	action := cast.ToString(params["action"]) // "approve" | "reject"
+	reply := cast.ToString(params["reply"])   // 申诉回复（驳回时必填）
+
+	if recordId == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "record_id"), 400)
+		return
+	}
+
+	if action != "approve" && action != "reject" {
+		this.json(ctx, nil, facade.Lang(ctx, "action 必须为 approve 或 reject！"), 400)
+		return
+	}
+
+	if action == "reject" && utils.Is.Empty(reply) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "驳回理由"), 400)
+		return
+	}
+
+	// 查找封禁记录
+	record, _ := facade.DB.Model(&model.UserBanRecords{}).Find(recordId)
+	if utils.Is.Empty(record) {
+		this.json(ctx, nil, facade.Lang(ctx, "封禁记录不存在！"), 404)
+		return
+	}
+	recordMap := cast.ToStringMap(record)
+
+	// 只有申诉中状态才能处理
+	if cast.ToInt(recordMap["status"]) != model.BanStatusAppealed {
+		this.json(ctx, nil, facade.Lang(ctx, "当前封禁记录非申诉中状态！"), 400)
+		return
+	}
+
+	now := time.Now().Unix()
+	operator := this.user(ctx)
+	uid := cast.ToInt(recordMap["uid"])
+
+	if action == "approve" {
+		// 申诉通过：更新记录状态 + 恢复用户
+		_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
+			"status":            model.BanStatusAppealApproved,
+			"unban_time":        now,
+			"appeal_reply":      reply,
+			"appeal_reply_time": now,
+		})
+		if err != nil {
+			this.json(ctx, nil, err.Error(), 400)
+			return
+		}
+
+		// 恢复用户状态
+		_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+			"current_ban_id": 0,
+			"restrictions":   0,
+		})
+		if err != nil {
+			this.json(ctx, nil, err.Error(), 400)
+			return
+		}
+
+		// 清除缓存
+		facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
+		go this.delCache()
+
+		// 审计日志
+		facade.Log.Info(map[string]any{
+			"uid":         uid,
+			"record_id":   recordId,
+			"operator_id": operator.Id,
+			"action":      "approve",
+			"reply":       reply,
+		}, "管理员通过申诉")
+
+		this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已通过，用户已解封！"), 200)
+
+	} else {
+		// 申诉驳回：仅更新记录状态，封禁继续生效
+		_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
+			"status":            model.BanStatusAppealRejected,
+			"appeal_reply":      reply,
+			"appeal_reply_time": now,
+		})
+		if err != nil {
+			this.json(ctx, nil, err.Error(), 400)
+			return
+		}
+
+		// 审计日志
+		facade.Log.Info(map[string]any{
+			"uid":         uid,
+			"record_id":   recordId,
+			"operator_id": operator.Id,
+			"action":      "reject",
+			"reply":       reply,
+		}, "管理员驳回申诉")
+
+		this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已驳回！"), 200)
+	}
+}
+
+// appealPublic 公开申诉接口（被封禁用户无需登录即可申诉）
+// 两阶段流程：
+//   1. 不传 code：发送验证码到账号绑定的邮箱/手机号
+//   2. 传 code + content：验证验证码并提交申诉
+func (this *Users) appealPublic(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	account := cast.ToString(params["account"])
+
+	if utils.Is.Empty(account) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "账号"), 400)
+		return
+	}
+
+	// 通过账号查找用户（支持邮箱、手机号、账号名）
+	table := model.Users{}
+	item, _ := facade.DB.Model(&table).Or([]any{
+		[]any{"email", "=", account},
+		[]any{"phone", "=", account},
+		[]any{"account", "=", account},
+	}).Find()
+
+	if utils.Is.Empty(item) {
+		this.json(ctx, nil, facade.Lang(ctx, "账号与封禁记录不匹配！"), 403)
+		return
+	}
+	userMap := cast.ToStringMap(item)
+	uid := cast.ToInt(userMap["id"])
+
+	// 查找用户当前生效的封禁记录
+	if cast.ToInt(userMap["current_ban_id"]) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "该账号当前未被封禁！"), 400)
+		return
+	}
+
+	banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(cast.ToInt(userMap["current_ban_id"]))
+	if utils.Is.Empty(banRecord) {
+		this.json(ctx, nil, facade.Lang(ctx, "封禁记录不存在！"), 404)
+		return
+	}
+	banMap := cast.ToStringMap(banRecord)
+	recordId := cast.ToInt(banMap["id"])
+
+	// 只有生效中的封禁才能申诉
+	if cast.ToInt(banMap["status"]) != model.BanStatusActive {
+		this.json(ctx, nil, facade.Lang(ctx, "当前封禁状态不允许申诉！"), 400)
+		return
+	}
+
+	// 五次及以上禁止申诉
+	if cast.ToInt(banMap["violation_num"]) >= 5 {
+		this.json(ctx, nil, facade.Lang(ctx, "该封禁为永久封禁且违规次数已达上限，禁止申诉！"), 403)
+		return
+	}
+
+	// 确定联系方式（优先邮箱，其次手机号）
+	var social string
+	var contact string
+	userEmail := cast.ToString(userMap["email"])
+	userPhone := cast.ToString(userMap["phone"])
+	if utils.Is.Email(userEmail) {
+		social = "email"
+		contact = userEmail
+	} else if utils.Is.Phone(userPhone) {
+		social = "phone"
+		contact = userPhone
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "该账号未绑定邮箱或手机号，无法验证身份！"), 400)
+		return
+	}
+
+	drive := utils.Ternary(social == "email", "email", "sms")
+	drives := cast.ToStringMap(facade.SMSToml.Get("drive"))
+	if utils.Is.Empty(drives[drive]) {
+		this.json(ctx, nil, facade.Lang(ctx, "管理员未开启%v服务，无法发送验证码！", utils.Ternary(social == "email", "邮箱", "短信")), 400)
+		return
+	}
+
+	clientIP := ctx.ClientIP()
+
+	// 缓存键名
+	cacheName := fmt.Sprintf("[appeal][%v=%v]", social, contact)
+	freqAccount := fmt.Sprintf("appeal-freq-account-%v", contact)
+	freqIP := fmt.Sprintf("appeal-freq-ip-%v", clientIP)
+	dailyAccount := fmt.Sprintf("appeal-daily-account-%v", contact)
+	dailyIP := fmt.Sprintf("appeal-daily-ip-%v", clientIP)
+	submitAccount := fmt.Sprintf("appeal-submit-account-%v", contact)
+	submitIP := fmt.Sprintf("appeal-submit-ip-%v", clientIP)
+	codeErrKey := fmt.Sprintf("appeal-code-err-%v", contact)
+
+	// ========== 阶段一：发送验证码 ==========
+	if utils.Is.Empty(params["code"]) {
+
+		// 账号维度发送间隔（60秒）
+		if lastSend := facade.Cache.Get(freqAccount); !utils.Is.Empty(lastSend) {
+			if time.Now().Unix()-cast.ToInt64(lastSend) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// IP 维度发送间隔（60秒）
+		if lastSend := facade.Cache.Get(freqIP); !utils.Is.Empty(lastSend) {
+			if time.Now().Unix()-cast.ToInt64(lastSend) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 账号每日发送上限（5次）
+		if cast.ToInt(facade.Cache.Get(dailyAccount)) >= 5 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
+		// IP 每日发送上限（10次）
+		if cast.ToInt(facade.Cache.Get(dailyIP)) >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
+		sms := facade.NewSMS(drives[drive]).VerifyCode(contact)
+		if sms.Error != nil {
+			if drive == "sms" && (strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL")) {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+				return
+			}
+			this.json(ctx, nil, sms.Error.Error(), 400)
+			return
+		}
+
+		// 缓存验证码 - 5分钟
+		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 清除验证码错误计数
+		facade.Cache.Del(codeErrKey)
+		// 发送间隔 - 60秒
+		go facade.Cache.Set(freqAccount, time.Now().Unix(), time.Second*60)
+		go facade.Cache.Set(freqIP, time.Now().Unix(), time.Second*60)
+		// 每日计数 - 24小时
+		go facade.Cache.Set(dailyAccount, cast.ToInt(facade.Cache.Get(dailyAccount))+1, time.Hour*24)
+		go facade.Cache.Set(dailyIP, cast.ToInt(facade.Cache.Get(dailyIP))+1, time.Hour*24)
+
+		var contactMasked string
+		if social == "email" {
+			contactMasked = facade.Comm.MaskEmail(contact)
+		} else {
+			contactMasked = facade.Comm.MaskPhone(contact)
+		}
+		msg := fmt.Sprintf("验证码已发送至您的%v：%s，请注意查收！",
+			utils.Ternary(social == "email", "邮箱", "手机"), contactMasked)
+		this.json(ctx, gin.H{
+			"contact_type":   social,
+			"contact_masked": contactMasked,
+		}, facade.Lang(ctx, msg), 201)
+		return
+	}
+
+	// ========== 阶段二：验证并提交申诉 ==========
+	appealContent := cast.ToString(params["content"])
+	if utils.Is.Empty(appealContent) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "申诉内容"), 400)
+		return
+	}
+
+	// 验证码错误次数上限（5次后需重新发送）
+	if cast.ToInt(facade.Cache.Get(codeErrKey)) >= 5 {
+		this.json(ctx, nil, facade.Lang(ctx, "验证码错误次数过多，请重新发送验证码！"), 400)
+		return
+	}
+
+	// 验证验证码
+	cacheCode := facade.Cache.Get(cacheName)
+	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
+		go facade.Cache.Set(codeErrKey, cast.ToInt(facade.Cache.Get(codeErrKey))+1, 5*time.Minute)
+		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+		return
+	}
+
+	// 提交频率限制（账号维度，每小时3次）
+	if cast.ToInt(facade.Cache.Get(submitAccount)) >= 3 {
+		this.json(ctx, nil, facade.Lang(ctx, "申诉提交过于频繁，请稍后再试！"), 400)
+		return
+	}
+
+	// 提交频率限制（IP维度，每小时5次）
+	if cast.ToInt(facade.Cache.Get(submitIP)) >= 5 {
+		this.json(ctx, nil, facade.Lang(ctx, "申诉提交过于频繁，请稍后再试！"), 400)
+		return
+	}
+
+	// 通过 status 条件更新限制每条封禁记录仅可申诉一次
+	now := time.Now().Unix()
+	tx, err := facade.DB.Model(&model.UserBanRecords{}).
+		Where("id", recordId).
+		Where("status", model.BanStatusActive).
+		Update(map[string]any{
+			"status":         model.BanStatusAppealed,
+			"appeal_content": appealContent,
+			"appeal_time":    now,
+		})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+	if tx.RowsAffected == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "该封禁记录已被处理，无法重复申诉！"), 400)
+		return
+	}
+
+	// 清理验证码相关缓存
+	go facade.Cache.Del(cacheName)
+	go facade.Cache.Del(codeErrKey)
+
+	// 更新提交频率
+	go facade.Cache.Set(submitAccount, cast.ToInt(facade.Cache.Get(submitAccount))+1, time.Hour)
+	go facade.Cache.Set(submitIP, cast.ToInt(facade.Cache.Get(submitIP))+1, time.Hour)
+
+	// 清除用户缓存
+	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
+	go this.delCache()
+
+	// 审计日志
+	facade.Log.Info(map[string]any{
+		"uid":       uid,
+		"record_id": recordId,
+		"account":   account,
+		"content":   appealContent,
+		"ip":        clientIP,
+	}, "被封禁用户通过公开接口提交申诉")
+
+	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已提交，请耐心等待管理员审核！"), 200)
 }

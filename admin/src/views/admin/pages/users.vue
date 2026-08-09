@@ -42,6 +42,13 @@
                         <table-users :params="state.params.remove" v-model:init="state.tabs.remove" v-on:refresh="method.refresh" ref="remove" type="remove"></table-users>
                     </el-tab-pane>
 
+                    <el-tab-pane name="blackroom">
+                        <template #label>
+                            <span style="font-weight: bold; font-size: 12px">封禁记录</span>
+                        </template>
+                        <table-blackroom v-model:init="state.tabs.blackroom" v-on:refresh="method.refresh" ref="blackroom"></table-blackroom>
+                    </el-tab-pane>
+
                 </el-tabs>
             </el-col>
         </el-row>
@@ -51,6 +58,7 @@
 <script setup>
 import utils from '{src}/utils/utils'
 import TableUsers from '{src}/comps/admin/table/users.vue'
+import TableBlackroom from '{src}/comps/admin/table/blackroom.vue'
 
 const { ctx, proxy } = getCurrentInstance()
 const state  = reactive({
@@ -73,6 +81,7 @@ const state  = reactive({
     tabs: {
         all: false,
         remove: false,
+        blackroom: false,
     }
 })
 
@@ -90,7 +99,7 @@ const method = {
     // 刷新
     refresh(...args) {
         // 允许刷新的参数
-        let allow = ['all','remove']
+        let allow = ['all','remove','blackroom']
         // 如果没有传参则刷新所有
         if (args.length === 0) args = allow
         // 如果传参则过滤不允许的参数
@@ -108,7 +117,7 @@ onMounted(async () => {
 
 watch(() => state.item.search, (val) => {
 
-    const allow = ['all', 'remove']
+    const allow = ['all', 'remove', 'blackroom']
 
     for (let item of allow) {
         if (!utils.is.empty(val)) state.params[item].like = [

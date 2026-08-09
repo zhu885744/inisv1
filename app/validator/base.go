@@ -68,6 +68,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &QpsWarn{}
 	case "attachment":
 		item = &Attachment{}
+	case "user-ban-records":
+		item = &UserBanRecords{}
 	default:
 		return errors.New("未知的验证器！")
 	}

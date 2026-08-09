@@ -14,6 +14,7 @@ func Run() {
 
 	Log.Run()
 	Device.Run()
+	Ban.Run()
 
 	go func() {
 		<- Timer.Start()

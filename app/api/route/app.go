@@ -18,6 +18,7 @@ var defaultMiddleware = []gin.HandlerFunc{
 	middle.Jwt(),
 	middle.Rule(),
 	middle.ApiKey(),
+	middle.Restriction(),
 }
 
 // 所有可用的控制器

@@ -66,12 +66,38 @@ func getUserInfoWithCache(uid any, jwtValid int64) (map[string]any, error) {
 	return user, nil
 }
 
-// validateUserStatus 验证用户状态
+// validateUserStatus 验证用户状态（冻结、封禁登录限制）
 func validateUserStatus(user map[string]any) error {
 	userStatus := cast.ToInt(user["status"])
 	if userStatus == UserStatusFrozen {
 		return fmt.Errorf("账号已被冻结，请联系管理员！")
 	}
+
+	// 检查封禁限制中是否包含登录限制
+	restrictions := cast.ToInt(user["restrictions"])
+	if restrictions&model.BanTypeLogin != 0 {
+		currentBanId := cast.ToInt(user["current_ban_id"])
+		if currentBanId > 0 {
+			banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(currentBanId)
+			if !utils.Is.Empty(banRecord) {
+				banMap := cast.ToStringMap(banRecord)
+				if cast.ToInt(banMap["status"]) == model.BanStatusActive {
+					reason := cast.ToString(banMap["reason"])
+					duration := cast.ToInt(banMap["duration"])
+					expiresAt := cast.ToInt64(banMap["expires_at"])
+					if duration > 0 {
+						remainingDays := (expiresAt - time.Now().Unix()) / 86400
+						if remainingDays > 0 {
+							return fmt.Errorf("您的账号已被封禁！原因：%s，剩余 %d 天", reason, remainingDays)
+						}
+						return fmt.Errorf("您的账号已被封禁！原因：%s，将于今日解封", reason)
+					}
+					return fmt.Errorf("您的账号已被永久封禁！原因：%s", reason)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -20,7 +20,7 @@
         </template>
 
         <template v-if="props.type === 'all'" #end>
-            <el-table-column :fixed="right" label="操作" width="100" class-name="text-end">
+            <el-table-column :fixed="right" label="操作" width="180" class-name="text-end">
                 <template #default="scope">
                     <span style="display: flex; justify-content: flex-end">
                         <el-button v-on:click="method.edit(scope.row)" class="custom" size="small">
@@ -28,6 +28,12 @@
                         </el-button>
                         <el-button v-on:click="method.delete(scope.row.id, true)" size="small" style="margin-left: 0" :disabled="scope.row.id === 1">
                             <i-svg color="rgb(var(--icon-color))" name="delete" size="21px"></i-svg>
+                        </el-button>
+                        <el-button v-if="!scope.row.current_ban_id" v-on:click="method.ban(scope.row)" size="small" style="margin-left: 0; color: #e6a23c" :disabled="scope.row.id === 1">
+                            <el-icon style="font-size: 16px"><Warning /></el-icon>
+                        </el-button>
+                        <el-button v-if="scope.row.current_ban_id" v-on:click="method.unban(scope.row)" size="small" style="margin-left: 0; color: #67c23a" :disabled="scope.row.id === 1">
+                            <el-icon style="font-size: 16px"><CircleCheck /></el-icon>
                         </el-button>
                     </span>
                 </template>
@@ -183,6 +189,72 @@
             </div>
         </template>
     </el-dialog>
+
+    <!-- 封禁对话框 -->
+    <el-dialog v-model="state.banDialog.visible" title="封禁用户" width="600px" class="custom" draggable :close-on-click-modal="false">
+        <div style="padding: 10px 0;">
+            <el-alert :title="`封禁用户：${state.banDialog.target?.nickname || ''} (ID: ${state.banDialog.target?.id || ''})`" type="warning" :closable="false" show-icon style="margin-bottom: 16px" />
+
+            <el-form label-width="100px" label-position="left">
+                <el-form-item label="封禁类型">
+                    <el-checkbox-group v-model="state.banDialog.banTypes">
+                        <el-checkbox :value="1" label="限制登录" style="margin-right: 12px" />
+                        <el-checkbox :value="2" label="限制发文" style="margin-right: 12px" />
+                        <el-checkbox :value="4" label="限制评论" style="margin-right: 12px" />
+                        <el-checkbox :value="8" label="限制上传" style="margin-right: 12px" />
+                        <el-checkbox :value="16" label="限制互动" />
+                    </el-checkbox-group>
+                    <div style="margin-top: 4px; font-size: 12px; color: #909399">
+                        可多选，不选则默认全部封禁
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="封禁模式">
+                    <el-radio-group v-model="state.banDialog.mode">
+                        <el-radio value="auto">自动梯度</el-radio>
+                        <el-radio value="manual">手动指定</el-radio>
+                    </el-radio-group>
+                </el-form-item>
+
+                <el-form-item v-if="state.banDialog.mode === 'manual'" label="封禁时长">
+                    <el-select v-model="state.banDialog.duration" placeholder="请选择封禁时长">
+                        <el-option label="1 天" :value="1" />
+                        <el-option label="3 天" :value="3" />
+                        <el-option label="7 天" :value="7" />
+                        <el-option label="15 天" :value="15" />
+                        <el-option label="30 天" :value="30" />
+                        <el-option label="永久封禁" :value="0" />
+                    </el-select>
+                </el-form-item>
+
+                <el-form-item v-if="state.banDialog.mode === 'auto'" label="梯度规则">
+                    <div style="font-size: 12px; color: #909399; line-height: 1.8">
+                        当前累计违规 {{ state.banDialog.target?.ban_count || 0 }} 次<br/>
+                        <span v-if="(state.banDialog.target?.ban_count || 0) === 0">自动封禁 <b>1 天</b>（首次）</span>
+                        <span v-else-if="(state.banDialog.target?.ban_count || 0) === 1">自动封禁 <b>7 天</b>（二次）</span>
+                        <span v-else-if="(state.banDialog.target?.ban_count || 0) === 2">自动封禁 <b>15 天</b>（三次）</span>
+                        <span v-else-if="(state.banDialog.target?.ban_count || 0) === 3">自动封禁 <b>30 天</b>（四次）</span>
+                        <span v-else style="color: #f56c6c">自动封禁 <b>永久</b>（五次及以上，禁止申诉）</span>
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="封禁原因">
+                    <el-input v-model="state.banDialog.reason" type="textarea" :rows="3" placeholder="请输入封禁原因（默认：违反社区规定）" />
+                </el-form-item>
+
+                <el-form-item label="封禁证据">
+                    <el-input v-model="state.banDialog.evidence" placeholder="文本说明或链接（可选）" />
+                </el-form-item>
+            </el-form>
+        </div>
+
+        <template #footer>
+            <div style="text-align: right; padding: 10px 0;">
+                <el-button @click="state.banDialog.visible = false" size="default" style="margin-right: 10px;">取 消</el-button>
+                <el-button @click="method.doBan()" :loading="state.banDialog.loading" type="warning" size="default">确认封禁</el-button>
+            </div>
+        </template>
+    </el-dialog>
 </template>
 
 <script setup>
@@ -229,6 +301,16 @@ const state  = reactive({
         upload: false,
         wait: false,
         selection: [],
+    },
+    banDialog: {
+        visible: false,
+        loading: false,
+        target: null,
+        banTypes: [1, 2, 4, 8, 16], // 默认全选
+        mode: 'auto', // auto | manual
+        duration: 7, // 手动模式默认7天
+        reason: '',
+        evidence: '',
     },
     struct: {
         id: null, // 存储当前编辑用户的ID
@@ -513,6 +595,81 @@ const method = {
     window(url = null, target = '_blank') {
         if (utils.is.empty(url)) return
         globalThis.open(url, target)
+    },
+    // 打开封禁对话框
+    ban(target) {
+        if (!target || target.id === 1) {
+            ElMessage.error('禁止封禁系统管理员！')
+            return
+        }
+        state.banDialog.target = target
+        state.banDialog.banTypes = [1, 2, 4, 8, 16]
+        state.banDialog.mode = 'auto'
+        state.banDialog.duration = 7
+        state.banDialog.reason = ''
+        state.banDialog.evidence = ''
+        state.banDialog.visible = true
+    },
+    // 执行封禁
+    async doBan() {
+        const target = state.banDialog.target
+        if (!target) return
+
+        let banType = 0
+        for (const bit of state.banDialog.banTypes) {
+            banType |= bit
+        }
+        // 未选任何类型则全部封禁
+        if (banType === 0) banType = 31
+
+        const params = {
+            uid: target.id,
+            ban_type: banType,
+            reason: state.banDialog.reason,
+            evidence: state.banDialog.evidence,
+        }
+
+        if (state.banDialog.mode === 'auto') {
+            params.auto_gradient = true
+        } else {
+            params.duration = state.banDialog.duration
+        }
+
+        state.banDialog.loading = true
+        try {
+            const { code, msg } = await axios.put('/api/users/ban', params)
+            if (code !== 200) throw new Error(msg)
+            ElMessage.success('封禁成功！')
+            state.banDialog.visible = false
+            emit('refresh', 'all')
+            await method.init()
+        } catch (error) {
+            ElMessage.error(error.message || '封禁失败')
+        }
+        state.banDialog.loading = false
+    },
+    // 解封用户
+    async unban(target) {
+        if (!target || !target.id) return
+        try {
+            await ElMessageBox.confirm(
+                `确定要解封用户「${target.nickname}」吗？`,
+                '解封确认',
+                { type: 'warning' }
+            )
+        } catch {
+            return
+        }
+
+        try {
+            const { code, msg } = await axios.put('/api/users/unban', { uid: target.id })
+            if (code !== 200) throw new Error(msg)
+            ElMessage.success('解封成功！')
+            emit('refresh', 'all')
+            await method.init()
+        } catch (error) {
+            ElMessage.error(error.message || '解封失败')
+        }
     },
     imageSize(url = '', size = '50x50') {
         if (utils.is.empty(url)) return url
