@@ -5,7 +5,6 @@ import (
 	"inis/app/facade"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -33,46 +32,30 @@ type AuthRules struct {
 
 // AfterFind - 查询Hook
 func (this *AuthRules) AfterFind(tx *gorm.DB) (err error) {
-
 	this.Text = cast.ToString(this.Text)
 	this.Json = utils.Json.Decode(this.Json)
-
-	return
-}
-
-// BeforeCreate - 创建前的Hook
-func (this *AuthRules) BeforeCreate(tx *gorm.DB) (err error) {
-
-	exist, _ := facade.DB.Model(&AuthRules{}).WithTrashed().Where("hash", this.Hash).Exist()
-	if exist {
-		return fmt.Errorf("hash: %s 已存在", this.Hash)
-	}
-
 	return
 }
 
 // InitAuthRules - 初始化AuthRules表
 func InitAuthRules() {
+	facade.Log.Info(map[string]any{}, "==== InitAuthRules 开始执行 ====")
 
-	// 迁移表
 	err := facade.DB.Drive().AutoMigrate(&AuthRules{})
 	if err != nil {
 		facade.Log.Error(map[string]any{"error": err}, "AuthRules表迁移失败")
 		return
 	}
+	facade.Log.Info(map[string]any{}, "AuthRules AutoMigrate执行完成")
 
-	wg := sync.WaitGroup{}
+	list := createAuthRules()
+	facade.Log.Info(map[string]any{"count": len(list)}, "createAuthRules生成规则数量")
 
-	// 动态生成规则
-	for _, item := range createAuthRules() {
-		wg.Add(1)
-		go func(item AuthRules, wg *sync.WaitGroup) {
-			defer wg.Done()
-			saveAuthRules(item)
-		}(item, &wg)
+	for _, item := range list {
+		saveAuthRules(item)
 	}
 
-	wg.Wait()
+	facade.Log.Info(map[string]any{}, "==== InitAuthRules 全部执行完毕 ====")
 }
 
 // createAuthRules - 生成规则
@@ -700,16 +683,23 @@ func saveAuthRules(item AuthRules) {
 		Route:  cast.ToString(item.Route),
 	}
 
-	exist, _ := facade.DB.Model(&AuthRules{}).Where("hash", hash).Exist()
-	if exist {
+	exist, err := facade.DB.Model(&AuthRules{}).Where("hash", hash).Exist()
+	if err != nil {
+		// 查询异常，仅告警，不return，继续尝试写入
+		facade.Log.Warn(map[string]any{"error": err.Error(), "route": item.Route, "hash": hash}, "检查hash存在性查询异常，直接尝试写入")
+	}
+
+	// 只有查询无错误并且确认存在，才跳过
+	if err == nil && exist {
 		return
 	}
 
-	_, err := facade.DB.Model(&AuthRules{}).Create(&table)
+	_, err = facade.DB.Model(&AuthRules{}).Create(&table)
 	if err != nil {
-		if strings.Contains(err.Error(), "已存在") {
+		// 数据库唯一索引冲突直接忽略
+		if strings.Contains(err.Error(), "Duplicate entry") {
 			return
 		}
-		facade.Log.Error(map[string]any{"error": err.Error()}, "自动添加规则失败")
+		facade.Log.Error(map[string]any{"error": err.Error(), "route": item.Route, "hash": hash}, "自动添加规则失败")
 	}
 }

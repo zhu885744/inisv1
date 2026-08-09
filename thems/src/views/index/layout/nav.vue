@@ -401,6 +401,12 @@
 
   <!-- 引入签到对话框组件 -->
   <DialogCheckin ref="checkinDialog" />
+
+  <!-- 封禁提醒弹窗 -->
+  <BanNotice ref="banNoticeDialog" @appeal="method.openAppealDialog" />
+
+  <!-- 封禁申诉弹窗 -->
+  <DialogAppeal ref="appealDialog" />
 </template>
 
 <script setup>
@@ -418,6 +424,8 @@ import { STORAGE_KEYS } from '@/constants'
 import DialogAuth from '@/comps/index/dialog/auth.vue'
 import DialogSearch from '@/comps/index/dialog/search.vue'
 import DialogCheckin from '@/comps/index/dialog/checkin.vue'
+import BanNotice from '@/comps/index/dialog/ban-notice.vue'
+import DialogAppeal from '@/comps/index/dialog/appeal.vue'
 
 // 初始化router
 const router = useRouter()
@@ -438,6 +446,8 @@ const signLoading = ref(false)
 const authDialog = ref(null)
 const searchDialog = ref(null)
 const checkinDialog = ref(null)
+const banNoticeDialog = ref(null)
+const appealDialog = ref(null)
 
 // 存储
 const store = {
@@ -631,6 +641,19 @@ const method = {
   push: (params = {}) => {
     router.push(params)
     state.drawer.show = false
+  },
+
+  // 打开申诉弹窗
+  openAppealDialog() {
+    if (appealDialog.value && appealDialog.value.show) {
+      appealDialog.value.show()
+    } else {
+      setTimeout(() => {
+        if (appealDialog.value && appealDialog.value.show) {
+          appealDialog.value.show()
+        }
+      }, 100)
+    }
   },
 }
 
@@ -975,6 +998,31 @@ watch(
       method.showRegister()
     } else if (newAuth.reset) {
       method.showResetPassword()
+    }
+  },
+  { deep: true }
+)
+
+// 监听用户登录状态，检测封禁并弹窗提醒
+let banDialogShown = false
+watch(
+  () => store.comm.login.user,
+  (user) => {
+    if (!user || utils.is.empty(user)) {
+      banDialogShown = false
+      return
+    }
+    // 检查用户是否被封禁
+    const ban = user.result?.ban
+    if (ban && ban.is_banned && ban.record && !banDialogShown) {
+      banDialogShown = true
+      setTimeout(() => {
+        if (banNoticeDialog.value && banNoticeDialog.value.show) {
+          banNoticeDialog.value.show(ban.record)
+        }
+      }, 800)
+    } else if (ban && !ban.is_banned) {
+      banDialogShown = false
     }
   },
   { deep: true }

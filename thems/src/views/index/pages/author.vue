@@ -84,10 +84,53 @@
             <span v-if="userInfo.title || userInfo.json?.title" class="badge rounded-pill title-badge" :class="getTitleColorClass(userInfo.json?.title || userInfo.title)">
               <i class="bi bi-person-badge"></i> {{ userInfo.json?.title || userInfo.title }}
             </span>
+            <!-- 封禁状态标签 -->
+            <span v-if="banInfo.isBanned" class="badge rounded-pill bg-danger" style="cursor: pointer;" title="点击查看封禁详情" @click="showBanDetail = !showBanDetail">
+              <i class="bi bi-slash-circle"></i> 小黑屋 · 第{{ banInfo.violationNum }}次
+              <span v-if="banInfo.remaining"> · 剩余{{ banInfo.remaining }}</span>
+            </span>
             <span class="badge bg-light text-dark rounded-pill">
               <i class="bi bi-calendar3"></i> 注册于 {{ formatDate(userInfo.create_time) }}
             </span>
           </div>
+
+          <!-- 封禁详情卡片 -->
+          <div v-if="showBanDetail && banInfo.isBanned" class="ban-detail-card mt-3 p-3 rounded border border-warning">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h6 class="text-warning mb-2"><i class="bi bi-exclamation-triangle-fill me-1"></i>封禁详情</h6>
+                <div class="row g-2 small">
+                  <div class="col-sm-6">
+                    <span class="text-muted">封禁原因：</span>
+                    <span>{{ banInfo.reason }}</span>
+                  </div>
+                  <div class="col-sm-6">
+                    <span class="text-muted">封禁时长：</span>
+                    <span v-if="banInfo.duration === 0 && banInfo.violationNum >= 5" class="text-danger fw-bold">永久封禁</span>
+                    <span v-else-if="banInfo.duration === 0" class="text-danger">永久</span>
+                    <span v-else>{{ banInfo.duration }} 天</span>
+                  </div>
+                  <div class="col-sm-6">
+                    <span class="text-muted">限制类型：</span>
+                    <span v-for="bt in banInfo.banTypes" :key="bt.bit" class="badge bg-secondary me-1">{{ bt.name }}</span>
+                    <span v-if="!banInfo.banTypes.length" class="badge bg-danger">全部限制</span>
+                  </div>
+                  <div class="col-sm-6" v-if="banInfo.expiresAt && banInfo.duration > 0">
+                    <span class="text-muted">解封时间：</span>
+                    <span>{{ formatDate(banInfo.expiresAt) }}</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-close" @click="showBanDetail = false" aria-label="Close"></button>
+            </div>
+            <!-- 申诉按钮（仅本人才显示） -->
+            <button v-if="isSelf && banInfo.violationNum < 5" class="btn btn-warning btn-sm mt-3 w-100" @click="appealDialog?.show()">
+              <i class="bi bi-journal-text me-1"></i> 提交申诉
+            </button>
+          </div>
+
+          <!-- 封禁申诉弹窗 -->
+          <DialogAppeal ref="appealDialog" />
 
           <!-- 经验条 -->
           <div class="exp-section">
@@ -680,6 +723,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { request, cache } from '@/utils/network'
 import LevelDisplay from '@/comps/custom/LevelDisplay.vue'
 import iAvatarFrame from '@/comps/custom/i-avatar-frame.vue'
+import DialogAppeal from '@/comps/index/dialog/appeal.vue'
 import { useCommStore } from '@/store/comm'
 import { usePageTitle, toast, getTitleColorClass } from '@/utils/app'
 import utils from '@/utils/utils'
@@ -806,6 +850,50 @@ const userWebsite = computed(() => {
     }
   }
   return jsonData
+})
+
+// 封禁状态
+const showBanDetail = ref(false)
+const appealDialog = ref(null)
+const banTypeMap = [
+  { bit: 1,  name: '限制登录' },
+  { bit: 2,  name: '限制发文' },
+  { bit: 4,  name: '限制评论' },
+  { bit: 8,  name: '限制上传' },
+  { bit: 16, name: '限制互动' },
+]
+const banInfo = computed(() => {
+  const ban = userInfo.value?.result?.ban
+  if (!ban || !ban.is_banned) {
+    return { isBanned: false, reason: '', duration: 0, violationNum: 0, expiresAt: 0, remaining: '', banTypes: [] }
+  }
+  const record = ban.record || {}
+  const expiresAt = record.expires_at || 0
+  let remaining = ''
+  if (record.duration > 0 && expiresAt > 0) {
+    const secondsLeft = expiresAt - Math.floor(Date.now() / 1000)
+    if (secondsLeft <= 0) {
+      remaining = '已到期'
+    } else {
+      const days = Math.floor(secondsLeft / 86400)
+      const hours = Math.floor((secondsLeft % 86400) / 3600)
+      remaining = days > 0 ? `${days}天${hours}小时` : `${hours}小时内`
+    }
+  }
+  const banTypes = (() => {
+    const val = record.ban_type
+    if (!val || val === 0 || val === 31) return []
+    return banTypeMap.filter(t => val & t.bit)
+  })()
+  return {
+    isBanned: true,
+    reason: record.reason || '违反社区规定',
+    duration: record.duration || 0,
+    violationNum: record.violation_num || 1,
+    expiresAt,
+    remaining,
+    banTypes,
+  }
 })
 
 const switchTab = (tab) => {

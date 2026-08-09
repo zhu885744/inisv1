@@ -4,6 +4,12 @@
       <div class="text-center">
         <!-- 版权年份 -->
         <div class="text">
+          <router-link class="nav-link" :to="`/blackroom`" active-class="active" exact-active-class="active">
+              小黑屋
+          </router-link>
+        </div>
+        <!-- 版权年份 -->
+        <div class="text">
           Copyright © {{ startYear || '2020' }} ~ {{ currentYear }} {{ siteTitle }} 版权所有
         </div>
         

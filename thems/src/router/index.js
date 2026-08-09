@@ -169,12 +169,6 @@ const routes = [
     component: () => import('@/views/index/pages/blackroom.vue'),
     meta: { title: '小黑屋', requiresAuth: false }
   },
-  {
-    path: '/appeal',
-    name: '封禁申诉',
-    component: () => import('@/views/index/pages/appeal.vue'),
-    meta: { title: '封禁申诉', requiresAuth: false }
-  },
   // ========== 附件管理路由 ==========
   {
     path: '/attachments',

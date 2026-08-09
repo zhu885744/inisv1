@@ -24,7 +24,7 @@ type Attachment struct {
 	UploaderId    uint                  `gorm:"type:int(32); index; comment:上传者ID;" json:"uploader_id"`
 	TargetType    string                `gorm:"size:32; index; comment:关联业务类型;" json:"target_type"`
 	TargetId      uint                  `gorm:"type:int(32); index; comment:关联业务ID;" json:"target_id"`
-	FileHash      string                `gorm:"size:32; index; comment:文件MD5值;" json:"file_hash"`
+	FileHash      string                `gorm:"size:64; index; comment:文件SHA256值;" json:"file_hash"`
 	CreateTime    int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 	UpdateTime    int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime    soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`

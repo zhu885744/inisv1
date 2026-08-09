@@ -59,9 +59,7 @@
                                                required
                                                autocomplete="current-password"
                                                :class="{ 'is-invalid': state.errors.password, 'is-valid': state.valid.password }">
-                                        <button class="btn auth-password-toggle"
-                                                type="button"
-                                                @click="showPassword = !showPassword">
+                                        <button class="btn btn-outline-secondary auth-password-toggle" type="button" @click="showPassword = !showPassword">
                                             <i class="bi" :class="showPassword ? 'bi-eye-slash' : 'bi-eye'"></i>
                                         </button>
                                     </div>
@@ -1192,10 +1190,6 @@ const method = {
             // 封禁检查（403）
             if (code === 403 && msg.includes('封禁')) {
                 showNotification(msg, 'error')
-                // 显示申诉入口
-                setTimeout(() => {
-                    toast.warning('如对封禁有异议，可前往 <a href="/appeal">申诉页面</a> 提交申诉')
-                }, 500)
                 return
             }
 
@@ -1217,8 +1211,6 @@ const method = {
             state.item.wait = false
         }
     },
-
-
 
     // 注册方法
     async register() {

@@ -191,11 +191,47 @@
     </el-dialog>
 
     <!-- 封禁对话框 -->
-    <el-dialog v-model="state.banDialog.visible" title="封禁用户" width="600px" class="custom" draggable :close-on-click-modal="false">
+    <el-dialog v-model="state.banDialog.visible" title="拉入小黑屋" width="620px" class="custom" draggable :close-on-click-modal="false">
         <div style="padding: 10px 0;">
-            <el-alert :title="`封禁用户：${state.banDialog.target?.nickname || ''} (ID: ${state.banDialog.target?.id || ''})`" type="warning" :closable="false" show-icon style="margin-bottom: 16px" />
+            <el-alert :title="`拉黑用户：${state.banDialog.target?.nickname || ''} (ID: ${state.banDialog.target?.id || ''})`" type="warning" :closable="false" show-icon style="margin-bottom: 16px" />
+            <el-text type="info" size="small" style="display: block; margin-bottom: 16px;">
+                <i class="bi bi-info-circle me-1"></i> 将用户拉入小黑屋后，用户将失去对应的发布及操作权限。
+            </el-text>
 
-            <el-form label-width="100px" label-position="left">
+            <el-form label-width="120px" label-position="left">
+                <!-- 封禁原因（预设+自定义） -->
+                <el-form-item label="封禁原因" required>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+                        <el-tag
+                            v-for="r in state.banDialog.presetReasons"
+                            :key="r"
+                            :type="state.banDialog.reason === r ? 'warning' : 'info'"
+                            :effect="state.banDialog.reason === r ? 'dark' : 'plain'"
+                            style="cursor: pointer;"
+                            @click="state.banDialog.reason = r"
+                        >{{ r }}</el-tag>
+                        <el-tag
+                            :type="state.banDialog.isCustomReason ? 'warning' : 'info'"
+                            :effect="state.banDialog.isCustomReason ? 'dark' : 'plain'"
+                            style="cursor: pointer;"
+                            @click="method.toggleCustomReason()"
+                        >其他原因</el-tag>
+                    </div>
+                    <el-input
+                        v-if="state.banDialog.isCustomReason"
+                        v-model="state.banDialog.customReason"
+                        type="textarea"
+                        :rows="2"
+                        placeholder="请填写具体原因..."
+                        @input="state.banDialog.reason = state.banDialog.customReason"
+                    />
+                </el-form-item>
+
+                <el-divider content-position="left" style="margin: 12px 0;">
+                    <el-text type="info" size="small">权限限制</el-text>
+                </el-divider>
+
+                <!-- 封禁类型 -->
                 <el-form-item label="封禁类型">
                     <el-checkbox-group v-model="state.banDialog.banTypes">
                         <el-checkbox :value="1" label="限制登录" style="margin-right: 12px" />
@@ -238,9 +274,25 @@
                     </div>
                 </el-form-item>
 
-                <el-form-item label="封禁原因">
-                    <el-input v-model="state.banDialog.reason" type="textarea" :rows="3" placeholder="请输入封禁原因（默认：违反社区规定）" />
+                <el-divider content-position="left" style="margin: 12px 0;">
+                    <el-text type="info" size="small">高级选项</el-text>
+                </el-divider>
+
+                <el-form-item label="删除全部内容">
+                    <el-switch v-model="state.banDialog.deleteContent" active-text="是" inactive-text="否" />
+                    <el-text type="danger" size="small" style="margin-left: 8px;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>移至回收站（文章/动态/评论/点赞/收藏）
+                    </el-text>
                 </el-form-item>
+
+                <el-form-item label="禁止申诉">
+                    <el-switch v-model="state.banDialog.banAppeal" active-text="是" inactive-text="否" />
+                    <el-text type="info" size="small" style="margin-left: 8px;">开启后将不允许用户提交申诉</el-text>
+                </el-form-item>
+
+                <el-divider content-position="left" style="margin: 12px 0;">
+                    <el-text type="info" size="small">附加信息</el-text>
+                </el-divider>
 
                 <el-form-item label="封禁证据">
                     <el-input v-model="state.banDialog.evidence" placeholder="文本说明或链接（可选）" />
@@ -251,7 +303,9 @@
         <template #footer>
             <div style="text-align: right; padding: 10px 0;">
                 <el-button @click="state.banDialog.visible = false" size="default" style="margin-right: 10px;">取 消</el-button>
-                <el-button @click="method.doBan()" :loading="state.banDialog.loading" type="warning" size="default">确认封禁</el-button>
+                <el-button @click="method.doBan()" :loading="state.banDialog.loading" type="danger" size="default">
+                    <i class="bi bi-slash-circle me-1"></i>确认拉黑
+                </el-button>
             </div>
         </template>
     </el-dialog>
@@ -311,6 +365,13 @@ const state  = reactive({
         duration: 7, // 手动模式默认7天
         reason: '',
         evidence: '',
+        // 新增
+        deleteContent: false,   // 删除全部内容
+        banAppeal: false,       // 禁止申诉
+        // 预设原因
+        presetReasons: ['发布色情、违法内容', '存在欺诈骗钱行为', '骚扰他人', '涉嫌侵权', '发布垃圾广告信息'],
+        isCustomReason: false,
+        customReason: '',
     },
     struct: {
         id: null, // 存储当前编辑用户的ID
@@ -608,12 +669,31 @@ const method = {
         state.banDialog.duration = 7
         state.banDialog.reason = ''
         state.banDialog.evidence = ''
+        state.banDialog.deleteContent = false
+        state.banDialog.banAppeal = false
+        state.banDialog.isCustomReason = false
+        state.banDialog.customReason = ''
         state.banDialog.visible = true
+    },
+    // 切换自定义原因
+    toggleCustomReason() {
+        state.banDialog.isCustomReason = !state.banDialog.isCustomReason
+        if (!state.banDialog.isCustomReason) {
+            state.banDialog.customReason = ''
+            state.banDialog.reason = ''
+        }
     },
     // 执行封禁
     async doBan() {
         const target = state.banDialog.target
         if (!target) return
+
+        // 校验原因
+        const reason = state.banDialog.isCustomReason ? state.banDialog.customReason : state.banDialog.reason
+        if (!reason.trim()) {
+            ElMessage.error('请选择或填写封禁原因！')
+            return
+        }
 
         let banType = 0
         for (const bit of state.banDialog.banTypes) {
@@ -625,8 +705,10 @@ const method = {
         const params = {
             uid: target.id,
             ban_type: banType,
-            reason: state.banDialog.reason,
+            reason: reason.trim(),
             evidence: state.banDialog.evidence,
+            delete_content: state.banDialog.deleteContent ? 1 : 0,
+            ban_appeal: state.banDialog.banAppeal ? 1 : 0,
         }
 
         if (state.banDialog.mode === 'auto') {
@@ -635,16 +717,29 @@ const method = {
             params.duration = state.banDialog.duration
         }
 
+        // 删除全部内容二次确认
+        if (state.banDialog.deleteContent) {
+            try {
+                await ElMessageBox.confirm(
+                    `确定要删除该用户全部内容吗？文章、动态、评论等将移入回收站。`,
+                    '确认删除内容',
+                    { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+                )
+            } catch {
+                return // 用户取消
+            }
+        }
+
         state.banDialog.loading = true
         try {
             const { code, msg } = await axios.put('/api/users/ban', params)
             if (code !== 200) throw new Error(msg)
-            ElMessage.success('封禁成功！')
+            ElMessage.success('拉黑成功！')
             state.banDialog.visible = false
             emit('refresh', 'all')
             await method.init()
         } catch (error) {
-            ElMessage.error(error.message || '封禁失败')
+            ElMessage.error(error.message || '拉黑失败')
         }
         state.banDialog.loading = false
     },

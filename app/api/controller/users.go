@@ -1301,6 +1301,11 @@ func (this *Users) ban(ctx *gin.Context) {
 	// 证据
 	evidence := cast.ToString(params["evidence"])
 
+	// 辅助选项
+	deleteContent := cast.ToInt(params["delete_content"]) // 是否删除用户全部内容
+	banAppeal := cast.ToInt(params["ban_appeal"])         // 是否禁止申诉
+	freezeUser := cast.ToInt(params["freeze_user"])       // 是否同时冻结用户（记录标记，不实际修改status，冻结由status接口独立管理）
+
 	// 操作人信息
 	operator := this.user(ctx)
 	operatorIp := ctx.ClientIP()
@@ -1317,20 +1322,23 @@ func (this *Users) ban(ctx *gin.Context) {
 
 	// 创建封禁记录
 	record := model.UserBanRecords{
-		Uid:          uid,
-		OperatorId:   operator.Id,
-		BanType:      banType,
-		Reason:       reason,
-		Evidence:     evidence,
-		Duration:     duration,
-		BanTime:      now,
-		ExpiresAt:    expiresAt,
-		ViolationNum: violationNum,
-		Status:       model.BanStatusActive,
-		OperatorIp:   operatorIp,
-		OperatorUa:   operatorUa,
-		CreateTime:   now,
-		UpdateTime:   now,
+		Uid:           uid,
+		OperatorId:    operator.Id,
+		BanType:       banType,
+		Reason:        reason,
+		Evidence:      evidence,
+		Duration:      duration,
+		BanTime:       now,
+		ExpiresAt:     expiresAt,
+		ViolationNum:  violationNum,
+		Status:        model.BanStatusActive,
+		DeleteContent: deleteContent,
+		BanAppeal:     banAppeal,
+		FreezeUser:    freezeUser,
+		OperatorIp:    operatorIp,
+		OperatorUa:    operatorUa,
+		CreateTime:    now,
+		UpdateTime:    now,
 	}
 
 	// 事务：创建记录 + 更新用户状态
@@ -1340,14 +1348,29 @@ func (this *Users) ban(ctx *gin.Context) {
 		return
 	}
 
+	// 删除用户全部内容（软删除移入回收站）
+	if deleteContent == 1 {
+		go func() {
+			defer func() { recover() }()
+			facade.DB.Model(&model.Article{}).Where("uid", uid).Delete()
+			facade.DB.Model(&model.Moments{}).Where("uid", uid).Delete()
+			facade.DB.Model(&model.Comment{}).Where("uid", uid).Delete()
+			facade.DB.Model(&model.UserLikes{}).Where("uid", uid).Delete()
+			facade.DB.Model(&model.UserCollects{}).Where("uid", uid).Delete()
+			facade.Log.Info(map[string]any{"uid": uid, "operator_id": operator.Id}, "管理员删除被封禁用户全部内容")
+		}()
+	}
+
 	// 更新用户封禁信息
-	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+	userUpdate := map[string]any{
 		"ban_count":      violationNum,
 		"current_ban_id": record.Id,
 		"last_ban_at":    now,
 		"restrictions":   banType,
-	})
+	}
+
+	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
+	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(userUpdate)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
@@ -1362,15 +1385,18 @@ func (this *Users) ban(ctx *gin.Context) {
 
 	// 审计日志
 	facade.Log.Info(map[string]any{
-		"uid":           uid,
-		"operator_id":   operator.Id,
-		"ban_type":      banType,
-		"reason":        reason,
-		"duration":      duration,
-		"expires_at":    expiresAt,
-		"violation_num": violationNum,
-		"operator_ip":   operatorIp,
-		"operator_ua":   operatorUa,
+		"uid":            uid,
+		"operator_id":    operator.Id,
+		"ban_type":       banType,
+		"reason":         reason,
+		"duration":       duration,
+		"expires_at":     expiresAt,
+		"violation_num":  violationNum,
+		"delete_content": deleteContent,
+		"ban_appeal":     banAppeal,
+		"freeze_user":    freezeUser,
+		"operator_ip":    operatorIp,
+		"operator_ua":    operatorUa,
 	}, "管理员封禁用户")
 
 	this.json(ctx, gin.H{"id": record.Id}, facade.Lang(ctx, "封禁成功！"), 200)
@@ -1598,7 +1624,13 @@ func (this *Users) appeal(ctx *gin.Context) {
 		return
 	}
 
-	// 更新封禁记录为申诉中
+	// 管理员禁止申诉
+	if cast.ToInt(recordMap["ban_appeal"]) == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "管理员已禁止该封禁申诉！"), 403)
+		return
+	}
+
+	// 更新封禁记录为申诉中（第一条）
 	now := time.Now().Unix()
 	_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
 		"status":         model.BanStatusAppealed,
@@ -1737,8 +1769,8 @@ func (this *Users) appealHandle(ctx *gin.Context) {
 
 // appealPublic 公开申诉接口（被封禁用户无需登录即可申诉）
 // 两阶段流程：
-//   1. 不传 code：发送验证码到账号绑定的邮箱/手机号
-//   2. 传 code + content：验证验证码并提交申诉
+//  1. 不传 code：发送验证码到账号绑定的邮箱/手机号
+//  2. 传 code + content：验证验证码并提交申诉
 func (this *Users) appealPublic(ctx *gin.Context) {
 
 	params := this.params(ctx)
@@ -1787,6 +1819,12 @@ func (this *Users) appealPublic(ctx *gin.Context) {
 	// 五次及以上禁止申诉
 	if cast.ToInt(banMap["violation_num"]) >= 5 {
 		this.json(ctx, nil, facade.Lang(ctx, "该封禁为永久封禁且违规次数已达上限，禁止申诉！"), 403)
+		return
+	}
+
+	// 管理员禁止申诉
+	if cast.ToInt(banMap["ban_appeal"]) == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "管理员已禁止该封禁申诉！"), 403)
 		return
 	}
 
