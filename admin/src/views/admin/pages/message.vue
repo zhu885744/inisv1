@@ -14,7 +14,7 @@
         </div>
       </el-col>
       <el-col :span="8" class="text-end">
-        <el-button type="success" disabled>消息通知</el-button>
+        <el-button type="primary" :icon="'Promotion'" @click="method.gotoPush">推送消息</el-button>
       </el-col>
     </el-row>
 
@@ -26,6 +26,10 @@
 
       <el-tab-pane label="回收站" name="remove">
         <table-message ref="removeTable" v-model:init="state.tabs.remove" :params="state.params.remove" type="remove" @refresh="method.refresh" />
+      </el-tab-pane>
+
+      <el-tab-pane label="系统公告" name="broadcast">
+        <table-message ref="broadcastTable" v-model:init="state.tabs.broadcast" :params="state.params.broadcast" type="broadcast" @refresh="method.refresh" />
       </el-tab-pane>
 
       <el-tab-pane label="推送系统消息" name="push">
@@ -87,9 +91,19 @@
             <el-form-item label="发送方式">
               <el-checkbox-group v-model="state.pushForm.send_methods">
                 <el-checkbox value="system">系统消息（应用内通知）</el-checkbox>
-                <el-checkbox value="email">邮件通知</el-checkbox>
+                <el-checkbox value="email" :disabled="state.pushForm.target_type === 'all'">邮件通知</el-checkbox>
               </el-checkbox-group>
-              <div class="text-muted small mt-1">系统消息将出现在用户的消息中心；邮件通知将发送至用户绑定的邮箱</div>
+              <div class="text-muted small mt-1">
+                系统消息将出现在用户的消息中心；邮件通知将发送至用户绑定的邮箱。
+                <template v-if="state.pushForm.target_type === 'all'">
+                  <el-tag type="warning" size="small" effect="plain" class="ms-1">广播模式</el-tag>
+                  <span class="text-warning">仅创建 1 条公告记录（uid=0），全体用户可见；已读/删除按用户独立记录，不产生百万条数据。</span>
+                </template>
+                <template v-else>
+                  <el-tag type="info" size="small" effect="plain" class="ms-1">定向模式</el-tag>
+                  <span>为每个目标用户创建独立通知记录。</span>
+                </template>
+              </div>
             </el-form-item>
 
             <!-- 系统身份 -->
@@ -121,7 +135,7 @@
             <!-- 发送按钮 -->
             <el-form-item>
               <el-button type="success" size="large" @click="method.sendPush" :loading="state.pushForm.sending">
-                发送通知
+                {{ state.pushForm.target_type === 'all' ? '广播给全体用户' : '发送通知' }}
               </el-button>
               <el-button @click="method.resetPushForm">重置表单</el-button>
             </el-form-item>
@@ -133,10 +147,12 @@
 </template>
 
 <script setup>
-import { reactive, watch } from 'vue'
+import { reactive, watch, getCurrentInstance, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from '{src}/utils/request.js'
 import TableMessage from '@/comps/admin/table/message.vue'
+
+const { proxy } = getCurrentInstance()
 
 const state = reactive({
   item: {
@@ -147,10 +163,13 @@ const state = reactive({
   tabs: {
     all: false,
     remove: false,
+    broadcast: false,
   },
   params: {
     all: { order: 'create_time desc' },
     remove: { order: 'create_time desc', onlyTrashed: true },
+    // 系统公告：仅展示广播通知（uid=0，推送给全体用户的单条记录）
+    broadcast: { order: 'create_time desc', uid: 0 },
   },
   pushForm: {
     target_type: 'all',
@@ -167,13 +186,15 @@ const state = reactive({
 
 const method = {
   refresh(tab = '') {
-    if (tab === 'all') {
-      this.$refs.allTable && this.$refs.allTable.init()
-    } else if (tab === 'remove') {
-      this.$refs.removeTable && this.$refs.removeTable.init()
-    } else {
-      if (state.tabs.all) this.$refs.allTable && this.$refs.allTable.init()
-      if (state.tabs.remove) this.$refs.removeTable && this.$refs.removeTable.init()
+    // tab 名 -> 组件 ref 名
+    const tables = { all: 'allTable', remove: 'removeTable', broadcast: 'broadcastTable' }
+    if (tab && tables[tab]) {
+      proxy.$refs[tables[tab]]?.init?.()
+      return
+    }
+    // 无参：刷新所有已挂载的表格
+    for (const key of Object.keys(tables)) {
+      proxy.$refs[tables[key]]?.init?.()
     }
   },
 
@@ -181,9 +202,15 @@ const method = {
     state.tabs[name] = true
   },
 
+  gotoPush() {
+    state.item.tabs = 'push'
+    state.tabs.push = true
+  },
+
   order(key, val) {
     state.params.all.order = `${key} ${val}`
     state.params.remove.order = `${key} ${val}`
+    state.params.broadcast.order = `${key} ${val}`
     method.refresh()
   },
 
@@ -194,7 +221,8 @@ const method = {
     }
     state.pushForm.userLoading = true
     axios.get('/api/search/users', { keyword: query, limit: 20 }).then(res => {
-      const data = res?.data || []
+      // 后端返回 {code,msg,data:{data:[...],count,...}}，用户列表嵌套在 data.data（兼容 data.list）
+      const data = res?.data?.data || res?.data?.list || []
 
       state.pushForm.userOptions = Array.isArray(data) ? data.map(u => ({
         id: u.id,
@@ -208,6 +236,10 @@ const method = {
   onTargetChange() {
     state.pushForm.user_ids = []
     state.pushForm.userOptions = []
+    // 切到"全部用户"时移除邮件方式（全量推送为广播模式，不支持逐用户邮件）
+    if (state.pushForm.target_type === 'all') {
+      state.pushForm.send_methods = state.pushForm.send_methods.filter(m => m !== 'email')
+    }
   },
 
   previewContent() {
@@ -252,9 +284,17 @@ const method = {
       const res = await axios.post('/api/notification/send-system', payload)
       const data = res?.data || res
 
-      ElMessage.success(`推送完成！共 ${data?.total || 0} 个目标，成功 ${data?.success || 0} 条`)
-      method.resetPushForm()
-      method.refresh('all')
+      // 全量推送：后端返回 broadcast:true，只写 1 条广播记录，全体用户可见
+      if (data?.broadcast) {
+        ElMessage.success('已广播给全体用户！仅创建 1 条公告记录，用户进入消息中心即可看到')
+        method.resetPushForm()
+        method.refresh('all')
+        method.refresh('broadcast')
+      } else {
+        ElMessage.success(`推送完成！共 ${data?.total || 0} 个目标，成功 ${data?.success || 0} 条`)
+        method.resetPushForm()
+        method.refresh('all')
+      }
     } catch (err) {
       ElMessage.error('推送失败：' + (err?.msg || '未知错误'))
     } finally {
@@ -287,10 +327,13 @@ watch(() => state.item.search, val => {
 
     state.params.all.like = like
     state.params.remove.like = like
+    state.params.broadcast.like = like
     method.refresh()
   }, 500)
 })
 
 // 初始化加载
-state.tabs.all = true
+onMounted(() => {
+  state.tabs.all = true
+})
 </script>

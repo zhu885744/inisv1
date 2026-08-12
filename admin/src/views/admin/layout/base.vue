@@ -145,7 +145,6 @@ const state = reactive({
     sidebarCollapsed: false,
     menu: [],
     searchText: '',
-    notificationCount: 0,
     version: '1.0.0',
 })
 

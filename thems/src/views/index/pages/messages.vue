@@ -1,162 +1,193 @@
 <template>
-  <div class="card mt-3">
+  <!-- 顶部头部卡片：标题 + 操作按钮 -->
+  <div class="card mt-2">
     <div class="card-body">
-      <!-- 页面头部 -->
-      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
         <div>
           <h1 class="h4 mb-0 d-flex align-items-center gap-2">
             <i class="bi bi-bell-fill text-primary"></i>消息通知
-            <span v-if="unreadCount > 0" class="badge bg-primary rounded-pill ms-2">{{ unreadCount }}</span>
           </h1>
-          <p class="text-muted small mb-0 mt-1">实时接收系统通知、互动消息和平台公告</p>
         </div>
         <div class="d-flex gap-2">
           <button class="btn btn-outline-secondary btn-sm" @click="markAllRead" :disabled="loading || unreadCount === 0">
             <i class="bi bi-check2-all me-1"></i>全部已读
           </button>
           <button class="btn btn-outline-danger btn-sm" @click="clearAll" :disabled="loading || filteredMessages.length === 0">
-            <i class="bi bi-trash3 me-1"></i>清空当前分类
+            <i class="bi bi-trash3 me-1"></i>清空当前通知
           </button>
         </div>
       </div>
+    </div>
+  </div>
 
-      <!-- 分类筛选 Tabs -->
-      <ul class="nav nav-tabs border-bottom mb-3" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
-            全部 <span class="badge bg-secondary rounded-pill ms-1">{{ totalCount }}</span>
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'unread' }" @click="activeTab = 'unread'">
-            未读 <span class="badge bg-primary rounded-pill ms-1">{{ unreadCount }}</span>
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'comment' }" @click="activeTab = 'comment'">
-            <i class="bi bi-chat-dots me-1"></i>回复
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'like' }" @click="activeTab = 'like'">
-            <i class="bi bi-heart me-1"></i>点赞
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'collection' }" @click="activeTab = 'collection'">
-            <i class="bi bi-bookmark me-1"></i>收藏
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'follow' }" @click="activeTab = 'follow'">
-            <i class="bi bi-person-plus me-1"></i>关注
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'">
-            <i class="bi bi-gear me-1"></i>系统
-          </button>
-        </li>
-      </ul>
-
-      <!-- 加载中 -->
-      <div v-if="loading" class="text-center py-5">
-        <div class="spinner-border text-primary" role="status">
-          <span class="visually-hidden">加载中...</span>
-        </div>
-        <p class="mt-2 text-muted small">加载消息中...</p>
-      </div>
-
-      <!-- 消息列表 -->
-      <div v-else-if="filteredMessages.length > 0" class="wx-message-list">
-        <div
-          v-for="msg in filteredMessages"
-          :key="msg.id"
-          class="wx-message-item border rounded mb-2 p-3"
-          :class="{
-            'border-start border-start-4 border-primary': !msg.is_read && msg.is_read !== undefined,
-            'bg-light-subtle': !msg.is_read && msg.is_read !== undefined,
-            'opacity-75': msg.is_read === 1
-          }"
-          @click="handleItemClick(msg)"
-        >
-          <div class="d-flex gap-3">
-            <!-- 头像 / 图标 -->
-            <div class="flex-shrink-0">
-              <div
-                class="wx-avatar d-flex align-items-center justify-content-center rounded-circle"
-                :class="getAvatarClass(msg.type)"
-                style="width: 44px; height: 44px; font-size: 1.2rem;"
+  <!-- 下面网格：左侧导航card | 右侧内容card，两个独立卡片 -->
+  <div class="row g-2 mt-1">
+    <!-- 左侧：侧边栏导航卡片 -->
+    <div class="col-12 col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="nav-sidebar">
+            <div class="nav flex-column nav-pills">
+              <button
+                class="nav-link text-start d-flex align-items-center justify-content-between"
+                :class="{ active: activeTab === 'all' }"
+                @click="activeTab = 'all'"
               >
-                <img v-if="msg.result?.from_user?.avatar" :src="msg.result?.from_user?.avatar" alt="" style="width:44px;height:44px;border-radius:50%;object-fit:cover" />
-                <i v-else :class="getIcon(msg.type)"></i>
-              </div>
-            </div>
-
-            <!-- 消息内容 -->
-            <div class="flex-grow-1 min-w-0">
-              <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
-                <div>
-                  <span class="fw-semibold">{{ msg.title }}</span>
-                  <span v-if="!msg.is_read && msg.is_read !== undefined" class="badge bg-primary ms-2 small">未读</span>
-                  <span class="badge bg-light text-secondary border ms-1 small">{{ getTypeLabel(msg.type) }}</span>
-                </div>
-                <small class="text-muted flex-shrink-0">{{ formatTime(msg.create_time) }}</small>
-              </div>
-
-              <!-- ★ 修改点：将文本插值改为 v-html，并调用 formatContent 处理表情 -->
-              <p class="mb-1 text-body-secondary small" v-html="formatContent(msg.content)"></p>
-
-              <!-- 操作按钮 -->
-              <div class="d-flex gap-3 mt-2">
-                <button
-                  v-if="!msg.is_read && msg.is_read !== undefined"
-                  class="btn btn-link btn-sm p-0 text-primary text-decoration-none"
-                  @click.stop="markRead(msg.id)"
-                >
-                  <i class="bi bi-check2 me-1"></i>标记已读
-                </button>
-                <button
-                  class="btn btn-link btn-sm p-0 text-danger text-decoration-none"
-                  @click.stop="removeMessage(msg.id)"
-                >
-                  <i class="bi bi-trash3 me-1"></i>删除
-                </button>
-                <button
-                  v-if="getActionLink(msg)"
-                  class="btn btn-link btn-sm p-0 text-decoration-none"
-                  @click.stop="handleAction(msg)"
-                >
-                  <i class="bi bi-box-arrow-up-right me-1"></i>查看详情
-                </button>
-              </div>
+                <span><i class="bi bi-inbox me-2"></i>全部</span>
+                <span class="badge bg-secondary rounded-pill">{{ totalCount }}</span>
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center justify-content-between"
+                :class="{ active: activeTab === 'unread' }"
+                @click="activeTab = 'unread'"
+              >
+                <span><i class="bi bi-envelope me-2"></i>未读</span>
+                <span class="badge bg-primary rounded-pill">{{ unreadCount }}</span>
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center"
+                :class="{ active: activeTab === 'comment' }"
+                @click="activeTab = 'comment'"
+              >
+                <i class="bi bi-chat-dots me-2"></i>回复
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center"
+                :class="{ active: activeTab === 'like' }"
+                @click="activeTab = 'like'"
+              >
+                <i class="bi bi-heart me-2"></i>点赞
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center"
+                :class="{ active: activeTab === 'collection' }"
+                @click="activeTab = 'collection'"
+              >
+                <i class="bi bi-bookmark me-2"></i>收藏
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center"
+                :class="{ active: activeTab === 'follow' }"
+                @click="activeTab = 'follow'"
+              >
+                <i class="bi bi-person-plus me-2"></i>关注
+              </button>
+              <button
+                class="nav-link text-start d-flex align-items-center"
+                :class="{ active: activeTab === 'system' }"
+                @click="activeTab = 'system'"
+              >
+                <i class="bi bi-gear me-2"></i>系统
+              </button>
             </div>
           </div>
         </div>
-
-        <!-- 分页 -->
-        <div v-if="totalPages > 1" class="d-flex justify-content-center mt-3">
-          <nav>
-            <ul class="pagination pagination-sm">
-              <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-                <button class="page-link" @click="changePage(currentPage - 1)">上一页</button>
-              </li>
-              <li class="page-item disabled">
-                <span class="page-link">{{ currentPage }} / {{ totalPages }}</span>
-              </li>
-              <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-                <button class="page-link" @click="changePage(currentPage + 1)">下一页</button>
-              </li>
-            </ul>
-          </nav>
-        </div>
       </div>
+    </div>
 
-      <!-- 空状态 -->
-      <div v-else class="text-center py-5">
-        <i class="bi bi-inbox display-4 d-block mb-3 opacity-25"></i>
-        <p class="h5 mb-1">暂无消息</p>
-        <p class="text-muted small">当前分类下没有消息，稍后再来看看吧</p>
+    <!-- 右侧：消息内容卡片 -->
+    <div class="col-12 col-md-9">
+      <div class="card h-100">
+        <div class="card-body">
+          <!-- 加载中 -->
+          <div v-if="loading" class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2 text-muted small">加载消息中...</p>
+          </div>
+
+          <!-- 消息列表 -->
+          <div v-else-if="filteredMessages.length > 0" class="wx-message-list">
+            <div
+              v-for="msg in filteredMessages"
+              :key="msg.id"
+              class="wx-message-item border rounded mb-2 p-3"
+              :class="{
+                'border-start border-start-4 border-primary': !msg.is_read && msg.is_read !== undefined,
+                'bg-light-subtle': !msg.is_read && msg.is_read !== undefined,
+                'opacity-75': msg.is_read === 1
+              }"
+              @click="handleItemClick(msg)"
+            >
+              <div class="d-flex gap-3">
+                <!-- 头像 / 图标 -->
+                <div class="flex-shrink-0">
+                  <div
+                    class="wx-avatar d-flex align-items-center justify-content-center rounded-circle"
+                    :class="getAvatarClass(msg.type)"
+                    style="width: 44px; height: 44px; font-size: 1.2rem;"
+                  >
+                    <img v-if="msg.result?.from_user?.avatar" :src="msg.result?.from_user?.avatar" alt="" style="width:44px;height:44px;border-radius:50%;object-fit:cover" />
+                    <i v-else :class="getIcon(msg.type)"></i>
+                  </div>
+                </div>
+
+                <!-- 消息内容 -->
+                <div class="flex-grow-1 min-w-0">
+                  <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+                    <div>
+                      <span class="fw-semibold">{{ msg.title }}</span>
+                      <span v-if="!msg.is_read && msg.is_read !== undefined" class="badge bg-primary ms-2 small">未读</span>
+                      <span class="badge bg-light text-secondary border ms-1 small">{{ getTypeLabel(msg.type, msg.uid) }}</span>
+                    </div>
+                    <small class="text-muted flex-shrink-0">{{ formatTime(msg.create_time) }}</small>
+                  </div>
+
+                  <p class="mb-1 text-body-secondary small" v-html="formatContent(msg.content)"></p>
+
+                  <!-- 操作按钮 -->
+                  <div class="d-flex gap-3 mt-2">
+                    <button
+                      v-if="!msg.is_read && msg.is_read !== undefined"
+                      class="btn btn-link btn-sm p-0 text-primary text-decoration-none"
+                      @click.stop="markRead(msg.id)"
+                    >
+                      <i class="bi bi-check2 me-1"></i>标记已读
+                    </button>
+                    <button
+                      class="btn btn-link btn-sm p-0 text-danger text-decoration-none"
+                      @click.stop="removeMessage(msg.id)"
+                    >
+                      <i class="bi bi-trash3 me-1"></i>删除
+                    </button>
+                    <button
+                      v-if="getActionLink(msg)"
+                      class="btn btn-link btn-sm p-0 text-decoration-none"
+                      @click.stop="handleAction(msg)"
+                    >
+                      <i class="bi bi-box-arrow-up-right me-1"></i>查看详情
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 分页 -->
+            <div v-if="totalPages > 1" class="d-flex justify-content-center mt-3">
+              <nav>
+                <ul class="pagination pagination-sm">
+                  <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+                    <button class="page-link" @click="changePage(currentPage - 1)">上一页</button>
+                  </li>
+                  <li class="page-item disabled">
+                    <span class="page-link">{{ currentPage }} / {{ totalPages }}</span>
+                  </li>
+                  <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+                    <button class="page-link" @click="changePage(currentPage + 1)">下一页</button>
+                  </li>
+                </ul>
+              </nav>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-else class="text-center py-5">
+            <i class="bi bi-inbox display-4 d-block mb-3 opacity-25"></i>
+            <p class="h5 mb-1">暂无消息</p>
+            <p class="text-muted small">当前分类下没有消息，稍后再来看看吧</p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -166,10 +197,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { request } from '@/utils/network'
-import { useSocketStore } from '@/store/socket'
 
 const router = useRouter()
-const socketStore = useSocketStore()
 
 // ---------- 状态 ----------
 const activeTab = ref('all')
@@ -227,10 +256,14 @@ const fetchUnreadCount = async () => {
     const res = await request.get('/api/notification/unread-count')
     const data = res.data?.data || res.data
     unreadCount.value = data?.count || 0
-    socketStore.setUnreadCount(unreadCount.value)
   } catch (err) {
     console.error('获取未读通知数失败:', err)
   }
+}
+
+// 通知导航栏刷新未读角标（通过事件联动）
+const notifyUnreadChange = () => {
+  window.dispatchEvent(new CustomEvent('notification-unread-change'))
 }
 
 const markRead = async (id) => {
@@ -240,8 +273,8 @@ const markRead = async (id) => {
     if (msg && msg.is_read !== undefined) {
       msg.is_read = 1
       unreadCount.value = Math.max(0, unreadCount.value - 1)
-      socketStore.setUnreadCount(unreadCount.value)
     }
+    notifyUnreadChange()
   } catch (err) {
     console.error('标记已读失败:', err)
   }
@@ -254,7 +287,7 @@ const markAllRead = async () => {
       if (m.is_read !== undefined) m.is_read = 1
     })
     unreadCount.value = 0
-    socketStore.setUnreadCount(0)
+    notifyUnreadChange()
   } catch (err) {
     console.error('全部标记已读失败:', err)
   }
@@ -265,7 +298,8 @@ const removeMessage = async (id) => {
     await request.delete('/api/notification/remove', { data: { ids: [id] } })
     messages.value = messages.value.filter(m => m.id !== id)
     totalCount.value = Math.max(0, totalCount.value - 1)
-    fetchUnreadCount()
+    await fetchUnreadCount()
+    notifyUnreadChange()
   } catch (err) {
     console.error('删除消息失败:', err)
   }
@@ -282,7 +316,8 @@ const clearAll = async () => {
     await request.delete('/api/notification/remove-all', { data: params })
     messages.value = []
     totalCount.value = 0
-    fetchUnreadCount()
+    await fetchUnreadCount()
+    notifyUnreadChange()
   } catch (err) {
     console.error('清空消息失败:', err)
   }
@@ -303,7 +338,9 @@ const getIcon = (type) => {
   return map[type] || 'bi-bell'
 }
 
-const getTypeLabel = (type) => {
+const getTypeLabel = (type, uid) => {
+  // 广播通知（uid=0）显示为"系统公告"
+  if (uid === 0) return '系统'
   const map = {
     comment: '回复',
     like: '点赞',
@@ -427,23 +464,10 @@ const formatContent = (content) => {
   )
 }
 
-// ---------- 监听Socket实时通知 ----------
-const onSocketNotification = (notif) => {
-  // 新通知到达时更新列表和计数
-  if (activeTab.value === 'all' || activeTab.value === notif.type) {
-    messages.value.unshift(notif)
-    totalCount.value++
-  }
-  fetchUnreadCount()
-}
-
 // ---------- 生命周期 ----------
 onMounted(async () => {
   await fetchNotifications()
   await fetchUnreadCount()
-
-  // 监听实时通知
-  socketStore.init()
 })
 
 // 监听Tab切换
@@ -454,6 +478,12 @@ watch(activeTab, () => {
 </script>
 
 <style scoped>
+/* 左侧侧边栏导航 */
+.nav-sidebar .nav-pills .nav-link {
+  margin-bottom: 0.3rem;
+  border-radius: 0.4rem;
+}
+
 /* ----- 消息列表项 ----- */
 .wx-message-item {
   transition: all 0.2s ease;
@@ -502,11 +532,6 @@ watch(activeTab, () => {
   background-color: rgba(108, 117, 125, 0.25) !important;
 }
 
-/* ----- 空状态微调 ----- */
-.wx-empty-state i {
-  opacity: 0.25;
-}
-
 /* ----- ★ 表情图片样式 ----- */
 .emoji-inline {
   height: 1.2em;
@@ -514,20 +539,5 @@ watch(activeTab, () => {
   vertical-align: middle;
   display: inline-block;
   object-fit: contain;
-}
-
-/* ----- 响应式 Tabs 滚动 ----- */
-@media (max-width: 576px) {
-  .nav-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 0.25rem;
-    padding-bottom: 0.25rem;
-  }
-  .nav-tabs .nav-link {
-    white-space: nowrap;
-    font-size: 0.8rem;
-    padding: 0.4rem 0.6rem;
-  }
 }
 </style>

@@ -756,13 +756,9 @@ func (this *Comment) create(ctx *gin.Context) {
 				notifContent += "的" + bindTitle
 			}
 
-			notif, notifErr := (&model.Notification{}).CreateNotification(
+			_, _ = (&model.Notification{}).CreateNotification(
 				authorId, user.Id, "comment", title, notifContent, table.BindType, table.BindId,
 			)
-
-			if notifErr == nil && notif != nil {
-				PushNotification(authorId, notif)
-			}
 		}
 	}()
 

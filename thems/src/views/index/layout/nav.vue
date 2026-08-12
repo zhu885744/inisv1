@@ -960,6 +960,11 @@ onMounted(() => {
   checkSignStatus()
   method.fetchUnreadCount()
   
+  // 监听消息中心操作后刷新未读角标（消息通知通过 API 拉取，无需 socket 推送）
+  window.addEventListener('notification-unread-change', () => {
+    method.fetchUnreadCount()
+  })
+  
   // 初始化 Bootstrap 组件
   if (window.bootstrap) {
     initDropdowns()

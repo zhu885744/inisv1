@@ -203,7 +203,17 @@ func (this *Notification) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
-	query = query.Where("uid", this.user(ctx).Id)
+	// 管理员可同时查看广播通知（uid=0）
+	if this.meta.root(ctx) {
+		query = query.Where("uid", "IN", []any{0, this.user(ctx).Id})
+	} else {
+		query = query.Where("uid", this.user(ctx).Id)
+	}
+
+	// 显式指定 uid 参数时精确过滤（如"系统公告" uid=0；零值无法通过结构体过滤）
+	if uidParam, ok := params["uid"]; ok && uidParam != "" && uidParam != nil {
+		query = query.Where("uid", cast.ToInt(uidParam))
+	}
 
 	count, _ := query.Where(table).Count()
 
@@ -327,14 +337,37 @@ func (this *Notification) readBatch(ctx *gin.Context) {
 		return
 	}
 
-	_, err := facade.DB.Model(&model.Notification{}).
-		WhereIn("id", ids).
-		Where("uid", uid).
-		Update(map[string]any{"is_read": 1})
+	// 分离广播通知与个人通知（广播通知 uid=0，个人通知必须属于当前用户）
+	var broadcastIds, personalIds []int
+	items, _ := facade.DB.Model(&[]model.Notification{}).WhereIn("id", ids).Select()
+	for _, item := range items {
+		switch {
+		case cast.ToInt(item["uid"]) == 0:
+			broadcastIds = append(broadcastIds, cast.ToInt(item["id"]))
+		case cast.ToInt(item["uid"]) == uid:
+			personalIds = append(personalIds, cast.ToInt(item["id"]))
+		}
+	}
 
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "批量标记已读失败！"), 400)
-		return
+	// 个人通知：直接更新已读状态
+	if !utils.Is.Empty(personalIds) {
+		_, err := facade.DB.Model(&model.Notification{}).
+			WhereIn("id", personalIds).
+			Where("uid", uid).
+			Update(map[string]any{"is_read": 1})
+
+		if err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "批量标记已读失败！"), 400)
+			return
+		}
+	}
+
+	// 广播通知：写入该用户的已读状态
+	for _, nid := range broadcastIds {
+		if err := (&model.Notification{}).MarkBroadcastRead(nid, uid); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "批量标记已读失败！"), 400)
+			return
+		}
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "批量标记已读成功！"), 200)
@@ -574,20 +607,48 @@ func (this *Notification) remove(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.Notification{}).Where("uid", uid)
-	columnData, _ := item.WhereIn("id", ids).Column("id")
-	ids = utils.Unity.Ids(columnData)
+	// 分离广播通知与个人通知（广播通知 uid=0 对所有用户可见，删除即对该用户隐藏）
+	var broadcastIds, personalIds []int
+	items, _ := facade.DB.Model(&[]model.Notification{}).WhereIn("id", ids).Select()
+	for _, item := range items {
+		switch {
+		case cast.ToInt(item["uid"]) == 0:
+			broadcastIds = append(broadcastIds, cast.ToInt(item["id"]))
+		case cast.ToInt(item["uid"]) == uid:
+			personalIds = append(personalIds, cast.ToInt(item["id"]))
+		}
+	}
 
-	if utils.Is.Empty(ids) {
+	if utils.Is.Empty(broadcastIds) && utils.Is.Empty(personalIds) {
 		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
-	_, err := item.Delete(ids)
+	// 个人通知：软删除
+	if !utils.Is.Empty(personalIds) {
+		_, err := facade.DB.Model(&model.Notification{}).
+			WhereIn("id", personalIds).
+			Where("uid", uid).
+			Delete(personalIds)
 
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
-		return
+		if err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
+			return
+		}
+	}
+
+	// 广播通知：管理员删除则撤下公告（软删除，全体不可见）；普通用户删除仅隐藏自己
+	if this.meta.root(ctx) && !utils.Is.Empty(broadcastIds) {
+		if _, err := facade.DB.Model(&model.Notification{}).WhereIn("id", broadcastIds).Delete(broadcastIds); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
+			return
+		}
+	} else {
+		for _, nid := range broadcastIds {
+			if err := (&model.Notification{}).HideBroadcast(nid, uid); err != nil {
+				facade.Log.Error(map[string]any{"error": err, "id": nid}, "隐藏广播通知失败")
+			}
+		}
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
@@ -607,7 +668,13 @@ func (this *Notification) delete(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.Notification{}).WithTrashed().Where("uid", uid)
+	// 管理员可彻底删除广播通知（uid=0，撤回公告），普通用户仅限自己的通知
+	item := facade.DB.Model(&model.Notification{}).WithTrashed()
+	if this.meta.root(ctx) {
+		item = item.Where("uid", "IN", []any{0, uid})
+	} else {
+		item = item.Where("uid", uid)
+	}
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
 
 	if utils.Is.Empty(ids) {
@@ -635,6 +702,7 @@ func (this *Notification) removeAll(ctx *gin.Context) {
 	params := this.params(ctx)
 	typ := cast.ToString(params["type"])
 
+	// 个人通知：软删除
 	item := facade.DB.Model(&model.Notification{}).Where("uid", uid)
 	if typ != "" {
 		item = item.Where("type", typ)
@@ -643,15 +711,27 @@ func (this *Notification) removeAll(ctx *gin.Context) {
 	columnData, _ := item.Column("id")
 	ids := utils.Unity.Ids(columnData)
 
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
-		return
+	if !utils.Is.Empty(ids) {
+		if _, err := item.Delete(ids); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+			return
+		}
 	}
 
-	_, err := item.Delete(ids)
+	// 广播通知：对该用户隐藏（不删除共享记录）
+	bcItem := facade.DB.Model(&[]model.Notification{}).Where("uid", 0)
+	if typ != "" {
+		bcItem = bcItem.Where("type", typ)
+	}
+	bcData, _ := bcItem.Column("id")
+	for _, nid := range utils.Unity.Ids(bcData) {
+		if err := (&model.Notification{}).HideBroadcast(cast.ToInt(nid), uid); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "id": nid}, "隐藏广播通知失败")
+		}
+	}
 
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+	if utils.Is.Empty(ids) && utils.Is.Empty(bcData) {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
 		return
 	}
 
@@ -665,7 +745,13 @@ func (this *Notification) clear(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.Notification{}).OnlyTrashed().Where("uid", uid)
+	// 管理员清空回收站时同时清理广播通知（uid=0），普通用户仅限自己的通知
+	item := facade.DB.Model(&model.Notification{}).OnlyTrashed()
+	if this.meta.root(ctx) {
+		item = item.Where("uid", "IN", []any{0, uid})
+	} else {
+		item = item.Where("uid", uid)
+	}
 
 	columnData, _ := item.Column("id")
 	ids := utils.Unity.Ids(columnData)
@@ -750,29 +836,6 @@ func (this *Notification) sendSystem(ctx *gin.Context) {
 		targetType = "all"
 	}
 
-	// 获取目标用户列表
-	var targetUsers []any
-	switch targetType {
-	case "all":
-		// 获取所有用户ID
-		ids, _ := facade.DB.Model(&model.Users{}).Column("id")
-		targetUsers = utils.Unity.Keys(ids)
-	case "partial", "single":
-		if utils.Is.Empty(userIds) {
-			this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "目标用户"), 400)
-			return
-		}
-		targetUsers = userIds
-	default:
-		this.json(ctx, nil, facade.Lang(ctx, "无效的目标类型！"), 400)
-		return
-	}
-
-	if utils.Is.Empty(targetUsers) {
-		this.json(ctx, nil, facade.Lang(ctx, "没有可发送的目标用户！"), 204)
-		return
-	}
-
 	// 构造通知标题和内容
 	var notifTitle, notifContent string
 	if asSystem {
@@ -786,10 +849,36 @@ func (this *Notification) sendSystem(ctx *gin.Context) {
 		notifContent = adminNickname + " 发送了一条系统通知：" + content
 	}
 
+	// 全量推送：广播模式，仅创建一条 uid=0 的记录，全体用户通过列表接口可见
+	// 不向百万级用户逐条创建记录，也不发送邮件（无法向海量用户发邮件）
+	if targetType == "all" {
+		broadcast, err := (&model.Notification{}).CreateBroadcastNotification(uid, "system", notifTitle, notifContent, "", 0)
+		if err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "广播推送失败！"), 400)
+			return
+		}
+		// 发送人（管理员）自己标记为已读，避免后台角标出现未读
+		_ = (&model.Notification{}).MarkBroadcastRead(broadcast.Id, uid)
+
+		this.json(ctx, gin.H{
+			"broadcast": true,
+			"id":        broadcast.Id,
+			"total":     1,
+			"success":   1,
+		}, facade.Lang(ctx, "广播成功！全体用户可见"), 200)
+		return
+	}
+
+	// 部分用户 / 单个用户：正常为每个用户创建记录
+	if utils.Is.Empty(userIds) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "目标用户"), 400)
+		return
+	}
+
 	// 批量发送通知
 	successCount := 0
 
-	for _, targetUid := range cast.ToSlice(targetUsers) {
+	for _, targetUid := range cast.ToSlice(userIds) {
 		targetId := cast.ToInt(targetUid)
 		if targetId <= 0 {
 			continue
@@ -843,7 +932,7 @@ func (this *Notification) sendSystem(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{
-		"total":   len(cast.ToSlice(targetUsers)),
+		"total":   len(cast.ToSlice(userIds)),
 		"success": successCount,
 	}, facade.Lang(ctx, "推送完成！"), 200)
 }

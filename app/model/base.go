@@ -61,6 +61,7 @@ func InitTable() {
 		{"UserFollows", InitUserFollows},
 		{"UserBanRecords", InitUserBanRecords},
 		{"Notification", InitNotification},
+		{"NotificationRead", InitNotificationRead},
 	}
 
 	for _, item := range allow {

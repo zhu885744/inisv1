@@ -693,13 +693,9 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 			}
 		}
 
-		notif, notifErr := (&model.Notification{}).CreateNotification(
+		_, _ = (&model.Notification{}).CreateNotification(
 			authorId, uid, "collect", notifTitle, notifContent, targetType, targetId,
 		)
-
-		if notifErr == nil && notif != nil {
-			PushNotification(authorId, notif)
-		}
 	}()
 
 	this.json(ctx, gin.H{

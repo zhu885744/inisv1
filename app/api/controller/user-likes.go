@@ -717,13 +717,9 @@ func (this *UserLikes) like(ctx *gin.Context) {
 			}
 		}
 
-		notif, notifErr := (&model.Notification{}).CreateNotification(
+		_, _ = (&model.Notification{}).CreateNotification(
 			authorId, uid, "like", notifTitle, notifContent, bindType, bindId,
 		)
-
-		if notifErr == nil && notif != nil {
-			PushNotification(authorId, notif)
-		}
 	}()
 
 	this.json(ctx, gin.H{
@@ -848,4 +844,14 @@ func (this *UserLikes) counts(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"counts": counts}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// truncateSafe 按字符(rune)数截断字符串，超长时追加省略号
+// 供 user-likes.go / user-collects.go 生成通知内容时使用
+func truncateSafe(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }
