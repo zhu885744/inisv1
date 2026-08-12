@@ -13,7 +13,7 @@ import (
 type UserCollects struct {
 	Id         int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Uid        int    `gorm:"type:int(32); comment:用户ID;" json:"uid"`
-	TargetType string `gorm:"type:varchar(32); comment:目标类型(article/page/moment/comment);" json:"target_type"`
+	TargetType string `gorm:"type:varchar(32); comment:目标类型(article/page/moment);" json:"target_type"`
 	TargetId   int    `gorm:"type:int(32); comment:目标ID;" json:"target_id"`
 	Json       any    `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any    `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`

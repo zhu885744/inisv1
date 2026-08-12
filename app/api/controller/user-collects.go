@@ -624,6 +624,84 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 		}
 	}()
 
+	// 创建收藏通知
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "创建收藏通知协程发生错误")
+			}
+		}()
+
+		var authorId int
+		var title, content string
+
+		switch targetType {
+		case "article":
+			item, _ := facade.DB.Model(&model.Article{}).Where("id", targetId).Find()
+			itemMap := cast.ToStringMap(item)
+			authorId = cast.ToInt(itemMap["uid"])
+			title = cast.ToString(itemMap["title"])
+		case "page":
+			item, _ := facade.DB.Model(&model.Pages{}).Where("id", targetId).Find()
+			itemMap := cast.ToStringMap(item)
+			authorId = cast.ToInt(itemMap["uid"])
+			title = cast.ToString(itemMap["title"])
+		case "moments":
+			item, _ := facade.DB.Model(&model.Moments{}).Where("id", targetId).Find()
+			itemMap := cast.ToStringMap(item)
+			authorId = cast.ToInt(itemMap["uid"])
+			content = cast.ToString(itemMap["content"])
+		default:
+			return
+		}
+
+		if authorId <= 0 || authorId == uid {
+			return
+		}
+
+		userInfo, _ := facade.DB.Model(&model.Users{}).Find(uid)
+		fromNickname := cast.ToString(cast.ToStringMap(userInfo)["nickname"])
+
+		var notifTitle, notifContent string
+		switch targetType {
+		case "article":
+			if !utils.Is.Empty(title) {
+				title = truncateSafe(title, 20)
+				notifTitle = "文章被收藏"
+				notifContent = fromNickname + " 收藏了你的文章「" + title + "」"
+			} else {
+				notifTitle = "获得新收藏"
+				notifContent = fromNickname + " 收藏了你的文章"
+			}
+		case "page":
+			if !utils.Is.Empty(title) {
+				title = truncateSafe(title, 20)
+				notifTitle = "页面被收藏"
+				notifContent = fromNickname + " 收藏了你的页面「" + title + "」"
+			} else {
+				notifTitle = "获得新收藏"
+				notifContent = fromNickname + " 收藏了你的页面"
+			}
+		case "moments":
+			if !utils.Is.Empty(content) {
+				content = truncateSafe(content, 30)
+				notifTitle = "动态被收藏"
+				notifContent = fromNickname + " 收藏了你的动态「" + content + "」"
+			} else {
+				notifTitle = "获得新收藏"
+				notifContent = fromNickname + " 收藏了你的动态"
+			}
+		}
+
+		notif, notifErr := (&model.Notification{}).CreateNotification(
+			authorId, uid, "collect", notifTitle, notifContent, targetType, targetId,
+		)
+
+		if notifErr == nil && notif != nil {
+			PushNotification(authorId, notif)
+		}
+	}()
+
 	this.json(ctx, gin.H{
 		"target_type": targetType,
 		"target_id":   targetId,

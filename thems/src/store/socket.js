@@ -5,6 +5,7 @@ import { socketManager } from '@/composables/useSocket'
 let statusListenerRegistered = false
 let openListenerRegistered = false
 let closeListenerRegistered = false
+let notificationListenerRegistered = false
 
 export const useSocketStore = defineStore('socket', {
   state: () => ({
@@ -23,6 +24,10 @@ export const useSocketStore = defineStore('socket', {
     // 消息列表
     messages: [],
     maxMessages: 100,
+
+    // 实时通知列表
+    notifications: [],
+    unreadNotificationCount: 0,
 
     // 私聊消息（按用户/会话分组）
     privateMessages: new Map(),
@@ -102,6 +107,13 @@ export const useSocketStore = defineStore('socket', {
           if (data?.id) {
             this.clientId = data.id
           }
+        })
+      }
+
+      if (!notificationListenerRegistered) {
+        notificationListenerRegistered = true
+        socketManager.on('notification', (content) => {
+          this.addNotification(content)
         })
       }
 
@@ -200,6 +212,41 @@ export const useSocketStore = defineStore('socket', {
       this.messages = []
       this.broadcastMessages = []
       this.privateMessages.clear()
+    },
+
+    /**
+     * 添加实时通知
+     */
+    addNotification(notif) {
+      if (!notif || !notif.id) return
+      // 去重检查
+      if (this.notifications.some(n => n.id === notif.id)) return
+      
+      const notifItem = {
+        id: notif.id,
+        type: notif.type || 'system',
+        title: notif.title || '',
+        content: notif.content || '',
+        bind_id: notif.bind_id,
+        bind_type: notif.bind_type,
+        from_uid: notif.from_uid,
+        create_time: notif.create_time,
+        unread: true,
+      }
+      
+      this.notifications.unshift(notifItem)
+      this.unreadNotificationCount++
+      
+      if (this.notifications.length > this.maxMessages) {
+        this.notifications.pop()
+      }
+    },
+
+    /**
+     * 更新未读通知计数
+     */
+    setUnreadCount(count) {
+      this.unreadNotificationCount = count
     },
   },
 })

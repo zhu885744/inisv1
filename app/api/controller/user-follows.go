@@ -627,6 +627,28 @@ func (this *UserFollows) follow(ctx *gin.Context) {
 		return
 	}
 
+	// 创建通知 - 被关注通知
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "创建关注通知协程发生错误")
+			}
+		}()
+
+		userInfo, _ := facade.DB.Model(&model.Users{}).Find(uid)
+		fromNickname := cast.ToString(cast.ToStringMap(userInfo)["nickname"])
+
+		notif, notifErr := (&model.Notification{}).CreateNotification(
+			followUid, uid, "follow", "有新关注",
+			fromNickname+" 关注了你",
+			"user", uid,
+		)
+
+		if notifErr == nil && notif != nil {
+			PushNotification(followUid, notif)
+		}
+	}()
+
 	this.json(ctx, gin.H{"follow_uid": followUid}, facade.Lang(ctx, "关注成功！"), 200)
 }
 

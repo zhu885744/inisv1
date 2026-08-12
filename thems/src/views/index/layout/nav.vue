@@ -114,6 +114,24 @@
           >
             <i v-if="!signLoading" :class="hasSigned ? 'bi bi-check-circle' : 'bi bi-calendar-check'"></i>     
           </button>
+
+          <!-- 通知按钮（含未读角标），仅登录后显示 -->
+          <button 
+            v-if="store.comm.login.finish && store.comm.login.user"
+            class="btn btn-outline-secondary me-2 position-relative" 
+            type="button" 
+            @click="method.showNotification()"
+            title="消息中心"
+          >
+            <i class="bi bi-bell"></i>
+            <span 
+              v-if="socketStore.unreadNotificationCount > 0" 
+              class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+              style="font-size: 0.65rem;"
+            >
+              {{ socketStore.unreadNotificationCount > 99 ? '99+' : socketStore.unreadNotificationCount }}
+            </span>
+          </button>
           
           <!-- 用户相关功能 -->
           <div class="d-flex align-items-center" v-if="store.comm.login.finish && store.comm.login.user">
@@ -136,11 +154,6 @@
                 <li>
                   <router-link class="dropdown-item" to="/article-write">
                     <i class="bi bi-pencil-square me-1"></i>发布文章
-                  </router-link>
-                </li>
-                <li>
-                  <router-link class="dropdown-item" to="/messages">
-                    <i class="bi bi-bell me-1"></i>消息中心
                   </router-link>
                 </li>
                 <li>
@@ -418,6 +431,7 @@ import { cache } from '@/utils/network'
 import { useRouter } from 'vue-router'
 import { useCommStore } from '@/store/comm'
 import { useConfigStore } from '@/store/config'
+import { useSocketStore } from '@/store/socket'
 import { STORAGE_KEYS } from '@/constants'
 
 // 引入对话框组件
@@ -454,6 +468,7 @@ const store = {
   comm: useCommStore(),
   config: useConfigStore()
 }
+const socketStore = useSocketStore()
 
 // 清除缓存方法
 const clearCache = () => {
@@ -653,6 +668,26 @@ const method = {
           appealDialog.value.show()
         }
       }, 100)
+    }
+  },
+
+  // 跳转至消息中心
+  showNotification() {
+    closeSidebar()
+    router.push('/messages')
+  },
+
+  // 获取未读通知数量
+  async fetchUnreadCount() {
+    if (!store.comm.login.finish || !store.comm.login.user) return
+    try {
+      const res = await request.get('/api/notification/unread-count')
+      if (res.code === 200 && res.data != null) {
+        const count = typeof res.data === 'object' ? (res.data.count || 0) : res.data
+        socketStore.setUnreadCount(Number(count) || 0)
+      }
+    } catch {
+      // 静默处理
     }
   },
 }
@@ -923,6 +958,7 @@ onMounted(() => {
   initTheme()
   setupSystemThemeListener()
   checkSignStatus()
+  method.fetchUnreadCount()
   
   // 初始化 Bootstrap 组件
   if (window.bootstrap) {
@@ -961,6 +997,7 @@ onMounted(() => {
 watch(() => store.comm.login.user, () => {
   nextTick(() => {
     initDropdowns()
+    method.fetchUnreadCount()
   })
 })
 

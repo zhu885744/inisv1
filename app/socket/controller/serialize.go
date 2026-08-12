@@ -471,7 +471,7 @@ func (hub *hub) ValidateMessage(message []byte) (bool, string) {
 	}
 
 	msgType := cast.ToString(content["type"])
-	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong"}
+	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification"}
 	found := false
 	for _, t := range allowedTypes {
 		if t == msgType {
@@ -577,4 +577,12 @@ func (hub *hub) GetUnreadCount(userId string) int {
 func (hub *hub) GetChatHistory(user1, user2 string, limit int) []*privateMessage {
 	var history []*privateMessage
 	return history
+}
+
+// PushNotice 推送通知消息到Hub（对外公开方法）
+func (hub *hub) PushNotice(data []byte) {
+	if hub == nil || hub.notice == nil {
+		return
+	}
+	hub.notice <- data
 }

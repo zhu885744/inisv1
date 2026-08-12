@@ -2,9 +2,10 @@ package validator
 
 import (
 	"errors"
+	"strings"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"strings"
 )
 
 type Valid interface {
@@ -70,6 +71,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &Attachment{}
 	case "user-ban-records":
 		item = &UserBanRecords{}
+	case "notification":
+		item = &Notification{}
 	default:
 		return errors.New("未知的验证器！")
 	}

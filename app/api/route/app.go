@@ -23,8 +23,8 @@ var defaultMiddleware = []gin.HandlerFunc{
 
 // 所有可用的控制器
 var controllers = map[string]controller.ApiInterface{
-	"exp":  		 &controller.EXP{},
-	"test":			 &controller.Test{},
+	"exp":           &controller.EXP{},
+	"test":          &controller.Test{},
 	"comm":          &controller.Comm{},
 	"toml":          &controller.Toml{},
 	"tags":          &controller.Tags{},
@@ -55,6 +55,7 @@ var controllers = map[string]controller.ApiInterface{
 	"user-likes":    &controller.UserLikes{},
 	"user-collects": &controller.UserCollects{},
 	"user-follows":  &controller.UserFollows{},
+	"notification":  &controller.Notification{},
 }
 
 // registerRoutes 注册路由

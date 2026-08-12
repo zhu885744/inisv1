@@ -367,7 +367,7 @@ func (hub *hub) run() {
 			if empty := utils.Is.Empty(msgType); empty || msgType == "broadcast" || msgType == "status" {
 				hub.recordMessage("broadcast")
 				hub.broadcast(message)
-			} else if msgType == "single" {
+			} else if msgType == "single" || msgType == "notification" {
 				hub.recordMessage("single")
 				hub.singlecast(message)
 			} else if msgType == "private" {

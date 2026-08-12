@@ -554,6 +554,38 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=login",
 			},
 		},
+		"notification": {
+			"GET": {
+				"path=one&type=login&name=获取指定通知",
+				"path=all&type=login&name=获取全部通知",
+				"path=sum&type=login",
+				"path=min&type=login",
+				"path=max&type=login",
+				"path=rand&type=login",
+				"path=count&type=login&name=查询通知数量",
+				"path=column&type=login&name=列查询通知",
+				"path=list&type=login&name=获取通知列表",
+				"path=unread-count&type=login&name=获取未读通知数",
+			},
+			"POST": {
+				"path=save&type=login",
+				"path=create&type=login",
+				"path=send-system&type=default&name=发送系统消息",
+			},
+			"PUT": {
+				"path=update&type=login",
+				"path=restore&type=login",
+				"path=read&type=login&name=标记已读",
+				"path=read-all&type=login&name=全部标记已读",
+				"path=read-batch&type=login&name=批量标记已读",
+			},
+			"DELETE": {
+				"path=remove&type=login&name=删除通知",
+				"path=delete&type=login",
+				"path=clear&type=login",
+				"path=remove-all&type=login&name=清空通知",
+			},
+		},
 	}
 
 	// 接口名称
@@ -589,6 +621,7 @@ func createAuthRules() (result []AuthRules) {
 		"rss":           "【RSS订阅 API】",
 		"moments":       "【动态 API】",
 		"attachment":    "【附件 API】",
+		"notification":  "【消息通知 API】",
 	}
 
 	// 基础方法

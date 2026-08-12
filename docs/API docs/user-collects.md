@@ -44,7 +44,7 @@
 | :--- | :--- | :--- |
 | `id` | int | 主键，自增 |
 | `uid` | int | 用户ID |
-| `target_type` | string | 目标类型：article/page/moment/comment |
+| `target_type` | string | 目标类型：article/page/moment |
 | `target_id` | int | 目标ID |
 | `json` | any | JSON扩展数据 |
 | `text` | any | 文本扩展数据 |
@@ -289,7 +289,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment |
+| `target_type` | string | **是** | 目标类型：article/page/moment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -316,7 +316,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | 否 | 目标类型过滤：article/page/moment/comment |
+| `target_type` | string | 否 | 目标类型过滤：article/page/moment |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
@@ -357,7 +357,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment |
+| `target_type` | string | **是** | 目标类型：article/page/moment |
 | `target_ids` | string | **是** | 目标ID列表，逗号分隔 |
 
 **成功响应** (200):
@@ -458,7 +458,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment |
+| `target_type` | string | **是** | 目标类型：article/page/moment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -494,7 +494,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment |
+| `target_type` | string | **是** | 目标类型：article/page/moment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
@@ -554,7 +554,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment/comment |
+| `target_type` | string | **是** | 目标类型：article/page/moment |
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):

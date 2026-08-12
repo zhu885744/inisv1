@@ -1,294 +1,456 @@
 <template>
   <div class="card mt-3">
     <div class="card-body">
-    <!-- 页面头部 -->
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
-      <div>
-        <h1 class="h4 mb-0 d-flex align-items-center gap-2">
-          <i class="bi bi-bell-fill text-primary"></i>消息通知
-          <span class="badge bg-primary rounded-pill ms-2">{{ unreadCount }}</span>
-        </h1>
-        <p class="text-muted small mb-0 mt-1">实时接收系统通知、互动消息和平台公告</p>
+      <!-- 页面头部 -->
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+        <div>
+          <h1 class="h4 mb-0 d-flex align-items-center gap-2">
+            <i class="bi bi-bell-fill text-primary"></i>消息通知
+            <span v-if="unreadCount > 0" class="badge bg-primary rounded-pill ms-2">{{ unreadCount }}</span>
+          </h1>
+          <p class="text-muted small mb-0 mt-1">实时接收系统通知、互动消息和平台公告</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" @click="markAllRead" :disabled="loading || unreadCount === 0">
+            <i class="bi bi-check2-all me-1"></i>全部已读
+          </button>
+          <button class="btn btn-outline-danger btn-sm" @click="clearAll" :disabled="loading || filteredMessages.length === 0">
+            <i class="bi bi-trash3 me-1"></i>清空当前分类
+          </button>
+        </div>
       </div>
-      <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary btn-sm" @click="markAllRead">
-          <i class="bi bi-check2-all me-1"></i>全部已读
-        </button>
-        <button class="btn btn-outline-danger btn-sm" @click="clearAll">
-          <i class="bi bi-trash3 me-1"></i>清空
-        </button>
+
+      <!-- 分类筛选 Tabs -->
+      <ul class="nav nav-tabs border-bottom mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
+            全部 <span class="badge bg-secondary rounded-pill ms-1">{{ totalCount }}</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'unread' }" @click="activeTab = 'unread'">
+            未读 <span class="badge bg-primary rounded-pill ms-1">{{ unreadCount }}</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'comment' }" @click="activeTab = 'comment'">
+            <i class="bi bi-chat-dots me-1"></i>回复
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'like' }" @click="activeTab = 'like'">
+            <i class="bi bi-heart me-1"></i>点赞
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'collection' }" @click="activeTab = 'collection'">
+            <i class="bi bi-bookmark me-1"></i>收藏
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'follow' }" @click="activeTab = 'follow'">
+            <i class="bi bi-person-plus me-1"></i>关注
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'">
+            <i class="bi bi-gear me-1"></i>系统
+          </button>
+        </li>
+      </ul>
+
+      <!-- 加载中 -->
+      <div v-if="loading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">加载中...</span>
+        </div>
+        <p class="mt-2 text-muted small">加载消息中...</p>
       </div>
-    </div>
 
-    <!-- 分类筛选 Tabs -->
-    <ul class="nav nav-tabs border-bottom mb-3" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button
-          class="nav-link active"
-          :class="{ active: activeTab === 'all' }"
-          @click="activeTab = 'all'"
+      <!-- 消息列表 -->
+      <div v-else-if="filteredMessages.length > 0" class="wx-message-list">
+        <div
+          v-for="msg in filteredMessages"
+          :key="msg.id"
+          class="wx-message-item border rounded mb-2 p-3"
+          :class="{
+            'border-start border-start-4 border-primary': !msg.is_read && msg.is_read !== undefined,
+            'bg-light-subtle': !msg.is_read && msg.is_read !== undefined,
+            'opacity-75': msg.is_read === 1
+          }"
+          @click="handleItemClick(msg)"
         >
-          全部 <span class="badge bg-secondary rounded-pill ms-1">{{ messages.length }}</span>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button
-          class="nav-link"
-          :class="{ active: activeTab === 'unread' }"
-          @click="activeTab = 'unread'"
-        >
-          未读 <span class="badge bg-primary rounded-pill ms-1">{{ unreadCount }}</span>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button
-          class="nav-link"
-          :class="{ active: activeTab === 'system' }"
-          @click="activeTab = 'system'"
-        >
-          <i class="bi bi-gear me-1"></i>系统
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button
-          class="nav-link"
-          :class="{ active: activeTab === 'interaction' }"
-          @click="activeTab = 'interaction'"
-        >
-          <i class="bi bi-chat me-1"></i>互动
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button
-          class="nav-link"
-          :class="{ active: activeTab === 'announcement' }"
-          @click="activeTab = 'announcement'"
-        >
-          <i class="bi bi-megaphone me-1"></i>公告
-        </button>
-      </li>
-    </ul>
-
-    <!-- 消息列表 -->
-    <div v-if="filteredMessages.length > 0" class="wx-message-list">
-      <div
-        v-for="msg in filteredMessages"
-        :key="msg.id"
-        class="wx-message-item border rounded mb-2 p-3"
-        :class="{
-          'border-start border-start-4 border-primary': msg.unread,
-          'bg-light-subtle': msg.unread,
-          'opacity-75': !msg.unread
-        }"
-        @click="markRead(msg.id)"
-      >
-        <div class="d-flex gap-3">
-          <!-- 头像 / 图标 -->
-          <div class="flex-shrink-0">
-            <div
-              class="wx-avatar d-flex align-items-center justify-content-center rounded-circle"
-              :class="getAvatarClass(msg.type)"
-              style="width: 44px; height: 44px; font-size: 1.2rem;"
-            >
-              <i :class="getIcon(msg.type)"></i>
-            </div>
-          </div>
-
-          <!-- 消息内容 -->
-          <div class="flex-grow-1 min-w-0">
-            <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
-              <div>
-                <span class="fw-semibold">{{ msg.title }}</span>
-                <span v-if="msg.unread" class="badge bg-primary rounded-pill ms-2 small">未读</span>
-                <span class="badge bg-light text-secondary border ms-1 small">{{ msg.typeLabel }}</span>
+          <div class="d-flex gap-3">
+            <!-- 头像 / 图标 -->
+            <div class="flex-shrink-0">
+              <div
+                class="wx-avatar d-flex align-items-center justify-content-center rounded-circle"
+                :class="getAvatarClass(msg.type)"
+                style="width: 44px; height: 44px; font-size: 1.2rem;"
+              >
+                <img v-if="msg.result?.from_user?.avatar" :src="msg.result?.from_user?.avatar" alt="" style="width:44px;height:44px;border-radius:50%;object-fit:cover" />
+                <i v-else :class="getIcon(msg.type)"></i>
               </div>
-              <small class="text-muted flex-shrink-0">{{ msg.time }}</small>
             </div>
 
-            <p class="mb-1 text-body-secondary small">{{ msg.content }}</p>
+            <!-- 消息内容 -->
+            <div class="flex-grow-1 min-w-0">
+              <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+                <div>
+                  <span class="fw-semibold">{{ msg.title }}</span>
+                  <span v-if="!msg.is_read && msg.is_read !== undefined" class="badge bg-primary ms-2 small">未读</span>
+                  <span class="badge bg-light text-secondary border ms-1 small">{{ getTypeLabel(msg.type) }}</span>
+                </div>
+                <small class="text-muted flex-shrink-0">{{ formatTime(msg.create_time) }}</small>
+              </div>
 
-            <!-- 操作按钮 -->
-            <div class="d-flex gap-3 mt-2">
-              <button
-                v-if="msg.unread"
-                class="btn btn-link btn-sm p-0 text-primary text-decoration-none"
-                @click.stop="markRead(msg.id)"
-              >
-                <i class="bi bi-check2 me-1"></i>标记已读
-              </button>
-              <button
-                class="btn btn-link btn-sm p-0 text-danger text-decoration-none"
-                @click.stop="removeMessage(msg.id)"
-              >
-                <i class="bi bi-trash3 me-1"></i>删除
-              </button>
-              <button
-                v-if="msg.actionLink"
-                class="btn btn-link btn-sm p-0 text-decoration-none"
-                @click.stop="handleAction(msg.actionLink)"
-              >
-                <i class="bi bi-box-arrow-up-right me-1"></i>查看详情
-              </button>
+              <!-- ★ 修改点：将文本插值改为 v-html，并调用 formatContent 处理表情 -->
+              <p class="mb-1 text-body-secondary small" v-html="formatContent(msg.content)"></p>
+
+              <!-- 操作按钮 -->
+              <div class="d-flex gap-3 mt-2">
+                <button
+                  v-if="!msg.is_read && msg.is_read !== undefined"
+                  class="btn btn-link btn-sm p-0 text-primary text-decoration-none"
+                  @click.stop="markRead(msg.id)"
+                >
+                  <i class="bi bi-check2 me-1"></i>标记已读
+                </button>
+                <button
+                  class="btn btn-link btn-sm p-0 text-danger text-decoration-none"
+                  @click.stop="removeMessage(msg.id)"
+                >
+                  <i class="bi bi-trash3 me-1"></i>删除
+                </button>
+                <button
+                  v-if="getActionLink(msg)"
+                  class="btn btn-link btn-sm p-0 text-decoration-none"
+                  @click.stop="handleAction(msg)"
+                >
+                  <i class="bi bi-box-arrow-up-right me-1"></i>查看详情
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 空状态 -->
-    <div v-else class="wx-card">
-      <div class="wx-empty-state py-5">
+        <!-- 分页 -->
+        <div v-if="totalPages > 1" class="d-flex justify-content-center mt-3">
+          <nav>
+            <ul class="pagination pagination-sm">
+              <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+                <button class="page-link" @click="changePage(currentPage - 1)">上一页</button>
+              </li>
+              <li class="page-item disabled">
+                <span class="page-link">{{ currentPage }} / {{ totalPages }}</span>
+              </li>
+              <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+                <button class="page-link" @click="changePage(currentPage + 1)">下一页</button>
+              </li>
+            </ul>
+          </nav>
+        </div>
+      </div>
+
+      <!-- 空状态 -->
+      <div v-else class="text-center py-5">
         <i class="bi bi-inbox display-4 d-block mb-3 opacity-25"></i>
         <p class="h5 mb-1">暂无消息</p>
         <p class="text-muted small">当前分类下没有消息，稍后再来看看吧</p>
-        <button class="btn btn-outline-primary btn-sm mt-2" @click="activeTab = 'all'">
-          <i class="bi bi-arrow-left me-1"></i>返回全部
-        </button>
       </div>
-    </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { request } from '@/utils/network'
+import { useSocketStore } from '@/store/socket'
+
+const router = useRouter()
+const socketStore = useSocketStore()
 
 // ---------- 状态 ----------
 const activeTab = ref('all')
-const messages = ref([
-  {
-    id: 1,
-    type: 'system',
-    typeLabel: '系统',
-    title: '系统维护通知',
-    content: '服务器将于 2026-08-10 02:00-04:00 进行例行维护，期间服务可能短暂不可用，请提前做好准备。',
-    time: '2026-08-08 14:30',
-    unread: true,
-    actionLink: '/notice/system-maintenance'
-  },
-  {
-    id: 2,
-    type: 'interaction',
-    typeLabel: '互动',
-    title: '用户 @张三 评论了你的文章',
-    content: '「这篇文章写得太棒了！尤其是关于缓存策略的部分，学到了很多。」',
-    time: '2026-08-08 10:15',
-    unread: true,
-    actionLink: '/article/123#comment-456'
-  },
-  {
-    id: 3,
-    type: 'announcement',
-    typeLabel: '公告',
-    title: '🎉 新版编辑器上线预告',
-    content: '全新 Markdown 编辑器即将于下周发布，支持实时预览、代码高亮和 AI 辅助写作，敬请期待！',
-    time: '2026-08-07 18:00',
-    unread: false,
-    actionLink: '/announcement/new-editor'
-  },
-  {
-    id: 4,
-    type: 'system',
-    typeLabel: '系统',
-    title: '账号安全提醒',
-    content: '检测到您在新设备 (Chrome 浏览器, 广东深圳) 上登录。如非本人操作，请立即修改密码。',
-    time: '2026-08-07 08:22',
-    unread: false,
-    actionLink: '/security/account'
-  },
-  {
-    id: 5,
-    type: 'interaction',
-    typeLabel: '互动',
-    title: '用户 @李四 赞了你的动态',
-    content: '「分享的代码片段太实用了，已收藏！」',
-    time: '2026-08-06 22:10',
-    unread: false,
-    actionLink: '/moment/567'
-  },
-  {
-    id: 6,
-    type: 'announcement',
-    typeLabel: '公告',
-    title: '📢 社区运营新规',
-    content: '为营造更良好的社区氛围，即日起实施新版内容规范，详见公告链接。',
-    time: '2026-08-06 16:45',
-    unread: false,
-    actionLink: '/announcement/community-rules'
-  },
-  {
-    id: 7,
-    type: 'interaction',
-    typeLabel: '互动',
-    title: '用户 @王五 回复了你的评论',
-    content: '「@张三 是的，我试过了，确实可以这样用，感谢分享！」',
-    time: '2026-08-06 13:20',
-    unread: false,
-    actionLink: '/article/456#comment-789'
+const messages = ref([])
+const loading = ref(false)
+const currentPage = ref(1)
+const totalCount = ref(0)
+const totalPages = ref(1)
+const unreadCount = ref(0)
+const pageSize = 20
+
+// ---------- API 请求 ----------
+const fetchNotifications = async () => {
+  loading.value = true
+  try {
+    let params = {
+      page: currentPage.value,
+      size: pageSize,
+      order: 'create_time desc',
+    }
+
+    if (activeTab.value === 'unread') {
+      params.is_read = 0
+    } else if (activeTab.value !== 'all') {
+      // collection 映射为 collect
+      params.type = activeTab.value === 'collection' ? 'collect' : activeTab.value
+    }
+
+    const res = await request.get('/api/notification/list', params)
+    const result = res?.data?.data || res?.data
+
+    if (result?.data) {
+      messages.value = Array.isArray(result.data) ? result.data : []
+      totalCount.value = result.count || 0
+      totalPages.value = result.page || 1
+    } else if (Array.isArray(result)) {
+      messages.value = result
+      totalCount.value = result.length
+      totalPages.value = 1
+    } else {
+      messages.value = []
+      totalCount.value = 0
+      totalPages.value = 1
+    }
+  } catch (err) {
+    console.error('获取通知列表失败:', err)
+    messages.value = []
+  } finally {
+    loading.value = false
   }
-])
+}
+
+const fetchUnreadCount = async () => {
+  try {
+    const res = await request.get('/api/notification/unread-count')
+    const data = res.data?.data || res.data
+    unreadCount.value = data?.count || 0
+    socketStore.setUnreadCount(unreadCount.value)
+  } catch (err) {
+    console.error('获取未读通知数失败:', err)
+  }
+}
+
+const markRead = async (id) => {
+  try {
+    await request.put('/api/notification/read', { id })
+    const msg = messages.value.find(m => m.id === id)
+    if (msg && msg.is_read !== undefined) {
+      msg.is_read = 1
+      unreadCount.value = Math.max(0, unreadCount.value - 1)
+      socketStore.setUnreadCount(unreadCount.value)
+    }
+  } catch (err) {
+    console.error('标记已读失败:', err)
+  }
+}
+
+const markAllRead = async () => {
+  try {
+    await request.put('/api/notification/read-all')
+    messages.value.forEach(m => {
+      if (m.is_read !== undefined) m.is_read = 1
+    })
+    unreadCount.value = 0
+    socketStore.setUnreadCount(0)
+  } catch (err) {
+    console.error('全部标记已读失败:', err)
+  }
+}
+
+const removeMessage = async (id) => {
+  try {
+    await request.delete('/api/notification/remove', { data: { ids: [id] } })
+    messages.value = messages.value.filter(m => m.id !== id)
+    totalCount.value = Math.max(0, totalCount.value - 1)
+    fetchUnreadCount()
+  } catch (err) {
+    console.error('删除消息失败:', err)
+  }
+}
+
+const clearAll = async () => {
+  if (!confirm('确定要清空当前分类下的所有消息吗？此操作不可恢复。')) return
+
+  try {
+    let params = {}
+    if (activeTab.value !== 'all' && activeTab.value !== 'unread') {
+      params.type = activeTab.value === 'collection' ? 'collect' : activeTab.value
+    }
+    await request.delete('/api/notification/remove-all', { data: params })
+    messages.value = []
+    totalCount.value = 0
+    fetchUnreadCount()
+  } catch (err) {
+    console.error('清空消息失败:', err)
+  }
+}
 
 // ---------- 计算属性 ----------
-const unreadCount = computed(() => messages.value.filter(m => m.unread).length)
+const filteredMessages = computed(() => messages.value)
 
-const filteredMessages = computed(() => {
-  switch (activeTab.value) {
-    case 'unread':
-      return messages.value.filter(m => m.unread)
-    case 'system':
-      return messages.value.filter(m => m.type === 'system')
-    case 'interaction':
-      return messages.value.filter(m => m.type === 'interaction')
-    case 'announcement':
-      return messages.value.filter(m => m.type === 'announcement')
-    default:
-      return messages.value
-  }
-})
-
-// ---------- 方法 ----------
+// ---------- 辅助方法 ----------
 const getIcon = (type) => {
   const map = {
+    comment: 'bi-chat-dots',
+    like: 'bi-heart',
+    collect: 'bi-bookmark',
+    follow: 'bi-person-plus',
     system: 'bi-gear',
-    interaction: 'bi-chat-dots',
-    announcement: 'bi-megaphone'
   }
   return map[type] || 'bi-bell'
 }
 
+const getTypeLabel = (type) => {
+  const map = {
+    comment: '回复',
+    like: '点赞',
+    collect: '收藏',
+    follow: '关注',
+    system: '系统',
+  }
+  return map[type] || type
+}
+
 const getAvatarClass = (type) => {
   const map = {
+    comment: 'bg-info-subtle text-info',
+    like: 'bg-danger-subtle text-danger',
+    collect: 'bg-warning-subtle text-warning',
+    follow: 'bg-success-subtle text-success',
     system: 'bg-primary-subtle text-primary',
-    interaction: 'bg-success-subtle text-success',
-    announcement: 'bg-warning-subtle text-warning'
   }
   return map[type] || 'bg-secondary-subtle text-secondary'
 }
 
-const markRead = (id) => {
-  const msg = messages.value.find(m => m.id === id)
-  if (msg) msg.unread = false
+const formatTime = (ts) => {
+  if (!ts) return ''
+  const date = new Date(ts * 1000)
+  const now = new Date()
+  const diff = now - date
+  const mins = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins}分钟前`
+  if (hours < 24) return `${hours}小时前`
+  if (days < 7) return `${days}天前`
+
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
-const markAllRead = () => {
-  messages.value.forEach(m => m.unread = false)
-}
+const getActionLink = (msg) => {
+  if (!msg.bind_id || !msg.bind_type) return null
 
-const removeMessage = (id) => {
-  messages.value = messages.value.filter(m => m.id !== id)
-}
-
-const clearAll = () => {
-  if (confirm('确定要清空所有消息吗？此操作不可恢复。')) {
-    messages.value = []
+  switch (msg.bind_type) {
+    case 'article':
+      return `/archives/${msg.bind_id}`
+    case 'page':
+      return `/${msg.bind_id}`
+    case 'moments':
+      return `/moments/${msg.bind_id}`
+    case 'comment':
+      return null
+    case 'user':
+      return `/author/${msg.bind_id}`
+    default:
+      return null
   }
 }
 
-const handleAction = (link) => {
-  // 跳转或执行其他操作
-  console.log('跳转到:', link)
-  // 实际使用 router.push(link)
+const handleAction = (msg) => {
+  const link = getActionLink(msg)
+  if (link) {
+    markRead(msg.id).finally(() => {
+      if (msg.bind_type === 'article') {
+        router.push({ name: '文章详情', params: { id: String(msg.bind_id) } })
+      } else if (msg.bind_type === 'moments') {
+        router.push({ name: '动态详情', params: { id: String(msg.bind_id) } })
+      } else if (msg.bind_type === 'user') {
+        router.push({ name: '用户主页', params: { id: String(msg.bind_id) } })
+      } else {
+        router.push(link)
+      }
+    })
+  }
 }
+
+const handleItemClick = (msg) => {
+  if (!msg.is_read && msg.is_read !== undefined) {
+    markRead(msg.id)
+  }
+}
+
+const changePage = (page) => {
+  if (page < 1 || page > totalPages.value) return
+  currentPage.value = page
+  fetchNotifications()
+}
+
+// ---------- ★ 新增：HTML 转义和 Emoji 解析 ----------
+// 转义 HTML 特殊字符，防止 XSS
+const escapeHtml = (text) => {
+  if (!text) return ''
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }
+  return text.replace(/[&<>"']/g, (m) => map[m])
+}
+
+// 将 [emoji:图片链接] 格式替换为 img 标签
+const formatContent = (content) => {
+  if (!content) return ''
+  // 先转义，再替换 emoji
+  const escaped = escapeHtml(content)
+  return escaped.replace(
+    /\[emoji:([^\]]+)\]/g,
+    (match, url) => {
+      // 对 URL 做简单过滤，只允许 http/https，防止 javascript: 等危险协议
+      const sanitizedUrl = url.trim()
+      if (!/^https?:\/\/./i.test(sanitizedUrl)) {
+        return match // 不安全的 URL 保留原样
+      }
+      // 再次转义 URL 中的特殊字符（虽然已经转义过，但为了安全再处理）
+      const safeUrl = escapeHtml(sanitizedUrl)
+      return `<img src="${safeUrl}" alt="emoji" class="emoji-inline" />`
+    }
+  )
+}
+
+// ---------- 监听Socket实时通知 ----------
+const onSocketNotification = (notif) => {
+  // 新通知到达时更新列表和计数
+  if (activeTab.value === 'all' || activeTab.value === notif.type) {
+    messages.value.unshift(notif)
+    totalCount.value++
+  }
+  fetchUnreadCount()
+}
+
+// ---------- 生命周期 ----------
+onMounted(async () => {
+  await fetchNotifications()
+  await fetchUnreadCount()
+
+  // 监听实时通知
+  socketStore.init()
+})
+
+// 监听Tab切换
+watch(activeTab, () => {
+  currentPage.value = 1
+  fetchNotifications()
+})
 </script>
 
 <style scoped>
@@ -314,8 +476,11 @@ const handleAction = (link) => {
 .bg-success-subtle {
   background-color: rgba(25, 135, 84, 0.12) !important;
 }
-.bg-warning-subtle {
-  background-color: rgba(255, 193, 7, 0.12) !important;
+.bg-info-subtle {
+  background-color: rgba(13, 202, 240, 0.12) !important;
+}
+.bg-danger-subtle {
+  background-color: rgba(220, 53, 69, 0.12) !important;
 }
 .bg-secondary-subtle {
   background-color: rgba(108, 117, 125, 0.12) !important;
@@ -327,8 +492,11 @@ const handleAction = (link) => {
 [data-bs-theme="dark"] .bg-success-subtle {
   background-color: rgba(25, 135, 84, 0.25) !important;
 }
-[data-bs-theme="dark"] .bg-warning-subtle {
-  background-color: rgba(255, 193, 7, 0.25) !important;
+[data-bs-theme="dark"] .bg-info-subtle {
+  background-color: rgba(13, 202, 240, 0.25) !important;
+}
+[data-bs-theme="dark"] .bg-danger-subtle {
+  background-color: rgba(220, 53, 69, 0.25) !important;
 }
 [data-bs-theme="dark"] .bg-secondary-subtle {
   background-color: rgba(108, 117, 125, 0.25) !important;
@@ -337,6 +505,15 @@ const handleAction = (link) => {
 /* ----- 空状态微调 ----- */
 .wx-empty-state i {
   opacity: 0.25;
+}
+
+/* ----- ★ 表情图片样式 ----- */
+.emoji-inline {
+  height: 1.2em;
+  width: auto;
+  vertical-align: middle;
+  display: inline-block;
+  object-fit: contain;
 }
 
 /* ----- 响应式 Tabs 滚动 ----- */

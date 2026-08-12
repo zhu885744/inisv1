@@ -711,6 +711,61 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}()
 
+	// 创建通知 - 新回复通知给文章/页面/动态作者
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				facade.Log.Error(map[string]any{"error": r}, "创建回复通知协程发生错误")
+			}
+		}()
+
+		var authorId int
+		var bindTitle string
+
+		switch table.BindType {
+		case "article":
+			article, _ := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
+			if !utils.Is.Empty(article) {
+				authorId = cast.ToInt(cast.ToStringMap(article)["uid"])
+				bindTitle = cast.ToString(cast.ToStringMap(article)["title"])
+			}
+		case "page":
+			page, _ := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
+			if !utils.Is.Empty(page) {
+				authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
+				bindTitle = cast.ToString(cast.ToStringMap(page)["title"])
+			}
+		case "moments":
+			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
+			if !utils.Is.Empty(moment) {
+				authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
+				content := cast.ToString(cast.ToStringMap(moment)["content"])
+				if len([]rune(content)) > 30 {
+					bindTitle = string([]rune(content)[:30]) + "..."
+				} else {
+					bindTitle = content
+				}
+			}
+		}
+
+		if authorId > 0 && authorId != user.Id {
+			title := "收到新回复"
+			notifUserInfo, _ := facade.DB.Model(&model.Users{}).Where("id", user.Id).Find()
+			notifContent := cast.ToString(cast.ToStringMap(notifUserInfo)["nickname"]) + " 回复了你"
+			if bindTitle != "" {
+				notifContent += "的" + bindTitle
+			}
+
+			notif, notifErr := (&model.Notification{}).CreateNotification(
+				authorId, user.Id, "comment", title, notifContent, table.BindType, table.BindId,
+			)
+
+			if notifErr == nil && notif != nil {
+				PushNotification(authorId, notif)
+			}
+		}
+	}()
+
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 

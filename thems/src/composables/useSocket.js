@@ -266,6 +266,7 @@ const dispatchMessage = (message) => {
     case 'ack':
       // 消息确认
       break
+    case 'notification':
     case 'status':
     case 'broadcast':
     case 'single':
