@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { cache } from '@/utils/network'
 import utils from '@/utils/utils'
 import { request as axios } from '@/utils/network'
-import { route } from '@/utils/app'
+import { route, applyRouteTitle } from '@/utils/app'
 import { STORAGE_KEYS } from '@/constants'
 
 // 定义Token名称（和后端配置一致）
@@ -194,10 +194,15 @@ const fetchSiteInfo = async (state = {}, force = false) => {
                     
                     state.siteInfo = siteInfo
                     
-                    // 更新页面标题
+                    // 站点信息加载完成后，按当前路由重新拼接完整标题（页面名 - 站点名）
+                    // 避免用裸站点名覆盖掉路由已设置好的页面标题
                     if (siteInfo.title) {
-                        document.title = siteInfo.title
+                        const pageTitle = route.currentRoute?.value?.meta?.title ||
+                            route.currentRoute?.value?.name || '未知页面'
+                        document.title = `${pageTitle} - ${siteInfo.title}`
                     }
+                    // 兜底：若路由实例未就绪，则交由 router.beforeEach 在下次导航时修正
+                    applyRouteTitle?.()
                     
                     return siteInfo
                 } else {

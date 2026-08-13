@@ -1,5 +1,4 @@
 import * as bootstrap from 'bootstrap/dist/js/bootstrap.bundle.min.js'
-import { useTitle as useVueUseTitle } from '@vueuse/core'
 import { computed, watch, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import utils from '@/utils/utils'
@@ -880,58 +879,70 @@ const setupRouteTitle = (routerInstance) => {
   })
 }
 
+// 根据当前路由重新计算并写入页面标题（单一数据源，避免多实例冲突导致标题错乱）
+const applyRouteTitle = () => {
+  const siteTitle = getSiteTitle()
+  const route = router.currentRoute.value
+  const pageTitle = route?.meta?.title || route?.name || '未知页面'
+  document.title = `${pageTitle} - ${siteTitle}`
+}
+
 const usePageTitle = (options = {}) => {
+  // 兼容旧调用方式：usePageTitle('小黑屋')
+  const opts = typeof options === 'string' ? { staticTitle: options, defaultTitle: options } : options
   const {
     staticTitle = '',
     defaultTitle = '未知页面'
-  } = options
-  
+  } = opts
+
   const route = useRoute()
-  const title = useVueUseTitle('')
-  
+
   const baseTitle = computed(() => getSiteTitle())
-  
+
   const fullTitle = computed(() => {
     const pageTitle = route.meta.title || route.name || defaultTitle
     return `${pageTitle} - ${baseTitle.value}`
   })
-  
+
+  // 直接写入 document.title，不再依赖 @vueuse/useTitle 的多个实例（会造成标题串页）
   const setTitle = (newTitle) => {
-    title.value = newTitle
+    document.title = newTitle
   }
-  
+
   const setDynamicTitle = (dynamicTitle, appendBase = true) => {
     if (appendBase) {
-      title.value = `${dynamicTitle} - ${baseTitle.value}`
+      document.title = `${dynamicTitle} - ${baseTitle.value}`
     } else {
-      title.value = dynamicTitle
+      document.title = dynamicTitle
     }
   }
-  
+
   const setLoadingTitle = (customLoadingText = '加载中...') => {
     const displayTitle = staticTitle || route.meta.title || route.name || '加载中'
-    title.value = `${displayTitle} - ${customLoadingText}`
+    document.title = `${displayTitle} - ${customLoadingText}`
   }
-  
+
   const setErrorTitle = (customErrorText = '获取失败') => {
     const displayTitle = staticTitle || route.meta.title || route.name || '错误'
-    title.value = `${displayTitle} - ${customErrorText}`
+    document.title = `${displayTitle} - ${customErrorText}`
   }
-  
+
+  // 还原为当前路由对应的标准标题（如 文章详情 - 网站标题）
   const resetTitle = () => {
-    title.value = fullTitle.value
+    document.title = fullTitle.value
   }
-  
+
+  // 路由变化（含 keep-alive 切换）时，始终以当前路由 meta 为准，避免停留在旧页面标题
   watch(
-    () => route.path,
+    () => route.fullPath,
     () => {
       resetTitle()
     },
     { immediate: true }
   )
-  
+
   return {
-    title,
+    title: fullTitle,
     fullTitle,
     baseTitle,
     setTitle,
@@ -1120,6 +1131,7 @@ export {
   validators,
   usePageTitle,
   setupRouteTitle,
+  applyRouteTitle,
   init,
   setupSiteInfo,
   MESSAGE_TYPES,
