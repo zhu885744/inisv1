@@ -34,7 +34,6 @@
                 @click="activeTab = 'all'"
               >
                 <span><i class="bi bi-inbox me-2"></i>全部</span>
-                <span class="badge bg-secondary rounded-pill">{{ totalCount }}</span>
               </button>
               <button
                 class="nav-link text-start d-flex align-items-center justify-content-between"
@@ -42,42 +41,41 @@
                 @click="activeTab = 'unread'"
               >
                 <span><i class="bi bi-envelope me-2"></i>未读</span>
-                <span class="badge bg-primary rounded-pill">{{ unreadCount }}</span>
               </button>
               <button
-                class="nav-link text-start d-flex align-items-center"
+                class="nav-link text-start d-flex align-items-center justify-content-between"
                 :class="{ active: activeTab === 'comment' }"
                 @click="activeTab = 'comment'"
               >
-                <i class="bi bi-chat-dots me-2"></i>回复
+                <span><i class="bi bi-chat-dots me-2"></i>回复</span>
               </button>
               <button
-                class="nav-link text-start d-flex align-items-center"
+                class="nav-link text-start d-flex align-items-center justify-content-between"
                 :class="{ active: activeTab === 'like' }"
                 @click="activeTab = 'like'"
               >
-                <i class="bi bi-heart me-2"></i>点赞
+                <span><i class="bi bi-heart me-2"></i>点赞</span>
               </button>
               <button
-                class="nav-link text-start d-flex align-items-center"
+                class="nav-link text-start d-flex align-items-center justify-content-between"
                 :class="{ active: activeTab === 'collection' }"
                 @click="activeTab = 'collection'"
               >
-                <i class="bi bi-bookmark me-2"></i>收藏
+                <span><i class="bi bi-bookmark me-2"></i>收藏</span>
               </button>
               <button
-                class="nav-link text-start d-flex align-items-center"
+                class="nav-link text-start d-flex align-items-center justify-content-between"
                 :class="{ active: activeTab === 'follow' }"
                 @click="activeTab = 'follow'"
               >
-                <i class="bi bi-person-plus me-2"></i>关注
+                <span><i class="bi bi-person-plus me-2"></i>关注</span>
               </button>
               <button
-                class="nav-link text-start d-flex align-items-center"
+                class="nav-link text-start d-flex align-items-center justify-content-between"
                 :class="{ active: activeTab === 'system' }"
                 @click="activeTab = 'system'"
               >
-                <i class="bi bi-gear me-2"></i>系统
+                <span><i class="bi bi-gear me-2"></i>系统</span>
               </button>
             </div>
           </div>
@@ -208,6 +206,7 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 const totalPages = ref(1)
 const unreadCount = ref(0)
+const counts = ref({ all: 0, unread: 0, comment: 0, like: 0, collection: 0, follow: 0, system: 0 })
 const pageSize = 20
 
 // ---------- API 请求 ----------
@@ -295,10 +294,11 @@ const markAllRead = async () => {
 
 const removeMessage = async (id) => {
   try {
-    await request.delete('/api/notification/remove', { data: { ids: [id] } })
+    await request.delete('/api/notification/remove', { ids: String(id) })
     messages.value = messages.value.filter(m => m.id !== id)
     totalCount.value = Math.max(0, totalCount.value - 1)
     await fetchUnreadCount()
+    await fetchCounts()
     notifyUnreadChange()
   } catch (err) {
     console.error('删除消息失败:', err)
@@ -313,10 +313,11 @@ const clearAll = async () => {
     if (activeTab.value !== 'all' && activeTab.value !== 'unread') {
       params.type = activeTab.value === 'collection' ? 'collect' : activeTab.value
     }
-    await request.delete('/api/notification/remove-all', { data: params })
+    await request.delete('/api/notification/remove-all', params)
     messages.value = []
     totalCount.value = 0
     await fetchUnreadCount()
+    await fetchCounts()
     notifyUnreadChange()
   } catch (err) {
     console.error('清空消息失败:', err)
@@ -449,7 +450,8 @@ const formatContent = (content) => {
   if (!content) return ''
   // 先转义，再替换 emoji
   const escaped = escapeHtml(content)
-  return escaped.replace(
+  const withBr = escaped.replace(/\n/g, '<br>')
+  return withBr.replace(
     /\[emoji:([^\]]+)\]/g,
     (match, url) => {
       // 对 URL 做简单过滤，只允许 http/https，防止 javascript: 等危险协议
@@ -468,6 +470,7 @@ const formatContent = (content) => {
 onMounted(async () => {
   await fetchNotifications()
   await fetchUnreadCount()
+  await fetchCounts()
 })
 
 // 监听Tab切换

@@ -144,6 +144,140 @@ func (this *Notification) CreateBroadcastNotification(fromUid int, typ, title, c
 	return notif, nil
 }
 
+// CreateLoginNotification 创建“账号登录通知”（系统消息）
+// 在用户登录成功后调用，记录登录账号、时间、IP、设备等信息，提醒用户确认是否为本人操作。
+func (this *Notification) CreateLoginNotification(uid int, account, ip, ua string) (*Notification, error) {
+	now := time.Now()
+	loginTime := now.Format("2006-01-02 15:04:05")
+
+	// 去除 UA 中的换行，避免注入
+	ua = strings.ReplaceAll(ua, "\n", " ")
+	ua = strings.ReplaceAll(ua, "\r", " ")
+
+	// 解析为简洁的设备描述（如：Windows 10 Chrome 144）
+	device := parseDevice(ua)
+
+	content := "请确认你的登录信息，并确保是你本人操作。\n\n" +
+		"登录账号：" + account + "\n" +
+		"登录时间：" + loginTime + "\n" +
+		"登录IP：" + ip + "\n" +
+		"登录设备：" + device + "\n\n" +
+		"如非本人操作，请尽快修改密码。"
+
+	notif := &Notification{
+		Uid:      uid,
+		FromUid:  uid,
+		Type:     "system",
+		Title:    "账号登录通知",
+		Content:  content,
+		BindType: "user",
+		BindId:   uid,
+		IsRead:   0,
+		Json: utils.Json.Encode(map[string]any{
+			"account":    account,
+			"login_time": loginTime,
+			"ip":         ip,
+			"device":     device,
+		}),
+	}
+
+	_, err := facade.DB.Model(&Notification{}).Create(notif)
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err, "uid": uid}, "创建账号登录通知失败")
+		return nil, err
+	}
+
+	return notif, nil
+}
+
+// parseDevice 从 User-Agent 中解析出简洁的设备描述
+// 例如：Windows 10 Chrome 144 / Android Chrome 145 / iPhone Safari 17
+func parseDevice(ua string) string {
+	ua = strings.TrimSpace(ua)
+	if ua == "" {
+		return "未知设备"
+	}
+
+	var os, browser string
+
+	// 操作系统
+	switch {
+	case strings.Contains(ua, "Windows NT 10.0"):
+		os = "Windows 10"
+	case strings.Contains(ua, "Windows NT 6.3"):
+		os = "Windows 8.1"
+	case strings.Contains(ua, "Windows NT 6.2"):
+		os = "Windows 8"
+	case strings.Contains(ua, "Windows NT 6.1"):
+		os = "Windows 7"
+	case strings.Contains(ua, "Windows"):
+		os = "Windows"
+	case strings.Contains(ua, "Android"):
+		os = "Android"
+	case strings.Contains(ua, "iPhone"), strings.Contains(ua, "iPad"), strings.Contains(ua, "iPod"):
+		os = "iOS"
+	case strings.Contains(ua, "Mac OS X"), strings.Contains(ua, "Macintosh"):
+		os = "macOS"
+	case strings.Contains(ua, "Linux"):
+		os = "Linux"
+	}
+
+	// 浏览器
+	switch {
+	case strings.Contains(ua, "Edg/"):
+		browser = "Edge"
+	case strings.Contains(ua, "OPR/"), strings.Contains(ua, "Opera"):
+		browser = "Opera"
+	case strings.Contains(ua, "Firefox/"):
+		browser = "Firefox"
+	case strings.Contains(ua, "Chrome/"):
+		browser = "Chrome"
+	case strings.Contains(ua, "Safari/") && strings.Contains(ua, "Version/"):
+		browser = "Safari"
+	}
+
+	// 浏览器主版本号
+	version := ""
+	for _, prefix := range []string{"Edg/", "OPR/", "Firefox/", "Chrome/"} {
+		if idx := strings.Index(ua, prefix); idx >= 0 {
+			rest := ua[idx+len(prefix):]
+			if end := strings.IndexAny(rest, " .;)"); end > 0 {
+				version = rest[:end]
+			} else {
+				version = rest
+			}
+			break
+		}
+	}
+	if version == "" {
+		if idx := strings.Index(ua, "Version/"); idx >= 0 {
+			rest := ua[idx+len("Version/"):]
+			if end := strings.IndexAny(rest, " .;)"); end > 0 {
+				version = rest[:end]
+			} else {
+				version = rest
+			}
+		}
+	}
+
+	parts := []string{}
+	if os != "" {
+		parts = append(parts, os)
+	}
+	if browser != "" {
+		parts = append(parts, browser)
+	}
+	if version != "" {
+		parts = append(parts, version)
+	}
+
+	if len(parts) == 0 {
+		return "未知设备"
+	}
+
+	return strings.Join(parts, " ")
+}
+
 // MarkBroadcastRead 标记广播通知为已读（记录该用户的已读状态）
 func (this *Notification) MarkBroadcastRead(id, uid int) error {
 	return facade.DB.Drive().Clauses(clause.OnConflict{

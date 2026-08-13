@@ -241,6 +241,14 @@ func (this *Comm) login(ctx *gin.Context) {
 	// 登录增加经验
 	go this.loginExp(item["id"])
 
+	// 登录成功后，异步创建“账号登录通知”，记录登录账号/时间/IP/设备
+	go func(uid int, account, ip, ua string) {
+		notification := new(model.Notification)
+		if _, e := notification.CreateLoginNotification(uid, account, ip, ua); e != nil {
+			facade.Log.Error(map[string]any{"error": e.Error(), "uid": uid}, "发送账号登录通知失败")
+		}
+	}(cast.ToInt(item["id"]), cast.ToString(params["account"]), ctx.ClientIP(), ctx.Request.UserAgent())
+
 	this.json(ctx, result, facade.Lang(ctx, "登录成功！"), 200)
 }
 
