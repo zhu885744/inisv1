@@ -504,6 +504,106 @@ body {
   margin-bottom: 1.25rem;
 }
 
+/* ==========================================
+ * UI 细节统一优化
+ * ========================================== */
+
+/* 图片渐显：配合 loading="lazy" 让懒加载图片出现得更自然 */
+img[loading="lazy"] {
+  animation: wx-img-fade 0.4s ease both;
+}
+
+@keyframes wx-img-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 骨架屏与占位使用 GPU 合成层，避免动画引起整页重排 */
+.wx-skeleton {
+  will-change: background-position;
+}
+
+/* 卡片/按钮的位移动画只提示 transform，减少重绘范围 */
+.wx-card-hover,
+.wx-btn-gradient,
+.wx-btn-outline,
+.wx-tag {
+  will-change: auto;
+}
+
+/* 统一焦点可见性：键盘操作时给出清晰聚焦环，鼠标点击不显示 */
+.wx-btn-gradient:focus-visible,
+.wx-btn-outline:focus-visible,
+.wx-tag:focus-visible,
+.btn:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(var(--bs-primary-rgb), 0.55);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* 统一滚动条样式，深浅色主题自适应 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bs-border-color) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bs-border-color);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bs-secondary-color);
+}
+
+/* 长文本统一截断工具类 */
+.wx-line-1,
+.wx-line-2,
+.wx-line-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wx-line-1 { -webkit-line-clamp: 1; }
+.wx-line-2 { -webkit-line-clamp: 2; }
+.wx-line-3 { -webkit-line-clamp: 3; }
+
+/* 空状态图标在深色主题下适当提高对比度 */
+[data-bs-theme=dark] .wx-empty-state i {
+  opacity: 0.42;
+}
+
+/* 触屏设备取消 hover 位移，避免点击后卡在悬浮态 */
+@media (hover: none) {
+  .wx-card-hover:hover,
+  .wx-btn-gradient:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* 尊重系统「减少动效」偏好，兼顾无障碍与低端设备性能 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .wx-page-title {
   font-size: 1.35rem;
   font-weight: 700;

@@ -32,9 +32,15 @@ const createAndConfigureApp = async (isRetry = false) => {
   // 挂载页面
   app.mount('#app')
   
+  // 通知加载页可以隐藏了，无需等待 window.onload
+  window.dispatchEvent(new Event('app-mounted'))
+  
+  // 站点信息、全局工具与登录态校验相互独立，并行执行缩短首屏可用时间。
+  // 登录态在此统一校验一次，页面与组件后续直接读取 store，不再各自发起校验。
   await Promise.all([
     setupGlobalTools(app),
-    setupSiteInfo(commStore)
+    setupSiteInfo(commStore),
+    commStore.ensureLogin().catch(err => logError('登录态校验失败:', err))
   ])
   
   log('应用初始化完成')

@@ -91,11 +91,17 @@ export default defineConfig(({ mode }) => {
       minify: isProduction ? 'terser' : 'esbuild',
       sourcemap: false,
       chunkSizeWarningLimit: 1500,
-      cssCodeSplit: 'divider',
+      // 按路由拆分 CSS，避免首屏加载全站样式（此处需为布尔值）
+      cssCodeSplit: true,
+      // 小于 4KB 的资源内联为 base64，减少首屏请求数
+      assetsInlineLimit: 4096,
+      reportCompressedSize: false,
 
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (!id.includes('node_modules')) return
+
             if (id.includes('node_modules/vue') || id.includes('vue-router') || id.includes('pinia')) {
               return 'vue-vendor'
             }

@@ -21,14 +21,13 @@ let fetchSiteInfoPromise = null
  * @returns {Promise<void>}
  */
 const checkToken = async (state = {}) => {
-    // 如果正在校验，等待前一个校验完成
+    // 防止并发调用：已有进行中的校验时复用同一个 Promise，
+    // 让并发调用方等待同一次校验结果，而不是各自再发一次请求
     if (checkingToken && checkTokenPromise) {
         await checkTokenPromise
         return
     }
     
-    // 防止并发调用
-    if (checkingToken) return
     checkingToken = true
     
     // 保存当前Promise供后续调用等待
@@ -59,7 +58,8 @@ const checkToken = async (state = {}) => {
                 // 校验成功 → 更新状态和缓存（延长缓存有效期，比如2小时）
                 state.login.user = data.user
                 state.login.finish = true
-                cache.set(cacheName, data.user, 7200) // 2小时缓存
+                // cache.set 第三个参数单位为「分钟」，此前传 7200 实际是 5 天
+                cache.set(cacheName, data.user, 120) // 2小时缓存
                 break;
             case 401: // Token过期/无效
             case 412: // Token格式错误
@@ -121,8 +121,9 @@ const logout = async (state = {}, path = null) => {
  * @returns {Promise<Object|null>}
  */
 const fetchSiteInfo = async (state = {}, force = false) => {
-    // 如果正在 fetchingSiteInfo 且有现成的 Promise，直接返回等待
-    if (fetchingSiteInfo && fetchSiteInfoPromise) {
+    // 已有进行中的请求则复用，避免多个组件同时挂载时重复请求。
+    // 强制刷新需要跳过复用，否则拿到的仍是旧请求的结果。
+    if (!force && fetchingSiteInfo && fetchSiteInfoPromise) {
         return fetchSiteInfoPromise
     }
     
@@ -214,7 +215,9 @@ const fetchSiteInfo = async (state = {}, force = false) => {
         } catch (error) {
             console.error('获取站点信息失败:', error)
         } finally {
-            // 重置标志位            fetchingSiteInfo = false
+            // 重置标志位（此前该赋值被误并入注释，导致标志位永远为 true，
+            // 后续包括 force 强制刷新在内的调用都会被并发保护挡掉）
+            fetchingSiteInfo = false
             fetchSiteInfoPromise = null
         }
     })()
@@ -278,6 +281,27 @@ export const useCommStore = defineStore('comm', {
         },
         
         /**
+         * 确保登录态已校验（应用启动时调用一次）
+         * 仅在存在 Token 且尚未校验完成时才发请求，避免游客态的无效请求
+         * @returns {Promise<Object>} 登录状态对象
+         */
+        async ensureLogin() {
+            const hasToken = !!utils.get.cookie(TOKEN_NAME)
+            const hasCachedUser = !utils.is.empty(this.login.user)
+            
+            if (!hasToken && !hasCachedUser) {
+                this.login.finish = true
+                return this.login
+            }
+            
+            if (!this.login.finish || !hasCachedUser) {
+                await checkToken(this)
+            }
+            
+            return this.login
+        },
+        
+        /**
          * 获取站点信息
          * @param {boolean} force - 是否强制刷新
          * @returns {Promise<Object|null>}
@@ -333,16 +357,10 @@ export const useCommStore = defineStore('comm', {
          * @param {Object} state - 状态对象
          * @returns {Object} 登录状态
          */
-        getLogin: (state) => {
-            // 只在状态未完成且用户信息为空时校验Token
-            if (!state.login.finish && utils.is.empty(state.login.user)) {
-                // 使用异步方式校验Token，避免阻塞UI
-                checkToken(state).catch(err => {
-                    console.error('Token校验失败：', err)
-                })
-            }
-            return state.login
-        },
+        // 保持为纯读取：getter 内发起请求会在多个组件读取时反复触发校验，
+        // 且它修改的 state.login 正是自身依赖，容易形成额外的无效请求。
+        // Token 校验统一由 ensureLogin() 在应用启动时触发一次。
+        getLogin: (state) => state.login,
         
         /**
          * 获取站点信息

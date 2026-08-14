@@ -18,6 +18,9 @@
                 :src="banner.image" 
                 :alt="banner.title" 
                 class="d-block w-100 carousel-img"
+                decoding="async"
+                :loading="index === 0 ? 'eager' : 'lazy'"
+                :fetchpriority="index === 0 ? 'high' : 'low'"
               >
             </a>
           </div>
@@ -407,7 +410,9 @@ const getBanners = async () => {
   }
 }
 
-// 监听路由变化
+// 监听路由变化。
+// immediate: true 已负责首次加载，因此 onMounted 中不再重复请求列表，
+// 否则每次进入页面都会产生两次 /api/moments/all 请求。
 watch(() => route.params.id, (newId) => {
   if (newId) {
     loadMomentDetail(newId)
@@ -417,18 +422,21 @@ watch(() => route.params.id, (newId) => {
   }
 }, { immediate: true })
 
-// 监听登录状态变化
-watch(() => store.login?.finish, () => {
-  if (!route.params.id) {
+// 监听登录状态变化：
+// 仅当筛选条件与登录用户相关（我的/草稿）时才需要重新拉取，
+// 公共列表内容与登录态无关，无需重复请求。
+watch(() => store.login?.finish, (finish, prev) => {
+  if (finish === prev) return
+  if (route.params.id) return
+  if (filter.value === 'mine' || filter.value === 'draft') {
     loadMoments()
   }
 })
 
 onMounted(() => {
+  // 轮播图与动态列表相互独立，轮播图单独请求即可；
+  // 列表加载由上方 immediate watch 触发，避免重复。
   getBanners()
-  if (!route.params.id) {
-    loadMoments()
-  }
 })
 </script>
 
