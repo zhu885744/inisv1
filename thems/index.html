@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>%VITE_TITLE%</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <!-- 提前完成 API 域名的 DNS 解析与 TLS 握手，缩短首个接口请求耗时 -->
+    <link rel="dns-prefetch" href="//cs.zhuxu.asia">
+    <link rel="preconnect" href="https://cs.zhuxu.asia" crossorigin>
     <style>
       * {
         margin: 0;
@@ -144,6 +147,11 @@
           loadingPage.remove()
         }, 600)
       }
+      // 应用挂载完成即隐藏（由 main.js 触发），
+      // 不必等待 window.onload（会等所有图片/字体加载完，明显拖慢感知速度）
+      window.__hideLoading = hideLoading
+      window.addEventListener('app-mounted', hideLoading, { once: true })
+      // 兜底：即使应用初始化异常也不会一直卡在加载页
       window.onload = hideLoading
       setTimeout(hideLoading, 3500)
     </script>

@@ -3,20 +3,42 @@ import { defineStore } from 'pinia'
 import { cache } from '@/utils/network'
 import utils from '@/utils/utils'
 import { request as axios } from '@/utils/network'
-import { route } from '@/utils/app'
 
-// ==================== 新增：配置相关工具函数 ====================
-// 获取指定配置
+// ==================== 配置相关工具函数 ====================
+// 记录进行中的配置请求，避免同一 key 被并发重复请求
+const configInflight = new Map()
+
+// 获取指定配置（异步写入 state，命中缓存则不发请求）
 const one = (state = {}, key = '') => {
   if (utils.is.empty(key)) return {}
 
-  axios.get('/api/config/one', { key }).then(({ code, data }) => {
-    if (code !== 200) return (state[key] = {})
+  const cacheName = `config[${key}]`
 
-    // 缓存数据
-    cache.set(`config[${key}]`, data, globalThis?.inis?.cache || 3600)
-    state[key] = data
-  })
+  const cached = cache.get(cacheName)
+  if (cached) {
+    state[key] = cached
+    return state[key]
+  }
+
+  if (!configInflight.has(key)) {
+    const task = axios
+      .get('/api/config/one', { key })
+      .then(({ code, data }) => {
+        if (code !== 200) {
+          state[key] = {}
+          return
+        }
+        // 缓存数据（第三个参数单位为分钟）
+        cache.set(cacheName, data, globalThis?.inis?.cache || 60)
+        state[key] = data
+      })
+      .catch(() => {
+        state[key] = {}
+      })
+      .finally(() => configInflight.delete(key))
+
+    configInflight.set(key, task)
+  }
 
   return state[key]
 }
@@ -59,42 +81,7 @@ const infect = (cacheName, promise) => {
     })
 }
 
-// ==================== 原有：登录相关工具函数 ====================
-// 校验token
-const checkToken = (state = {}) => {
-  const cacheName = 'user-info'
-  // 缓存中存在用户信息
-  if (cache.has(cacheName)) return (state.login.finish = true)
-
-  axios.post('/api/comm/check-token').then(({ code, msg, data }) => {
-    if (code === 412) return
-    if (code === 401) return logout(state)
-    if (code !== 200) return notyf.error(msg)
-
-    state.login.user = data.user
-    state.login.finish = true
-    cache.set(cacheName, data.user, 10)
-  })
-}
-
-// 登出
-const logout = (state = {}, path = null) => {
-  // 清除登录信息
-  state.login.user = {}
-  state.login.finish = false
-  cache.del('user-info')
-  utils.clear.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN')
-
-  axios.del('/api/comm/logout').then((res) => res)
-
-  // 返回首页
-  if (!utils.is.empty(path))
-    setTimeout(() => {
-      route.push(path)
-    }, 300)
-}
-
-// ==================== 新增：异常捕获执行函数 ====================
+// ==================== 异常捕获执行函数 ====================
 const run = (fn) => {
   try {
     fn()
@@ -112,13 +99,15 @@ export const useConfigStore = defineStore('config', {
     ALLOW_REGISTER: cache.get('config[ALLOW_REGISTER]'),
   }),
   getters: {
-    getAllowRegister(state = {}) {
-      const cacheName = 'config[ALLOW_REGISTER]'
-      if (cache.has(cacheName)) return (state.ALLOW_REGISTER = cache.get(cacheName))
-      return one(this, 'ALLOW_REGISTER')
-    },
+    // 纯读取：模板中的 v-if 会在每次渲染时求值，
+    // 因此这里不发请求，仅返回已加载的配置（由 loadAllowRegister 负责拉取）
+    getAllowRegister: (state) => state.ALLOW_REGISTER,
   },
   actions: {
+    // 加载注册开关配置（命中缓存不发请求，并发调用自动合并）
+    loadAllowRegister() {
+      return one(this, 'ALLOW_REGISTER')
+    },
     // 获取指定配置（测试用）
     test() {
       const promise = axios.get('/api/config/one', { key: 'ALLOW_REGISTER' })
@@ -131,62 +120,6 @@ export const useConfigStore = defineStore('config', {
   },
 })
 
-// 2. 通用状态 Store（保留原有 comm store 逻辑）
-export const useCommStore = defineStore('comm', {
-  state: () => ({
-    // 登录注册重置密码的状态
-    auth: {
-      login: false,
-      reset: false,
-      register: false,
-    },
-    login: {
-      // 登录状态 - 是否登录完成
-      finish: false,
-      // 当前登录的用户信息
-      user: cache.get('user-info'),
-    },
-    progress: false,
-    nav: {
-      title: '',
-    },
-    // 新增：配置相关状态（可选，如需在 comm store 中管理配置可保留）
-    ALLOW_REGISTER: cache.get('config[ALLOW_REGISTER]'),
-  }),
-  getters: {
-    // 获取登录信息
-    getLogin: (state = {}) => {
-      // 校验token
-      checkToken(state)
-      // 返回登录信息
-      return state.login
-    },
-    // 新增：配置获取 getter（如需在 comm store 中获取配置可保留）
-    getAllowRegister(state = {}) {
-      const cacheName = 'config[ALLOW_REGISTER]'
-      if (cache.has(cacheName)) return (state.ALLOW_REGISTER = cache.get(cacheName))
-      return one(this, 'ALLOW_REGISTER')
-    },
-  },
-  actions: {
-    // 切换登录注册重置密码的状态
-    switchAuth(name = 'login', bool = true) {
-      for (const key in this.auth) {
-        this.auth[key] = key === name ? bool : false
-      }
-    },
-    // 登出
-    logout(path = null) {
-      logout(this, path)
-    },
-    // 新增：配置测试方法（可选）
-    configTest() {
-      const promise = axios.get('/api/config/one', { key: 'ALLOW_REGISTER' })
-      return infect('config[TEST]', promise)
-    },
-    // 新增：异常捕获执行方法（可选）
-    run(fn) {
-      run(fn)
-    },
-  },
-})
+// 说明：此文件曾额外定义过一个 id 同为 'comm' 的 store，
+// 与 store/comm.js 冲突（Pinia 以 id 注册，先导入者生效），且无人使用，已移除。
+// 通用状态请统一从 store/comm.js 引入 useCommStore。

@@ -762,13 +762,12 @@
 import { ref, onMounted, onUnmounted, watch, computed, nextTick, shallowRef, markRaw } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useCommStore } from '@/store/comm'
-import { request } from '@/utils/network'
 import iMarkdown from '@/comps/custom/i-markdown.vue'
 import iComment from '@/comps/custom/i-comment.vue'
 import iEmojiPicker from '@/comps/custom/i-emoji-picker.vue'
 import iVirtualScroll from '@/comps/custom/i-virtual-scroll.vue'
 import utils from '@/utils/utils'
-import { cache, uploadImage } from '@/utils/network'
+import { request, cache, uploadImage } from '@/utils/network'
 import { usePageTitle, toast } from '@/utils/app'
 import Sortable from 'sortablejs'
 
@@ -1225,97 +1224,51 @@ const handleCommentPageChange = async (page) => {
   }
 }
 
-// 获取文章总数
-const getArticleCount = async () => {
-  try {
-    const res = await request.get('/api/article/count')
-    if (res.code === 200) {
-      archiveStats.value.articleCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
+// 归档统计项配置：接口路径 + 参数 + 写入字段
+// 统一表驱动，避免为每个计数各写一个几乎相同的函数
+const ARCHIVE_COUNT_SOURCES = [
+  { field: 'articleCount', url: '/api/article/count' },
+  { field: 'categoryCount', url: '/api/article-group/count' },
+  { field: 'pageCount', url: '/api/pages/count', params: { onlyTrashed: false } },
+  { field: 'tagCount', url: '/api/tags/count' },
+  { field: 'linkCount', url: '/api/links/count', params: { onlyTrashed: false } },
+  { field: 'commentCount', url: '/api/comment/count' }
+]
 
-// 获取文章分类总数
-const getCategoryCount = async () => {
-  try {
-    const res = await request.get('/api/article-group/count')
-    if (res.code === 200) {
-      archiveStats.value.categoryCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
+const ARCHIVE_STATS_CACHE_KEY = 'archive_stats'
+const ARCHIVE_STATS_EXPIRE = 30 // 分钟
 
-// 获取独立页面总数
-const getPageCount = async () => {
+// 获取所有归档统计数据（命中缓存直接使用，未命中则并行拉取）
+const fetchArchiveStats = async (force = false) => {
   try {
-    const res = await request.get('/api/pages/count', {
-      onlyTrashed: false
+    if (!force) {
+      const cachedStats = cache.get(ARCHIVE_STATS_CACHE_KEY)
+      if (cachedStats) {
+        archiveStats.value = cachedStats
+        return
+      }
+    }
+
+    // 六项统计相互独立，并行请求；单项失败不影响其它项
+    const results = await Promise.allSettled(
+      ARCHIVE_COUNT_SOURCES.map(item =>
+        request.cached(item.url, item.params || {}, {
+          minutes: ARCHIVE_STATS_EXPIRE,
+          force
+        })
+      )
+    )
+
+    const stats = { ...archiveStats.value }
+    results.forEach((result, index) => {
+      const { field } = ARCHIVE_COUNT_SOURCES[index]
+      if (result.status === 'fulfilled' && result.value?.code === 200) {
+        stats[field] = result.value.data || 0
+      }
     })
-    if (res.code === 200) {
-      archiveStats.value.pageCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
 
-// 获取标签总数
-const getTagCount = async () => {
-  try {
-    const res = await request.get('/api/tags/count')
-    if (res.code === 200) {
-      archiveStats.value.tagCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
-
-// 获取友情链接总数
-const getLinkCount = async () => {
-  try {
-    const res = await request.get('/api/links/count', {
-      onlyTrashed: false
-    })
-    if (res.code === 200) {
-      archiveStats.value.linkCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
-
-// 获取评论总数
-const getCommentCount = async () => {
-  try {
-    const res = await request.get('/api/comment/count')
-    if (res.code === 200) {
-      archiveStats.value.commentCount = res.data || 0
-    }
-  } catch (error) {
-  }
-}
-
-// 获取所有归档统计数据
-const fetchArchiveStats = async () => {
-  try {
-    const cacheKey = 'archive_stats'
-    const cacheExpire = 30
-    
-    let cachedStats = cache.get(cacheKey)
-    
-    if (!cachedStats) {
-      await Promise.all([
-        getArticleCount(),
-        getCategoryCount(),
-        getPageCount(),
-        getTagCount(),
-        getLinkCount(),
-        getCommentCount()
-      ])
-      cache.set(cacheKey, archiveStats.value, cacheExpire)
-    } else {
-      archiveStats.value = cachedStats
-    }
+    archiveStats.value = stats
+    cache.set(ARCHIVE_STATS_CACHE_KEY, stats, ARCHIVE_STATS_EXPIRE)
   } catch (error) {
   } finally {
     loading.value = false
@@ -1326,19 +1279,21 @@ const fetchArchiveStats = async () => {
 // 手动刷新归档统计数据
 const refreshArchiveStats = async () => {
   refreshingArchive.value = true
-  cache.del('archive_stats')
-  await fetchArchiveStats()
+  cache.del(ARCHIVE_STATS_CACHE_KEY)
+  await fetchArchiveStats(true)
   toast.success('数据刷新成功')
   refreshingArchive.value = false
 }
 
-// 启动归档页面自动刷新
+// 启动归档页面自动刷新。
+// 页面不可见时跳过本轮刷新，避免后台标签页持续发起无意义请求
 const startArchiveAutoRefresh = () => {
   if (archiveRefreshTimer) {
     clearInterval(archiveRefreshTimer)
   }
   archiveRefreshTimer = setInterval(() => {
-    fetchArchiveStats()
+    if (document.hidden) return
+    fetchArchiveStats(true)
   }, 5 * 60 * 1000)
 }
 

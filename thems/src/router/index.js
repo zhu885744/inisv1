@@ -259,7 +259,9 @@ router.beforeEach(async (to, from, next) => {
     const commStore = useCommStore()
     
     try {
-      await commStore.checkLoginState()
+      // ensureLogin 仅在登录态尚未校验时才发请求，
+      // 避免每次进入需要鉴权的路由都重复校验 Token
+      await commStore.ensureLogin()
     } catch (error) {
       console.error('检查登录状态失败:', error)
     }

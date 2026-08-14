@@ -9,10 +9,62 @@ import { marked } from 'marked'
 
 // ==============================================
 // highlight.js 按需引入
+// 完整包会打入约 190 种语言（压缩后约 300KB），
+// 这里只注册常用语言，其余语言按 plaintext 渲染
 // ==============================================
-import hljs from 'highlight.js'
-// 样式
+import hljs from 'highlight.js/lib/core'
 import 'highlight.js/styles/agate.css'
+
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import scss from 'highlight.js/lib/languages/scss'
+import json from 'highlight.js/lib/languages/json'
+import yaml from 'highlight.js/lib/languages/yaml'
+import markdown from 'highlight.js/lib/languages/markdown'
+import bash from 'highlight.js/lib/languages/bash'
+import go from 'highlight.js/lib/languages/go'
+import python from 'highlight.js/lib/languages/python'
+import java from 'highlight.js/lib/languages/java'
+import php from 'highlight.js/lib/languages/php'
+import sql from 'highlight.js/lib/languages/sql'
+import ini from 'highlight.js/lib/languages/ini'
+import diff from 'highlight.js/lib/languages/diff'
+import plaintext from 'highlight.js/lib/languages/plaintext'
+
+// 语言注册表：键为语言名，值为对应的语法定义
+const LANGUAGES = {
+  javascript, typescript, xml, css, scss, json, yaml,
+  markdown, bash, go, python, java, php, sql, ini, diff, plaintext
+}
+
+Object.entries(LANGUAGES).forEach(([name, lang]) => hljs.registerLanguage(name, lang))
+
+// 常用别名，便于识别 ```js / ```vue / ```sh 之类的写法
+const LANGUAGE_ALIASES = {
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  html: 'xml', vue: 'xml', svg: 'xml',
+  sh: 'bash', shell: 'bash', zsh: 'bash', console: 'bash',
+  py: 'python', golang: 'go', yml: 'yaml',
+  md: 'markdown', conf: 'ini', toml: 'ini',
+  text: 'plaintext', txt: 'plaintext'
+}
+
+// 转义 HTML，用于高亮失败时安全地原样输出代码
+const escapeHtml = (str = '') => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+
+// 归一化语言名：未注册的语言统一降级为 plaintext，避免高亮抛错
+const resolveLanguage = (lang) => {
+  if (!lang || lang === 'language') return 'plaintext'
+  const normalized = String(lang).toLowerCase()
+  const mapped = LANGUAGE_ALIASES[normalized] || normalized
+  return hljs.getLanguage(mapped) ? mapped : 'plaintext'
+}
 
 // props
 const props = defineProps({
@@ -36,7 +88,7 @@ const renderMarkdown = (content) => {
   
   processedContent = processedContent.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
     try {
-      const safeLang = (lang === 'language' || !lang) ? 'plaintext' : lang
+      const safeLang = resolveLanguage(lang)
       const highlighted = hljs.highlight(code.trim(), { language: safeLang }).value
       return `<div class="code-block-container">
         <div class="code-block-header">
@@ -58,7 +110,7 @@ const renderMarkdown = (content) => {
             <span class="copy-text">复制</span>
           </button>
         </div>
-        <pre class="hljs"><code>${code}</code></pre>
+        <pre class="hljs"><code>${escapeHtml(code)}</code></pre>
       </div>`
     }
   })

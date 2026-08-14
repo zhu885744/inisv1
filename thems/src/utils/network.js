@@ -6,7 +6,6 @@ const DEV = import.meta.env.DEV
 const DEFAULT_TIMEOUT = 60 * 1000
 const MAX_RETRY = 2
 const MAX_CACHE_SIZE = 500
-const CACHE_KEY_PREFIX = '__inis_cache_'
 const API_WHITELIST = ['/api/']
 
 const axiosInstance = axios.create({
@@ -23,16 +22,25 @@ class Cache {
   constructor() {
     this.testKey = '__cache_test__'
     this.maxSize = MAX_CACHE_SIZE
+    this._available = null
+    // 内存镜像：避免同一次渲染内重复 JSON.parse
+    this._memo = new Map()
   }
 
+  // localStorage 可用性只探测一次并缓存结果，
+  // 避免每次 get/set/has 都执行一次写入+删除
   isAvailable() {
+    if (this._available !== null) {
+      return this._available
+    }
     try {
       localStorage.setItem(this.testKey, 'test')
       localStorage.removeItem(this.testKey)
-      return true
+      this._available = true
     } catch {
-      return false
+      this._available = false
     }
+    return this._available
   }
 
   isValidKey(key) {
@@ -63,9 +71,18 @@ class Cache {
       return null
     }
 
+    // 命中内存镜像，省去一次 JSON.parse
+    if (this._memo.has(key)) {
+      const hit = this._memo.get(key)
+      if (hit.expire && Date.now() > hit.expire) {
+        this.del(key)
+        return null
+      }
+      return hit.data
+    }
+
     const rawValue = localStorage.getItem(key)
     if (rawValue === null || rawValue === '') {
-      this.del(key)
       return null
     }
 
@@ -77,7 +94,9 @@ class Cache {
         return null
       }
 
-      return parsed.data !== undefined ? parsed.data : parsed
+      const data = parsed && parsed.data !== undefined ? parsed.data : parsed
+      this._memo.set(key, { data, expire: parsed?.expire || 0 })
+      return data
     } catch (error) {
       console.warn(`[Cache] 解析缓存失败: ${key}`, error)
       return rawValue || null
@@ -94,10 +113,6 @@ class Cache {
   set(key, value, minutes = 0) {
     if (!this.isValidKey(key) || !this.isAvailable()) {
       return
-    }
-
-    if (this.size() >= this.maxSize) {
-      this.cleanupOldest()
     }
 
     const storeValue = value === undefined ? null : value
@@ -118,40 +133,46 @@ class Cache {
       }
     }
 
+    this._memo.set(key, {
+      data: storeValue,
+      expire: dataToStore.expire || 0
+    })
+
     try {
       localStorage.setItem(key, JSON.stringify(dataToStore))
     } catch (error) {
-      console.error(`[Cache] 存储失败: ${key}`, error)
+      // 容量超限：先淘汰最旧的数据再重试一次
       this.cleanupOldest()
       try {
         localStorage.setItem(key, JSON.stringify(dataToStore))
-      } catch (retryError) {
-        console.error(`[Cache] 重试存储仍失败: ${key}`, retryError)
+      } catch {
+        console.warn(`[Cache] 存储失败，已降级为内存缓存: ${key}`)
       }
     }
   }
 
+  // 淘汰最旧的 20% 缓存项。
+  // 之前只统计带 CACHE_KEY_PREFIX 前缀的键，而业务侧写入的都是裸键，
+  // 导致淘汰逻辑永远选不出任何数据，这里改为识别本缓存写入的结构。
   cleanupOldest() {
     if (!this.isAvailable()) return
-    
-    const keys = this.keys().filter(k => k.startsWith(CACHE_KEY_PREFIX))
+
     const cacheItems = []
-    
-    keys.forEach(key => {
+
+    this.keys().forEach(key => {
       try {
-        const raw = localStorage.getItem(key)
-        const parsed = JSON.parse(raw)
-        if (parsed && parsed.timestamp) {
+        const parsed = JSON.parse(localStorage.getItem(key))
+        if (parsed && typeof parsed === 'object' && parsed.timestamp) {
           cacheItems.push({ key, timestamp: parsed.timestamp })
         }
       } catch {
       }
     })
-    
+
     cacheItems.sort((a, b) => a.timestamp - b.timestamp)
-    
-    const itemsToRemove = cacheItems.slice(0, Math.floor(this.maxSize * 0.2))
-    itemsToRemove.forEach(item => this.del(item.key))
+
+    const removeCount = Math.max(1, Math.floor(cacheItems.length * 0.2))
+    cacheItems.slice(0, removeCount).forEach(item => this.del(item.key))
   }
 
   setItem(key, value, minutes = 0) {
@@ -166,6 +187,7 @@ class Cache {
     if (!this.isValidKey(key) || !this.isAvailable()) {
       return
     }
+    this._memo.delete(key)
     localStorage.removeItem(key)
   }
 
@@ -173,12 +195,28 @@ class Cache {
     return this.del(key)
   }
 
+  // 清空本缓存写入的所有数据（不误删站点其它 localStorage 数据，
+  // 例如登录 token、主题偏好等非本缓存结构的键）
   clear() {
     if (!this.isAvailable()) {
       return
     }
-    const keys = this.keys().filter(k => k.startsWith(CACHE_KEY_PREFIX))
-    keys.forEach(key => this.del(key))
+    this.keys().forEach(key => {
+      if (this.isOwnedKey(key)) {
+        this.del(key)
+      }
+    })
+  }
+
+  // 判断某个键是否由本缓存写入（结构含 timestamp）
+  isOwnedKey(key) {
+    if (key === this.testKey) return false
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key))
+      return !!(parsed && typeof parsed === 'object' && parsed.timestamp)
+    } catch {
+      return false
+    }
   }
 
   setMultiple(items) {
@@ -239,7 +277,7 @@ class Cache {
     if (!this.isAvailable()) {
       return 0
     }
-    return this.keys().filter(k => k.startsWith(CACHE_KEY_PREFIX)).length
+    return this.keys().filter(k => this.isOwnedKey(k)).length
   }
 
   clearExpired() {
@@ -248,21 +286,19 @@ class Cache {
     }
 
     let clearedCount = 0
-    const keys = this.keys().filter(k => k.startsWith(CACHE_KEY_PREFIX))
+    const keys = this.keys()
     
     keys.forEach(key => {
       const value = localStorage.getItem(key)
-      if (value) {
-        try {
-          const parsed = JSON.parse(value)
-          if (this.isExpiredCache(parsed)) {
-            this.del(key)
-            clearedCount++
-          }
-        } catch {
+      if (!value) return
+      try {
+        const parsed = JSON.parse(value)
+        if (this.isExpiredCache(parsed)) {
           this.del(key)
           clearedCount++
         }
+      } catch {
+        // 非 JSON 数据（如登录 token、主题偏好）不属于本缓存，跳过
       }
     })
     
@@ -594,9 +630,91 @@ axiosInstance.interceptors.response.use(
   }
 )
 
+// ============ 带缓存的 GET ============
+// 统一的「缓存 + 并发去重 + 后台刷新(SWR)」读取入口。
+// 各页面不再各自手写 cache.get / cache.set 样板代码。
+//
+//   const res = await request.cached('/api/article/all', params, { minutes: 10 })
+//
+// 选项：
+//   minutes    缓存有效期（分钟），默认 5
+//   key        自定义缓存键，默认由 url + params 生成
+//   swr        true 时命中缓存也在后台静默刷新，下次访问即为最新数据
+//   force      true 时跳过缓存强制请求（用于下拉刷新等场景）
+const CACHED_PREFIX = '__inis_cache_'
+const inflight = new Map()
+
+const buildCacheKey = (url, params) => {
+  const keys = Object.keys(params || {}).sort()
+  const normalized = keys.map(k => `${k}=${params[k]}`).join('&')
+  return `${CACHED_PREFIX}${url}${normalized ? `?${normalized}` : ''}`
+}
+
+const cachedGet = async (url, params = {}, options = {}) => {
+  const {
+    minutes = 5,
+    key,
+    swr = false,
+    force = false,
+    ...requestOptions
+  } = options
+
+  const cacheKey = key || buildCacheKey(url, params)
+
+  if (!force) {
+    const hit = cache.get(cacheKey)
+    if (hit !== null && hit !== undefined) {
+      // 后台静默刷新，不阻塞当前渲染
+      if (swr && !inflight.has(cacheKey)) {
+        const task = requestWithRetry('get', url, params, { silentError: true, ...requestOptions })
+          .then(fresh => {
+            if (fresh?.code === 200) cache.set(cacheKey, fresh, minutes)
+            return fresh
+          })
+          .catch(() => null)
+          .finally(() => inflight.delete(cacheKey))
+        inflight.set(cacheKey, task)
+      }
+      return hit
+    }
+  }
+
+  // 并发去重：同一时刻的相同请求共享一个 Promise
+  if (inflight.has(cacheKey)) {
+    return inflight.get(cacheKey)
+  }
+
+  const task = requestWithRetry('get', url, params, requestOptions)
+    .then(res => {
+      // 只缓存成功响应，避免把错误态写进缓存
+      if (res?.code === 200) cache.set(cacheKey, res, minutes)
+      return res
+    })
+    .finally(() => inflight.delete(cacheKey))
+
+  inflight.set(cacheKey, task)
+  return task
+}
+
 const request = {
   get: async (url, params = {}, options = {}) => {
     return requestWithRetry('get', url, params, options)
+  },
+
+  cached: cachedGet,
+
+  // 主动失效缓存：传 url 前缀或完整缓存键
+  invalidate: (urlOrKey, params) => {
+    if (params) {
+      cache.del(buildCacheKey(urlOrKey, params))
+      return
+    }
+    const target = urlOrKey.startsWith(CACHED_PREFIX)
+      ? urlOrKey
+      : `${CACHED_PREFIX}${urlOrKey}`
+    cache.keys().forEach(k => {
+      if (k === target || k.startsWith(target)) cache.del(k)
+    })
   },
 
   delete: async (url, params = {}, options = {}) => {

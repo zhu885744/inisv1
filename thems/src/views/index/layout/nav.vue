@@ -423,7 +423,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, reactive, watch, onUpdated } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, reactive, watch } from 'vue'
 import { request } from '@/utils/network'
 import utils from '@/utils/utils'
 import { toast } from '@/utils/app'
@@ -805,42 +805,24 @@ const toggleCategoryDropdown = () => {
   categoryDropdownOpen.value = !categoryDropdownOpen.value
 }
 
-// 从API获取导航数据
+// 从响应中提取列表数据，兼容 data / data.data 两种结构
+const pickList = (response) => {
+  const payload = response?.data
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.data)) return payload.data
+  return []
+}
+
+// 从API获取导航数据（走统一缓存，后台静默刷新）
 const fetchNavData = async () => {
   try {
-    // 缓存键
-    const cacheKey = 'nav_items'
-    const cacheExpire = 60 // 缓存60分钟
-    
-    // 尝试从缓存获取导航数据
-    let cachedNavItems = cache.get(cacheKey)
-    
-    // 如果缓存不存在，从API获取
-    if (!cachedNavItems) {
-      const response = await request.get('/api/pages/all', {
-        params: {
-          field: 'key,title',
-          cache: false
-        }
-      })
-      
-      if (response.data && Array.isArray(response.data)) {
-        navItems.value = response.data
-        // 缓存导航数据
-        cache.set(cacheKey, response.data, cacheExpire)
-      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        navItems.value = response.data.data
-        // 缓存导航数据
-        cache.set(cacheKey, response.data.data, cacheExpire)
-      } else {
-        navItems.value = []
-      }
-    } else {
-      // 使用缓存数据
-      navItems.value = cachedNavItems
-    }
-  } catch (error) {
-    // console.error('获取导航数据失败:', error)
+    const response = await request.cached('/api/pages/all', {
+      field: 'key,title'
+    }, { minutes: 60, swr: true })
+
+    navItems.value = pickList(response)
+  } catch {
+    navItems.value = []
   }
 }
 
@@ -877,46 +859,15 @@ const parseCustomNavLinks = () => {
   customNavLinks.value = links
 }
 
-// 从API获取分类数据
+// 从API获取分类数据（走统一缓存，后台静默刷新）
 const fetchCategories = async () => {
   try {
-    // 缓存键
-    const cacheKey = 'categories_list'
-    const cacheExpire = 60 // 缓存60分钟
-    
-    // 尝试从缓存获取分类数据
-    let cachedCategories = cache.get(cacheKey)
-    
-    // 如果缓存不存在，从API获取
-    if (!cachedCategories) {
-      const response = await request.get('/api/article-group/all', {
-        params: {
-          field: 'id,key,name',
-          cache: false
-        }
-      })
+    const response = await request.cached('/api/article-group/all', {
+      field: 'id,key,name'
+    }, { minutes: 60, swr: true })
 
-      if (response.data && response.data.code === 200 && response.data.data && response.data.data.data) {
-        categories.value = response.data.data.data
-        // 缓存分类数据
-        cache.set(cacheKey, response.data.data.data, cacheExpire)
-      } else if (response.data && Array.isArray(response.data)) {
-        categories.value = response.data
-        // 缓存分类数据
-        cache.set(cacheKey, response.data, cacheExpire)
-      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        categories.value = response.data.data
-        // 缓存分类数据
-        cache.set(cacheKey, response.data.data, cacheExpire)
-      } else {
-        categories.value = []
-      }
-    } else {
-      // 使用缓存数据
-      categories.value = cachedCategories
-    }
-  } catch (error) {
-    // console.error('获取分类数据失败:', error)
+    categories.value = pickList(response)
+  } catch {
     categories.value = []
   }
 }
@@ -950,21 +901,49 @@ const doSign = () => {
   }
 }
 
+// 事件处理器保持引用，便于卸载时移除，避免内存泄漏
+const onUnreadChange = () => method.fetchUnreadCount()
+
+const onResize = () => {
+  if (window.innerWidth >= 992) {
+    closeSidebar()
+  }
+}
+
+const onKeydown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault()
+    method.showSearch()
+  }
+}
+
 // 组件挂载时获取数据并初始化
 onMounted(() => {
-  fetchNavData()
-  fetchCategories()
-  fetchSiteInfo()
+  // 导航、分类、站点信息三者互不依赖，并行请求，避免瀑布流等待
+  Promise.all([
+    fetchNavData(),
+    fetchCategories(),
+    fetchSiteInfo()
+  ])
+
   initTheme()
   setupSystemThemeListener()
-  checkSignStatus()
-  method.fetchUnreadCount()
-  
-  // 监听消息中心操作后刷新未读角标（消息通知通过 API 拉取，无需 socket 推送）
-  window.addEventListener('notification-unread-change', () => {
+  method.getTheme()
+
+  // 注册开关配置：命中缓存时不会发请求
+  store.config.loadAllowRegister()
+
+  // 登录态相关数据仅在已登录时请求
+  if (store.comm.login?.finish && store.comm.login?.user) {
+    checkSignStatus()
     method.fetchUnreadCount()
-  })
-  
+  }
+
+  // 监听消息中心操作后刷新未读角标（消息通知通过 API 拉取，无需 socket 推送）
+  window.addEventListener('notification-unread-change', onUnreadChange)
+  window.addEventListener('resize', onResize, { passive: true })
+  window.addEventListener('keydown', onKeydown)
+
   // 初始化 Bootstrap 组件
   if (window.bootstrap) {
     initDropdowns()
@@ -978,42 +957,23 @@ onMounted(() => {
       }
     }, 100)
   }
-  
-  // 监听窗口大小变化，自动关闭侧边栏
-  window.addEventListener('resize', () => {
-    if (window.innerWidth >= 992) {
-      closeSidebar()
-    }
-  })
-
-  // 全局键盘快捷键 Ctrl+K / Cmd+K 打开搜索
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-      e.preventDefault()
-      method.showSearch()
-    }
-  })
-  
-  // 初始化主题获取
-  method.getTheme()
 })
 
-// 当用户状态变化时重新初始化下拉菜单
-watch(() => store.comm.login.user, () => {
-  nextTick(() => {
-    initDropdowns()
+onUnmounted(() => {
+  window.removeEventListener('notification-unread-change', onUnreadChange)
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('keydown', onKeydown)
+})
+
+// 当用户登录状态真正切换时才重新初始化下拉菜单并拉取未读数。
+// 这里比较用户 id，避免对象引用变化引起的无效触发。
+watch(() => store.comm.login.user?.id, (id, prevId) => {
+  if (id === prevId) return
+  nextTick(() => initDropdowns())
+  if (id) {
     method.fetchUnreadCount()
-  })
-})
-
-onUpdated(() => {
-  // 组件更新后检查是否需要重新初始化下拉菜单
-  initDropdowns()
-})
-
-nextTick(async () => {
-  await method.getTheme()
-  initDropdowns()
+    checkSignStatus()
+  }
 })
 
 // 监听当前路由 name 改变

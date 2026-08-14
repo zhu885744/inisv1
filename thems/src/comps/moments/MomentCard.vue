@@ -43,7 +43,7 @@
             class="wx-img-wrap"
             @click.stop="openImage(idx)"
           >
-            <img :src="img" class="wx-img" />
+            <img :src="img" class="wx-img" loading="lazy" decoding="async" />
           </div>
         </div>
 
@@ -237,7 +237,7 @@ const formatTime = (timestamp) => {
 const renderContent = (content) => {
   if (!content) return ''
   let processed = content
-  processed = processed.replace(/\[emoji:\s*(https?:\/\/[^\]]+|\/[^\]]+)\]/g, '<img src="$1" style="width: 24px; height: 24px; vertical-align: middle; display: inline-block; object-fit: contain;">')
+  processed = processed.replace(/\[emoji:\s*(https?:\/\/[^\]]+|\/[^\]]+)\]/g, '<img src="$1" loading="lazy" decoding="async" style="width: 24px; height: 24px; vertical-align: middle; display: inline-block; object-fit: contain;">')
   processed = processed.replace(/\n/g, '<br>')
   return processed
 }
