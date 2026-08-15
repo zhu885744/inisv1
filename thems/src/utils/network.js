@@ -546,12 +546,12 @@ const requestWithRetry = async (method, url, dataOrParams, options = {}) => {
           throw error
         }
 
-        if (response?.status === 401 || response?.data?.code === 401) {
+        if (error?.response?.status === 401 || error?.response?.data?.code === 401) {
           handleLogout()
           return Promise.reject({
             code: 401,
-            message: response?.data?.msg || '登录已过期，请重新登录！',
-            data: response?.data,
+            message: error?.response?.data?.msg || '登录已过期，请重新登录！',
+            data: error?.response?.data,
             url: error.config?.url
           })
         }

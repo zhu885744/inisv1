@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"inis/app/facade"
 	"strings"
 	"sync"
@@ -45,6 +46,45 @@ func InitArticle() {
 		facade.Log.Error(map[string]any{"error": err}, "Article表迁移失败")
 		return
 	}
+
+	// 初始化数据
+	go initArticleData()
+}
+
+// initArticleData - 初始化Article表数据
+func initArticleData() {
+
+	count, _ := facade.DB.Model(&Article{}).Count()
+	if count != 0 {
+		return
+	}
+
+	// 确保默认分类已存在，避免异步初始化顺序问题
+	group := ArticleGroup{
+		Key:  "Default-Category",
+		Name: "默认分类",
+	}
+	exist, _ := facade.DB.Model(&ArticleGroup{}).Where("key", "Default-Category").Exist()
+	if !exist {
+		group.Pid = 0
+		group.Description = "默认分类"
+		facade.DB.Model(&group).Create(&group)
+	} else {
+		item, _ := facade.DB.Model(&ArticleGroup{}).Where("key", "Default-Category").Find()
+		group.Id = cast.ToInt(item["id"])
+	}
+
+	// 默认文章关联到默认分类（Group 字段存储 |id| 格式）
+	article := Article{
+		Uid:     1,
+		Title:   "欢迎使用 inis",
+		Content: "如果您看到这篇文章，表示您的 blog 已经安装成功.",
+		Group:   fmt.Sprintf("|%v|", group.Id),
+		Audit:   1,
+		Status:  1,
+	}
+
+	facade.DB.Model(&article).Create(&article)
 }
 
 // AfterFind - 查询Hook

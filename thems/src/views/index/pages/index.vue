@@ -173,9 +173,6 @@
       <div v-else class="wx-empty-state">
         <i class="bi bi-inbox"></i>
         <p>暂无动态</p>
-        <button v-if="isLogin" class="wx-btn-gradient mt-3" @click="showEditor = true">
-          <i class="bi bi-pencil-square me-1"></i>发布第一条动态
-        </button>
       </div>
     </div>
   </div>

@@ -32,6 +32,27 @@ func InitArticleGroup() {
 		facade.Log.Error(map[string]any{"error": err}, "ArticleGroup表迁移失败")
 		return
 	}
+
+	// 初始化数据
+	go initArticleGroupData()
+}
+
+// initArticleGroupData - 初始化ArticleGroup表数据
+func initArticleGroupData() {
+
+	count, _ := facade.DB.Model(&ArticleGroup{}).Count()
+	if count != 0 {
+		return
+	}
+
+	item := ArticleGroup{
+		Pid:         0,
+		Key:         "Default-Category",
+		Name:        "默认分类",
+		Description: "默认分类",
+	}
+
+	facade.DB.Model(&item).Create(&item)
 }
 
 // AfterSave - 保存后的Hook（包括 create update）

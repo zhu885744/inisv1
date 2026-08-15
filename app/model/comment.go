@@ -37,6 +37,46 @@ func InitComment() {
 		facade.Log.Error(map[string]any{"error": err}, "Comment表迁移失败")
 		return
 	}
+
+	// 初始化数据
+	go initCommentData()
+}
+
+// initCommentData - 初始化Comment表数据
+func initCommentData() {
+
+	count, _ := facade.DB.Model(&Comment{}).Count()
+	if count != 0 {
+		return
+	}
+
+	// 确保默认文章已存在，避免异步初始化顺序问题
+	article := Article{
+		Uid:    1,
+		Title:  "欢迎使用 inis",
+		Content: "如果您看到这篇文章，表示您的 blog 已经安装成功.",
+		Audit:  1,
+		Status: 1,
+	}
+	exist, _ := facade.DB.Model(&Article{}).Where("title", "欢迎使用 inis").Exist()
+	if !exist {
+		facade.DB.Model(&article).Create(&article)
+	} else {
+		item, _ := facade.DB.Model(&Article{}).Where("title", "欢迎使用 inis").Find()
+		article.Id = cast.ToInt(item["id"])
+	}
+
+	// 默认评论关联到默认文章
+	comment := Comment{
+		Pid:      0,
+		Uid:      1,
+		Content:  "欢迎来到 inis，这是一条默认评论，祝您使用愉快！",
+		BindId:   article.Id,
+		BindType: "article",
+		Editor:   "text",
+	}
+
+	facade.DB.Model(&comment).Create(&comment)
 }
 
 // AfterFind - 查询Hook

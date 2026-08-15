@@ -37,6 +37,27 @@ func InitMoments() {
 		facade.Log.Error(map[string]any{"error": err}, "Moments表迁移失败")
 		return
 	}
+
+	// 初始化数据
+	go initMomentsData()
+}
+
+// initMomentsData - 初始化Moments表数据
+func initMomentsData() {
+
+	count, _ := facade.DB.Model(&Moments{}).Count()
+	if count != 0 {
+		return
+	}
+
+	item := Moments{
+		Uid:     1,
+		Content: "欢迎使用 inis，这是一条默认动态，快去发布你的第一条动态吧！",
+		Audit:   1,
+		Status:  1,
+	}
+
+	facade.DB.Model(&item).Create(&item)
 }
 
 func (this *Moments) AfterFind(tx *gorm.DB) (err error) {
