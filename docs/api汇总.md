@@ -574,6 +574,35 @@ type ApiInterface interface {
 | DELETE | `remove` / `delete` / `clear` | `/api/notification/{method}` | 通用 |
 | DELETE | `remove-all` | `/api/notification/remove-all` | 清空全部通知 |
 
+#### 通知类型（type 字段）
+
+通知按 `type` 字段区分消息类型，目前项目实际支持以下取值（`varchar(32)`，可扩展）：
+
+| type 值 | 含义 | 触发场景 | 触发位置 |
+| :--- | :--- | :--- | :--- |
+| `system` | 系统通知 | 管理员后台发送系统通知；用户登录后的「账号登录通知」 | `notification.go` `sendSystem` / `model/notification.go` `CreateLoginNotification` |
+| `comment` | 评论/回复通知 | 有人回复了你的评论 | `comment.go` `create` |
+| `like` | 点赞通知 | 有人赞了你的评论 | `user-likes.go` `like` |
+| `follow` | 关注通知 | 有人关注了你 | `user-follows.go` `follow` |
+| `collect` | 收藏通知 | 有人收藏了你的文章/页面/动态 | `user-collects.go` `collect` |
+
+> 补充：`model/notification.go` 中 `Type` 字段注释写的是 `comment/like/follow/system`，实际代码还多了 `collect`（收藏通知），注释未同步。`notification.go` 控制器自身仅硬编码 `system` 一种类型，其余类型由评论/点赞/关注/收藏等控制器在业务动作中调用 `CreateNotification()` 传入。
+
+#### 广播 vs 个人通知（uid 字段）
+
+| 类型 | 判定 | 说明 |
+| :--- | :--- | :--- |
+| 广播通知 | `uid = 0` | 只存一条记录，全员可见；每个用户的已读/隐藏状态记录在 `inis_notification_read` 表 |
+| 个人通知 | `uid = 具体用户` | 每个用户一条独立记录 |
+
+`send-system` 接口的 `target_type` 参数支持三种目标：
+
+| target_type | 说明 |
+| :--- | :--- |
+| `all` | 全量广播（仅创建一条 `uid=0` 记录，不逐用户写入，不发邮件） |
+| `partial` | 部分用户（需传 `user_ids`） |
+| `single` | 单个用户（需传 `user_ids`） |
+
 ---
 
 ## 八、其他路由（dev / socket / index）

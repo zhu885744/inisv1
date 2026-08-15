@@ -125,7 +125,7 @@ const state = reactive({
             total: 1,
         },
         limit: props.pagination.sizes[0],
-        order: 'create_time asc',
+        order: props.opts?.order || 'create_time asc',
         loading: {
             data: false,
             page: false,
@@ -189,12 +189,12 @@ const method = {
         // 数据加载中
         state.item.loading.data = true
 
-        // 过滤掉空数组参数
-        const params = { ...state.config.opts.params }
+        // 过滤掉空数组参数（始终读取最新的 props.opts，保证父组件动态修改的参数能生效）
+        const params = { ...(props.opts?.params || state.config.opts.params || {}) }
         if (params.where && params.where.length === 0) delete params.where
         if (params.like && params.like.length === 0) delete params.like
 
-        const { data, code, msg } = await axios[state.config.opts.method](state.config.opts.url, {
+        const { data, code, msg } = await axios[props.opts?.method || state.config.opts.method || 'get'](props.opts?.url || state.config.opts.url, {
             page, limit, order: state.item.order, ...params
         })
 

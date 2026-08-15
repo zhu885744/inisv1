@@ -20,12 +20,9 @@
 
       <!-- 标题 -->
       <template #i-title="{ scope = {} }">
-        <div class="d-flex align-items-center">
-          <el-tag v-if="method.isBroadcast(scope)" type="warning" size="small" effect="dark" class="me-1">公告</el-tag>
-          <el-tooltip :content="scope.title" placement="top" :show-after="200">
-            <span class="text-truncate d-inline-block" style="max-width: 200px;">{{ scope.title }}</span>
-          </el-tooltip>
-        </div>
+        <el-tooltip :content="scope.title" placement="top" :show-after="200">
+          <span class="text-truncate d-inline-block" style="max-width: 200px;">{{ scope.title }}</span>
+        </el-tooltip>
       </template>
 
       <!-- 内容 -->
@@ -37,8 +34,7 @@
 
       <!-- 类型 -->
       <template #i-type="{ scope = {} }">
-        <el-tag v-if="method.isBroadcast(scope)" type="warning" size="small">系统公告</el-tag>
-        <el-tag v-else-if="scope.type === 'comment'" type="info" size="small">回复</el-tag>
+        <el-tag v-if="scope.type === 'comment'" type="info" size="small">回复</el-tag>
         <el-tag v-else-if="scope.type === 'like'" type="danger" size="small">点赞</el-tag>
         <el-tag v-else-if="scope.type === 'follow'" type="success" size="small">关注</el-tag>
         <el-tag v-else-if="scope.type === 'system'" type="primary" size="small">系统</el-tag>
@@ -47,20 +43,17 @@
 
       <!-- 接收用户 -->
       <template #i-uid="{ scope = {} }">
-        <el-tag v-if="method.isBroadcast(scope)" type="info" size="small" effect="plain">全体用户</el-tag>
-        <span v-else>{{ scope.uid }}</span>
+        <span>{{ scope.uid }}</span>
       </template>
 
       <!-- 触发用户 -->
       <template #i-from_uid="{ scope = {} }">
-        <span v-if="method.isBroadcast(scope)" class="text-muted">系统</span>
-        <span v-else>{{ scope.from_uid }}</span>
+        <span>{{ scope.from_uid }}</span>
       </template>
 
       <!-- 状态 -->
       <template #i-is_read="{ scope = {} }">
-        <el-tag v-if="method.isBroadcast(scope)" type="warning" size="small" effect="plain">公告</el-tag>
-        <el-tag v-else :type="scope.is_read === 1 ? 'success' : 'warning'" size="small">
+        <el-tag :type="scope.is_read === 1 ? 'success' : 'warning'" size="small">
           {{ scope.is_read === 1 ? '已读' : '未读' }}
         </el-tag>
       </template>
@@ -77,13 +70,8 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <template v-if="props.type !== 'remove'">
-              <el-button
-                v-if="!method.isBroadcast(scope.row) && scope.row.is_read === 0"
-                size="small" type="primary" link
-                @click="method.read(scope.row.id)"
-              >标记已读</el-button>
               <el-button size="small" link @click="method.show(scope.row)">详情</el-button>
-              <el-button size="small" type="danger" link @click="method.delete(scope.row.id, '', scope.row)">删 除</el-button>
+              <el-button size="small" type="danger" link @click="method.delete(scope.row.id, '')">删 除</el-button>
             </template>
             <template v-else>
               <el-button size="small" type="primary" link @click="method.restore(scope.row.id)">恢 复</el-button>
@@ -104,23 +92,16 @@
         <tr>
           <td class="table-active">接收范围</td>
           <td>
-            <el-tag v-if="method.isBroadcast(state.dialog.data)" type="warning" size="small">全体用户（广播公告，单条记录）</el-tag>
-            <span v-else>用户ID：{{ state.dialog.data.uid }}</span>
+            <span>用户ID：{{ state.dialog.data.uid }}</span>
           </td>
         </tr>
         <tr>
           <td class="table-active">触发用户</td>
-          <td>{{ method.isBroadcast(state.dialog.data) ? '系统' : state.dialog.data.from_uid }}</td>
+          <td>{{ state.dialog.data.from_uid }}</td>
         </tr>
         <tr>
           <td class="table-active">已读状态</td>
-          <td>
-            <template v-if="method.isBroadcast(state.dialog.data)">
-              <el-tag type="info" size="small">公告</el-tag>
-              <span class="text-muted small ms-1">已读状态按用户独立记录于 notification_reads</span>
-            </template>
-            <template v-else>{{ state.dialog.data.is_read === 1 ? '已读' : '未读' }}</template>
-          </td>
+          <td>{{ state.dialog.data.is_read === 1 ? '已读' : '未读' }}</td>
         </tr>
         <tr><td class="table-active">创建时间</td><td>{{ method.formatTime(state.dialog.data.create_time) }}</td></tr>
       </table>
@@ -147,10 +128,10 @@ const { proxy } = getCurrentInstance()
 const state = reactive({
   selection: [],
   opts: {
-    url: '',
+    url: '/api/notification/all',
     params: {},
     columns: [
-      { label: '#', prop: 'id', width: '70' },
+      { label: 'id', prop: 'id', width: '70' },
       { label: '标题', prop: 'title', slot: 'i-title' },
       { label: '内容', prop: 'content', slot: 'i-content' },
       { label: '类型', prop: 'type', width: '100', slot: 'i-type' },
@@ -172,11 +153,6 @@ const method = {
     if (state.opts.url) {
       await proxy.$refs['i-table']?.init?.()
     }
-  },
-
-  // 广播通知：uid === 0（推送给全体用户，仅一条共享记录）
-  isBroadcast(row) {
-    return row && Number(row.uid) === 0
   },
 
   onSelection(selection) {
@@ -216,19 +192,11 @@ const method = {
     })
   },
 
-  delete(id, type = '', row = null) {
-    const isBroadcast = method.isBroadcast(row)
+  delete(id, type = '') {
     const apiPath = type === 'force' ? '/api/notification/delete' : '/api/notification/remove'
-    let msg
-    if (type === 'force') {
-      msg = isBroadcast
-        ? '确定要彻底删除该公告吗？删除后全体用户将永远无法看到，此操作不可恢复！'
-        : '确定要彻底删除该通知吗？此操作不可恢复！'
-    } else {
-      msg = isBroadcast
-        ? '确定要删除该公告吗？删除后全体用户将看不到此公告（可到回收站恢复）。'
-        : '确定要删除该通知吗？'
-    }
+    const msg = type === 'force'
+      ? '确定要彻底删除该通知吗？此操作不可恢复！'
+      : '确定要删除该通知吗？'
 
     ElMessageBox.confirm(msg, '提示', { type: 'warning' }).then(() => {
       axios.del(apiPath, { ids: String(id) }).then(() => {
@@ -243,11 +211,10 @@ const method = {
     const ids = method.idsOf()
     if (!ids) return
 
-    const hasBroadcast = state.selection.some(r => method.isBroadcast(r))
     const apiPath = type === 'force' ? '/api/notification/delete' : '/api/notification/remove'
     const msg = type === 'force'
-      ? (hasBroadcast ? '选中项包含系统公告，彻底删除后全体用户将永远无法看到，此操作不可恢复！' : '确定要彻底删除选中的通知吗？此操作不可恢复！')
-      : (hasBroadcast ? '选中项包含系统公告，删除后全体用户将看不到该公告（可到回收站恢复）。' : '确定要删除选中的通知吗？')
+      ? '确定要彻底删除选中的通知吗？此操作不可恢复！'
+      : '确定要删除选中的通知吗？'
 
     ElMessageBox.confirm(msg, '提示', { type: 'warning' }).then(() => {
       axios.del(apiPath, { ids }).then(() => {
@@ -268,7 +235,6 @@ const method = {
   },
 
   typeLabel(row) {
-    if (method.isBroadcast(row)) return '系统公告'
     const map = { comment: '回复', like: '点赞', follow: '关注', system: '系统消息' }
     return map[row.type] || row.type
   },
@@ -292,8 +258,6 @@ const method = {
 }
 
 onMounted(async () => {
-  state.opts.url = '/api/notification/all'
-  state.opts.params = props.params
   if (props.init) await method.init()
 })
 
@@ -301,6 +265,12 @@ onMounted(async () => {
 watch(() => props.init, (val) => {
   if (val) method.init()
 })
+
+// 与父组件传入的参数保持响应式同步（onlyTrashed / uid / order / like 等）
+// 父组件修改 state.params.xxx 或整体替换对象时，都能实时反映到表格请求参数中
+watch(() => props.params, (val) => {
+  state.opts.params = val
+}, { immediate: true })
 
 defineExpose({ init: method.init, show: method.show })
 </script>

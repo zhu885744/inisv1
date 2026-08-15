@@ -1,20 +1,14 @@
 <template>
   <div class="container-box">
-    <!-- 顶部栏 -->
-    <el-row justify="space-between" align="middle" class="mb-3">
-      <el-col :span="16">
-        <div class="d-flex align-items-center gap-2">
-          <el-input
-            v-model="state.item.search"
-            placeholder="搜索通知标题或内容"
-            clearable
-            style="width: 280px"
-          />
-          <el-button type="primary" @click="method.refresh()" :icon="'Refresh'">刷新</el-button>
+    <el-row align="middle" class="mb-3">
+      <el-col :span="24">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-2">
+            <el-input v-model="state.item.search" placeholder="搜索通知标题或内容" clearable style="width: 280px" />
+            <el-button type="primary" @click="method.refresh()" :icon="'Refresh'">刷新</el-button>
+            <el-button type="primary" :icon="'Promotion'" @click="method.gotoPush">推送系统消息</el-button>
+          </div>
         </div>
-      </el-col>
-      <el-col :span="8" class="text-end">
-        <el-button type="primary" :icon="'Promotion'" @click="method.gotoPush">推送消息</el-button>
       </el-col>
     </el-row>
 
@@ -26,10 +20,6 @@
 
       <el-tab-pane label="回收站" name="remove">
         <table-message ref="removeTable" v-model:init="state.tabs.remove" :params="state.params.remove" type="remove" @refresh="method.refresh" />
-      </el-tab-pane>
-
-      <el-tab-pane label="系统公告" name="broadcast">
-        <table-message ref="broadcastTable" v-model:init="state.tabs.broadcast" :params="state.params.broadcast" type="broadcast" @refresh="method.refresh" />
       </el-tab-pane>
 
       <el-tab-pane label="推送系统消息" name="push">
@@ -96,8 +86,8 @@
               <div class="text-muted small mt-1">
                 系统消息将出现在用户的消息中心；邮件通知将发送至用户绑定的邮箱。
                 <template v-if="state.pushForm.target_type === 'all'">
-                  <el-tag type="warning" size="small" effect="plain" class="ms-1">广播模式</el-tag>
-                  <span class="text-warning">仅创建 1 条公告记录（uid=0），全体用户可见；已读/删除按用户独立记录，不产生百万条数据。</span>
+                  <el-tag type="warning" size="small" effect="plain" class="ms-1">全体用户广播模式</el-tag>
+                  <span class="text-warning">全体用户可见；已读/删除按用户独立记录。</span>
                 </template>
                 <template v-else>
                   <el-tag type="info" size="small" effect="plain" class="ms-1">定向模式</el-tag>
@@ -163,13 +153,11 @@ const state = reactive({
   tabs: {
     all: false,
     remove: false,
-    broadcast: false,
+    push: false,
   },
   params: {
     all: { order: 'create_time desc' },
     remove: { order: 'create_time desc', onlyTrashed: true },
-    // 系统公告：仅展示广播通知（uid=0，推送给全体用户的单条记录）
-    broadcast: { order: 'create_time desc', uid: 0 },
   },
   pushForm: {
     target_type: 'all',
@@ -187,7 +175,7 @@ const state = reactive({
 const method = {
   refresh(tab = '') {
     // tab 名 -> 组件 ref 名
-    const tables = { all: 'allTable', remove: 'removeTable', broadcast: 'broadcastTable' }
+    const tables = { all: 'allTable', remove: 'removeTable' }
     if (tab && tables[tab]) {
       proxy.$refs[tables[tab]]?.init?.()
       return
@@ -210,7 +198,6 @@ const method = {
   order(key, val) {
     state.params.all.order = `${key} ${val}`
     state.params.remove.order = `${key} ${val}`
-    state.params.broadcast.order = `${key} ${val}`
     method.refresh()
   },
 
@@ -284,17 +271,9 @@ const method = {
       const res = await axios.post('/api/notification/send-system', payload)
       const data = res?.data || res
 
-      // 全量推送：后端返回 broadcast:true，只写 1 条广播记录，全体用户可见
-      if (data?.broadcast) {
-        ElMessage.success('已广播给全体用户！仅创建 1 条公告记录，用户进入消息中心即可看到')
-        method.resetPushForm()
-        method.refresh('all')
-        method.refresh('broadcast')
-      } else {
-        ElMessage.success(`推送完成！共 ${data?.total || 0} 个目标，成功 ${data?.success || 0} 条`)
-        method.resetPushForm()
-        method.refresh('all')
-      }
+      ElMessage.success(`推送完成！共 ${data?.total || 0} 个目标，成功 ${data?.success || 0} 条`)
+      method.resetPushForm()
+      method.refresh('all')
     } catch (err) {
       ElMessage.error('推送失败：' + (err?.msg || '未知错误'))
     } finally {
@@ -327,7 +306,6 @@ watch(() => state.item.search, val => {
 
     state.params.all.like = like
     state.params.remove.like = like
-    state.params.broadcast.like = like
     method.refresh()
   }, 500)
 })
