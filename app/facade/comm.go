@@ -1,6 +1,9 @@
 package facade
 
 import (
+	"errors"
+	"net"
+	"net/url"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -168,6 +171,24 @@ func (c *CommStruct) MaskIP(ip string) string {
 	return parts[0] + "." + parts[1] + ".*.*"
 }
 
+// MaskSecret 密钥/密码脱敏处理（保留首尾各 4 位，中间隐藏）
+func (c *CommStruct) MaskSecret(secret string) string {
+	if secret == "" {
+		return secret
+	}
+
+	runes := []rune(secret)
+	length := len(runes)
+
+	// 长度不足 8 位时，全部隐藏，避免泄露短密钥（如简单密码）
+	if length <= 8 {
+		return strings.Repeat("*", length)
+	}
+
+	// 保留前 4 位和后 4 位
+	return string(runes[:4]) + "****" + string(runes[length-4:])
+}
+
 // MaskUA User-Agent脱敏处理
 func (c *CommStruct) MaskUA(ua string) string {
 	if ua == "" {
@@ -305,4 +326,71 @@ func (c *CommStruct) generateSecureHeaders(body map[string]any, unix int64) map[
 		"X-Gorgon":  gorgon,
 		"X-SS-STUB": stub,
 	}
+}
+
+// IsPrivateIP 判断 IP 是否为内网/回环/链路本地/保留地址，用于 SSRF 防护
+func (c *CommStruct) IsPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		// 解析失败（可能是 IPv6 带 zone 等），保守起见视为内网拦截
+		return true
+	}
+
+	// IPv4 内网/保留地址段
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.IsLoopback() ||
+			ip4.IsPrivate() ||
+			ip4.IsLinkLocalUnicast() ||
+			ip4.IsLinkLocalMulticast() ||
+			ip4.IsUnspecified() ||
+			ip4.IsMulticast()
+	}
+
+	// IPv6 内网/回环/链路本地
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast()
+}
+
+// IsSafeOutboundURL SSRF 防护：校验目标 URL 是否允许对外发起请求
+// 仅允许 http/https 协议，且目标主机不能解析到内网地址
+func (c *CommStruct) IsSafeOutboundURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if utils.Is.Empty(rawURL) {
+		return errors.New("目标地址不能为空！")
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return errors.New("目标地址格式错误！")
+	}
+
+	// 协议白名单
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return errors.New("仅允许 http/https 协议！")
+	}
+
+	// 主机名不能为空
+	host := u.Hostname()
+	if utils.Is.Empty(host) {
+		return errors.New("目标地址缺少主机名！")
+	}
+
+	// 解析主机名对应的所有 IP（防止 DNS rebinding 与十六进制/整数形式的 IP 绕过）
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return errors.New("目标主机无法解析！")
+	}
+
+	for _, ip := range ips {
+		if c.IsPrivateIP(ip.String()) {
+			return errors.New("禁止访问内网地址！")
+		}
+	}
+
+	return nil
 }

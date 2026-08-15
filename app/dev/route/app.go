@@ -12,14 +12,15 @@ const (
 )
 
 // 中间件配置
-var defaultDevMiddleware = []gin.HandlerFunc{
+// 注意：/dev/install 为安装引导接口，需允许外网访问以完成安装流程；
+// 其安全性由 Install 中间件控制（已安装后 /dev/install 会返回 412 禁止访问）
+var installDevMiddleware = []gin.HandlerFunc{
 	global.Params(),
 }
 
-// 控制器映射
-var devControllers = map[string]controller.ApiInterface{
-	"info":    &controller.Info{},
-	"install": &controller.Install{},
+// info 路由仅做参数解析，敏感方法（system/device/renew/kill）在控制器内部校验本机访问
+var infoDevMiddleware = []gin.HandlerFunc{
+	global.Params(),
 }
 
 // registerDevRoutes 注册开发路由
@@ -35,6 +36,15 @@ func registerDevRoutes(group *gin.RouterGroup, controllers map[string]controller
 
 // Route - 路由配置
 func Route(Gin *gin.Engine) {
-	devGroup := Gin.Group(apiPrefix, defaultDevMiddleware...)
-	registerDevRoutes(devGroup, devControllers)
+	// install 接口：仅本机可访问
+	installGroup := Gin.Group(apiPrefix, installDevMiddleware...)
+	registerDevRoutes(installGroup, map[string]controller.ApiInterface{
+		"install": &controller.Install{},
+	})
+
+	// info 接口：time/version 公开，敏感方法内部校验本机
+	infoGroup := Gin.Group(apiPrefix, infoDevMiddleware...)
+	registerDevRoutes(infoGroup, map[string]controller.ApiInterface{
+		"info": &controller.Info{},
+	})
 }

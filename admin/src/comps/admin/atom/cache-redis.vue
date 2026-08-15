@@ -146,8 +146,11 @@ const method = {
 
         let field = ['host', 'port', 'database', 'password']
 
+        // 密码已脱敏隐藏时，跳过「是否有变化」检查
+        const secretChanged = !utils.is.masked(state.struct.password)
+
         // 检查关键配置是否有变化
-        if (!utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成测试连接')
+        if (secretChanged && !utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成测试连接')
 
         if (utils.is.empty(state.struct.host))      return ElMessage.warning('请填写 主机地址！')
         if (utils.is.empty(state.struct.port))      return ElMessage.warning('请填写 端口号！')
@@ -155,7 +158,9 @@ const method = {
 
         state.status.wait   = true
 
-        const { code, msg } = await axios.put('/api/toml/cache-redis', state.struct)
+        // 剔除脱敏占位字段，由后端保留原值
+        const data = utils.object.withoutMasked(state.struct, ['password'])
+        const { code, msg } = await axios.put('/api/toml/cache-redis', data)
 
         state.status.wait   = false
 
@@ -172,7 +177,9 @@ const method = {
 
         state.status.test = true
 
-        const { code, msg, data } = await axios.post('/api/toml/test-redis', state.struct)
+        // 密码脱敏时，测试请求剔除该字段（后端保留原密码进行连接测试）
+        const data = utils.object.withoutMasked(state.struct, ['password'])
+        const { code, msg, data: resp } = await axios.post('/api/toml/test-redis', data)
 
         state.status.test = false
 
@@ -182,7 +189,7 @@ const method = {
             return ElMessage.success(msg)
         }
 
-        ElMessage.error(`${msg}<br>${data}`)
+        ElMessage.error(`${msg}<br>${resp}`)
     },
 }
 

@@ -94,7 +94,8 @@ class helper{
             },
             domain: (domain) => this.isDomain(domain),
             true  : (data) => this.isTrue(data),
-            false : (data) => this.isFalse(data)
+            false : (data) => this.isFalse(data),
+            masked: (value) => this.isMasked(value)
         }
 
         // 链式操作 in 属性
@@ -161,7 +162,8 @@ class helper{
             to: {
                 array: data => this.objectToArray(data)
             },
-            equal: (object1,object2,fields) => this.objectEqual(object1,object2,fields)
+            equal: (object1,object2,fields) => this.objectEqual(object1,object2,fields),
+            withoutMasked: (object, fields) => this.objectWithoutMasked(object, fields)
         }
 
         this.string= {
@@ -1191,6 +1193,19 @@ class helper{
             if (this.config.log) console.warn("请输入一个手机号码")
         }
         else return /^(\+?0?86\-?)?1[3456789]\d{9}$/.test(string)
+    }
+
+    /**
+     *
+     * @name   判断是否为脱敏后的密钥占位值
+     * @param  {String} value [待判断的值]
+     * @return {Boolean} 含 **** 或全由 * 组成返回 true
+     */
+    isMasked(value)
+    {
+        if (this.isEmpty(value) || typeof value !== 'string') return false
+        // 含 **** 或（非空且全由 * 组成）
+        return value.includes('****') || (value.trim() !== '' && value.split('').every(ch => ch === '*'))
     }
 
     /**
@@ -2292,6 +2307,31 @@ class helper{
             if (object1[field] !== object2[field]) return false
         }
         return true
+    }
+
+    /**
+     *
+     * @name   剔除对象中的脱敏占位字段
+     * @description 用于提交配置时，将脱敏后的密钥字段（含 **** 或全 *）从提交数据中移除，
+     *              以便后端保留原值，避免把脱敏值写回配置
+     * @param  {Object} object [源对象]
+     * @param  {Array} fields [需要检查的字段名数组，缺省则检查所有字段]
+     * @return {Object} 剔除脱敏字段后的新对象
+     */
+    objectWithoutMasked(object = {}, fields = [])
+    {
+        const result = { ...object }
+
+        // 未指定字段时，检查所有顶层字段
+        const keys = fields.length > 0 ? fields : Object.keys(result)
+
+        keys.forEach(key => {
+            if (this.isMasked(result[key])) {
+                delete result[key]
+            }
+        })
+
+        return result
     }
 
     // position 是相对于 element 元素的位置，位置参数如下：

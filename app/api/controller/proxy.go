@@ -80,6 +80,13 @@ func (this *Proxy) INDEX(ctx *gin.Context) {
 	params := this.params(ctx)
 	filter := []string{"i-url", "i-type"}
 
+	// SSRF 防护：校验目标地址，禁止访问内网与非 http/https 协议
+	targetURL := cast.ToString(params["i-url"])
+	if err := facade.Comm.IsSafeOutboundURL(targetURL); err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
 	// // 创建 CookieJar
 	// jar, _ := cookiejar.New(nil)
 	//

@@ -150,19 +150,24 @@ const method = {
 
         let field = ['host', 'port', 'account', 'password']
 
+        // 密码已脱敏隐藏时，跳过「是否有变化」检查
+        const secretChanged = !utils.is.masked(state.struct.password)
+
         // 检查关键配置是否有变化
-        if (!utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成邮件服务测试')
+        if (secretChanged && !utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成邮件服务测试')
 
         if (utils.is.empty(state.struct.host))      return ElMessage.warning('请填写邮件服务器地址！')
         if (utils.is.empty(state.struct.port))      return ElMessage.warning('请填写邮件服务器端口！')
         if (utils.is.empty(state.struct.account))   return ElMessage.warning('请填写邮件账号！')
-        if (utils.is.empty(state.struct.password))  return ElMessage.warning('请填写服务密码！')
+        if (utils.is.masked(state.struct.password)) return ElMessage.warning('服务密码已隐藏，如需修改请重新输入！')
         if (utils.is.empty(state.struct.sign_name)) return ElMessage.warning('请填写邮件签名！')
         if (method.chinese(state.struct.nickname))  return ElMessage.warning('邮件昵称不能包含中文！')
 
         state.status.wait   = true
 
-        const { code, msg } = await axios.put('/api/toml/sms-email', state.struct)
+        // 剔除脱敏占位字段，由后端保留原值
+        const data = utils.object.withoutMasked(state.struct, ['password'])
+        const { code, msg } = await axios.put('/api/toml/sms-email', data)
 
         state.status.wait   = false
 
@@ -177,6 +182,7 @@ const method = {
         if (utils.is.empty(state.struct.host))      return ElMessage.warning('请填写邮件服务器地址！')
         if (utils.is.empty(state.struct.port))      return ElMessage.warning('请填写邮件服务器端口！')
         if (utils.is.empty(state.struct.account))   return ElMessage.warning('请填写邮件账号！')
+        if (utils.is.masked(state.struct.password)) return ElMessage.warning('服务密码已隐藏，请重新输入后再测试！')
         if (utils.is.empty(state.struct.password))  return ElMessage.warning('请填写服务密码！')
         if (utils.is.empty(state.struct.sign_name)) return ElMessage.warning('请填写邮件签名！')
         if (!utils.is.email(state.struct.email))    return ElMessage.warning('接收者邮箱格式不正确！')

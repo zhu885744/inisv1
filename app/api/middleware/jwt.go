@@ -12,13 +12,8 @@ import (
 )
 
 const (
-	UserStatusNormal  = 0
-	UserStatusFrozen = 1
-)
-
-const (
-	cacheUserPrefix = "user[%v]"
-	tokenNameKey    = "app.token_name"
+	cacheUserPrefix  = "user[%v]"
+	tokenNameKey     = "app.token_name"
 	defaultTokenName = "INIS_LOGIN_TOKEN"
 )
 
@@ -69,7 +64,7 @@ func getUserInfoWithCache(uid any, jwtValid int64) (map[string]any, error) {
 // validateUserStatus 验证用户状态（冻结、封禁登录限制）
 func validateUserStatus(user map[string]any) error {
 	userStatus := cast.ToInt(user["status"])
-	if userStatus == UserStatusFrozen {
+	if userStatus == model.UserStatusFrozen {
 		return fmt.Errorf("账号已被冻结，请联系管理员！")
 	}
 

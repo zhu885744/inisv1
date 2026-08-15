@@ -14,6 +14,12 @@ import (
 	"gorm.io/plugin/soft_delete"
 )
 
+// 用户状态常量
+const (
+	UserStatusNormal = 0 // 正常
+	UserStatusFrozen = 1 // 冻结
+)
+
 type Users struct {
 	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Account     string `gorm:"size:32; comment:帐号; default:Null;" json:"account"`

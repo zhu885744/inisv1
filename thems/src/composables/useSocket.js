@@ -363,6 +363,25 @@ const connect = () => {
       connectionState.value = 'connected'
       reconnectCount = 0
       startHeartbeat()
+
+      // 前后端分离（跨域）场景：WebSocket 握手无法携带 Cookie，
+      // 连接成功后主动从 Cookie 读取 token 发送 auth 消息，由后端重新鉴权升级身份
+      const tokenName = globalThis?.inis?.token_name || import.meta.env.VITE_TOKEN_NAME || 'INIS_LOGIN_TOKEN'
+      const tokenMatch = document.cookie.match(new RegExp('(?:^|; )' + tokenName + '=([^;]*)'))
+      if (tokenMatch) {
+        const token = decodeURIComponent(tokenMatch[1])
+        if (token) {
+          try {
+            socketInstance.send(JSON.stringify({ type: 'auth', token }))
+            if (DEV) {
+              console.log('[Socket] 已发送 auth 鉴权消息')
+            }
+          } catch (e) {
+            console.warn('[Socket] 发送 auth 消息失败:', e)
+          }
+        }
+      }
+
       emit('open', {})
     }
 

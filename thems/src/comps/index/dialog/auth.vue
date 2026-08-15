@@ -1152,14 +1152,18 @@ const method = {
                     throw new Error('登录成功但返回数据不完整')
                 }
 
+                // 登录会话有效期（秒），后端返回，回退到 15 天
+                const validSeconds = Number(data.valid_time) > 0 ? Number(data.valid_time) : 15 * 24 * 60 * 60
+                const validMinutes = Math.ceil(validSeconds / 60)
+
                 if (cache.set) {
-                    cache.set('user-info', data.user, 7 * 24 * 60)
+                    cache.set('user-info', data.user, validMinutes)
                 } else if (cache.put) {
-                    cache.put('user-info', data.user, 7 * 24 * 60)
+                    cache.put('user-info', data.user, validMinutes)
                 } else {
                     localStorage.setItem('user-info', JSON.stringify({
                         data: data.user,
-                        expire: Date.now() + 7 * 24 * 60 * 60 * 1000
+                        expire: Date.now() + validSeconds * 1000
                     }))
                 }
                 
@@ -1167,7 +1171,7 @@ const method = {
                     utils.set.cookie(
                         globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN', 
                         data.token, 
-                        7 * 24 * 60 * 60
+                        validSeconds
                     )
                 }
                 
@@ -1245,7 +1249,9 @@ const method = {
             }
 
             cache.set('user-info', data.user, 10)
-            utils.set.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN', data.token, 7 * 24 * 60 * 60)
+            // 登录会话有效期（秒），后端返回，回退到 15 天
+            const registerValidSeconds = Number(data.valid_time) > 0 ? Number(data.valid_time) : 15 * 24 * 60 * 60
+            utils.set.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN', data.token, registerValidSeconds)
             method.hide()
             
             store.comm.login.finish = true

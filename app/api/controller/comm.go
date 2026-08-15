@@ -44,6 +44,7 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 		"register":       this.register,
 		"check-token":    this.checkToken,
 		"reset-password": this.resetPassword,
+		"logout":         this.logout,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -232,8 +233,9 @@ func (this *Comm) login(ctx *gin.Context) {
 	})
 
 	result := map[string]any{
-		"user":  item,
-		"token": jwt.Text,
+		"user":       item,
+		"token":      jwt.Text,
+		"valid_time": jwt.Valid, // 登录会话有效期（秒）
 	}
 
 	// 往客户端写入cookie - 存储登录token
@@ -431,8 +433,9 @@ func (this *Comm) register(ctx *gin.Context) {
 	table.Password = ""
 
 	result := map[string]any{
-		"user":  table,
-		"token": jwt.Text,
+		"user":       table,
+		"token":      jwt.Text,
+		"valid_time": jwt.Valid, // 登录会话有效期（秒）
 	}
 
 	// 往客户端写入cookie - 存储登录token
@@ -665,7 +668,7 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 			"hash": utils.Hash.Sum32(table.Password),
 		})
 		token = jwt.Text
-		valid = cast.ToInt64(utils.Calc(facade.AppToml.Get("jwt.expire", "7200")))
+		valid = cast.ToInt64(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
 		// 往客户端写入cookie - 存储登录token
 		setToken(ctx, token)
 	}
@@ -681,7 +684,19 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 
 // 退出登录
 func (this *Comm) logout(ctx *gin.Context) {
-	ctx.SetCookie(cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN")), "", -1, "/", "", false, false)
+
+	host := ctx.Request.Host
+	if strings.Contains(host, ":") {
+		host = strings.Split(host, ":")[0]
+	}
+
+	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
+
+	// 清除 cookie：domain 必须与登录时 setToken 的 domain 一致，否则无法清除
+	// 同时兼容带域名和空域名两种写法
+	ctx.SetCookie(tokenName, "", -1, "/", host, false, false)
+	ctx.SetCookie(tokenName, "", -1, "/", "", false, false)
+
 	this.json(ctx, nil, facade.Lang(ctx, "退出成功！"), 200)
 }
 
@@ -693,7 +708,7 @@ func setToken(ctx *gin.Context, token any) {
 		host = strings.Split(host, ":")[0]
 	}
 
-	expire := cast.ToInt(facade.AppToml.Get("jwt.expire", "7200"))
+	expire := cast.ToInt(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 
 	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", host, false, false)

@@ -44,26 +44,32 @@ const checkToken = async (state = {}) => {
         }
 
         // 2. 强制校验后端Token有效性（异步）
+        // skipAuthLogout: 让 401 原样返回，由下面的 switch 统一处理本地登录态清理，
+        // 避免 network.js 的全局 401 拦截直接 reject，导致 catch 分支误判为“保持登录”
         const { code, msg, data } = await axios.post('/api/comm/check-token', {}, {
             // 携带Cookie（适配后端从Cookie取Token）
             withCredentials: true,
             // 请求头携带Token（适配后端从Authorization取Token）
             headers: {
                 Authorization: utils.get.cookie(TOKEN_NAME) || ''
-            }
+            },
+            skipAuthLogout: true
         })
 
         switch (code) {
-            case 200:
-                // 校验成功 → 更新状态和缓存（延长缓存有效期，比如2小时）
+            case 200: {
+                // 校验成功 → 更新状态和缓存
                 state.login.user = data.user
                 state.login.finish = true
-                // cache.set 第三个参数单位为「分钟」，此前传 7200 实际是 5 天
-                cache.set(cacheName, data.user, 120) // 2小时缓存
+                // cache.set 第三个参数单位为「分钟」；优先使用后端返回的 token 剩余有效期
+                const validSeconds = Number(data.valid_time) > 0 ? Number(data.valid_time) : 2 * 60 * 60
+                cache.set(cacheName, data.user, Math.ceil(validSeconds / 60))
                 break;
+            }
             case 401: // Token过期/无效
             case 412: // Token格式错误
-                await logout(state)
+                // token 已失效，仅清除本地登录状态，不再发起 logout 请求（避免失效 token 触发 401/405）
+                clearLogin(state)
                 break;
             default:
                 console.error('Token校验失败：', msg)
@@ -89,6 +95,17 @@ const checkToken = async (state = {}) => {
 }
 
 /**
+ * 仅清除本地登录状态（不发起网络请求）
+ * @param {Object} state - 状态对象
+ */
+const clearLogin = (state = {}) => {
+    state.login.user = {}
+    state.login.finish = false
+    cache.del('user-info')
+    utils.clear.cookie(TOKEN_NAME)
+}
+
+/**
  * 登出（完善版）
  * @param {Object} state - 状态对象
  * @param {string|null} path - 跳转路径
@@ -96,14 +113,11 @@ const checkToken = async (state = {}) => {
  */
 const logout = async (state = {}, path = null) => {
     // 1. 清除前端状态
-    state.login.user = {}
-    state.login.finish = false
-    cache.del('user-info')
-    utils.clear.cookie(TOKEN_NAME)
+    clearLogin(state)
 
     // 2. 调用后端登出接口（兼容失败场景）
     try {
-        await axios.delete('/api/comm/logout', { withCredentials: true })
+        await axios.post('/api/comm/logout', {}, { withCredentials: true })
     } catch (err) {
         console.error('登出接口调用失败：', err)
     }

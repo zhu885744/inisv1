@@ -54,6 +54,55 @@ func (this *Toml) replaceTomlVars(temp string, tomlData map[string]any) string {
 	return temp
 }
 
+// 敏感字段名集合（密钥、密码等，返回给前端时需脱敏）
+var sensitiveTomlFields = map[string]bool{
+	"password":          true, // mysql/redis/email 密码
+	"access_key_secret": true, // 阿里云 AccessKey Secret
+	"secret_key":        true, // 腾讯云/七牛云 SecretKey
+	"access_key":        true, // 七牛云 AccessKey
+	"access_key_id":     true, // AccessKey ID
+	"secret_id":         true, // 腾讯云 SecretId
+	"key":               true, // JWT 签名密钥（仅出现在 crypt 配置的 jwt 段）
+}
+
+// restoreSecretParams 还原脱敏占位值：若前端回传的是脱敏后的密钥（含 **** 或全 *），
+// 则用当前配置中的原值替换，避免把脱敏值写回配置导致密钥损坏
+func (this *Toml) restoreSecretParams(params map[string]any, keys []string, current map[string]any) {
+	for _, key := range keys {
+		val := cast.ToString(params[key])
+		// 脱敏占位特征：包含 **** 或（非空且全由 * 组成）
+		if strings.Contains(val, "****") || (val != "" && strings.Trim(val, "*") == "") {
+			if original, ok := current[key]; ok && original != nil {
+				params[key] = original
+			} else {
+				delete(params, key)
+			}
+		}
+	}
+}
+
+// maskSensitiveFields 递归脱敏 map/slice 中的敏感字段
+func (this *Toml) maskSensitiveFields(data any) any {
+	switch val := data.(type) {
+	case map[string]any:
+		for key, value := range val {
+			if sensitiveTomlFields[strings.ToLower(key)] {
+				val[key] = facade.Comm.MaskSecret(cast.ToString(value))
+			} else {
+				val[key] = this.maskSensitiveFields(value)
+			}
+		}
+		return val
+	case []any:
+		for i, value := range val {
+			val[i] = this.maskSensitiveFields(value)
+		}
+		return val
+	default:
+		return data
+	}
+}
+
 // getNestedValue 从嵌套 map 中获取值，支持 "file.path" 这样的路径
 func (this *Toml) getNestedValue(data map[string]any, keyPath string) any {
 	parts := strings.Split(keyPath, ".")
@@ -208,11 +257,12 @@ func (this *Toml) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"log":     this.getLog,
-		"sms":     this.getSMS,
-		"cache":   this.getCache,
-		"crypt":   this.getCrypt,
-		"storage": this.getStorage,
+		"log":          this.getLog,
+		"sms":          this.getSMS,
+		"cache":        this.getCache,
+		"crypt":        this.getCrypt,
+		"storage":      this.getStorage,
+		"notification": this.getNotification,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -274,6 +324,7 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"storage-cos":              this.putStorageCOS,
 		"storage-kodo":             this.putStorageKODO,
 		"storage-attachment":       this.putStorageAttachment,
+		"notification":             this.putNotification,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -323,7 +374,7 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, item.Result, facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -335,8 +386,8 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 	result := cast.ToStringMap(item.Get(cast.ToString(params["name"])))
 	result["drive"] = item.Get("drive")
 
-	// 获取指定
-	this.json(ctx, result, facade.Lang(ctx, "数据请求成功！"), 200)
+	// 获取指定（脱敏敏感字段）
+	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // putSMS - 修改SMS服务配置
@@ -391,7 +442,7 @@ func (this *Toml) getCache(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, item.Result, facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -404,8 +455,8 @@ func (this *Toml) getCache(ctx *gin.Context) {
 	result["open"] = cast.ToBool(item.Get("open"))
 	result["default"] = item.Get("default")
 
-	// 获取指定
-	this.json(ctx, result, facade.Lang(ctx, "数据请求成功！"), 200)
+	// 获取指定（脱敏敏感字段）
+	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getCrypt - 获取加密服务配置
@@ -425,7 +476,7 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, item.Result, facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -434,8 +485,8 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 		return
 	}
 
-	// 获取指定
-	this.json(ctx, item.Get(cast.ToString(params["name"])), facade.Lang(ctx, "数据请求成功！"), 200)
+	// 获取指定（脱敏敏感字段，如 JWT 密钥 key）
+	this.json(ctx, this.maskSensitiveFields(item.Get(cast.ToString(params["name"]))), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getStorage - 获取存储服务配置
@@ -464,11 +515,22 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 		return
 	}
 
+	// 获取全部（脱敏敏感字段）
+	if utils.Is.Empty(params["name"]) {
+		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		return
+	}
+
+	if !utils.In.Array(params["name"], field) {
+		this.json(ctx, nil, facade.Lang(ctx, "不允许的查询范围！"), 400)
+		return
+	}
+
 	result := cast.ToStringMap(item.Get(cast.ToString(params["name"])))
 	result["default"] = item.Get("default")
 
-	// 获取指定
-	this.json(ctx, result, facade.Lang(ctx, "数据请求成功！"), 200)
+	// 获取指定（脱敏敏感字段）
+	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getStorage - 获取日志服务配置
@@ -486,9 +548,9 @@ func (this *Toml) getLog(ctx *gin.Context) {
 		return
 	}
 
-	// 获取全部
+	// 获取全部（脱敏敏感字段）
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, item.Result, facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -531,6 +593,9 @@ func (this *Toml) putSMSEmail(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"password"}, cast.ToStringMap(facade.SMSToml.Get("email")))
 
 	if utils.Is.Empty(params["host"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "host"), 400)
@@ -582,6 +647,9 @@ func (this *Toml) putSMSAliyun(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.SMSToml.Get("aliyun")))
+
 	if utils.Is.Empty(params["access_key_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
 		return
@@ -625,6 +693,9 @@ func (this *Toml) putSMSAliYunNumberVerify(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.SMSToml.Get("aliyun_number_verify")))
 
 	// 必传参数校验
 	if utils.Is.Empty(params["access_key_id"]) {
@@ -672,6 +743,9 @@ func (this *Toml) putSMSTencent(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"secret_key", "secret_id"}, cast.ToStringMap(facade.SMSToml.Get("tencent")))
 
 	if utils.Is.Empty(params["secret_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "secret_id"), 400)
@@ -1052,6 +1126,9 @@ func (this *Toml) putCryptJWT(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"key"}, cast.ToStringMap(facade.CryptToml.Get("jwt")))
+
 	if utils.Is.Empty(params["key"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "key"), 400)
 		return
@@ -1095,6 +1172,9 @@ func (this *Toml) putCacheRedis(ctx *gin.Context) {
 		"prefix":   "inis:",
 		"expire":   "2 * 60 * 60",
 	})
+
+	// 还原脱敏占位值（避免把脱敏密码写回配置）
+	this.restoreSecretParams(params, []string{"password"}, cast.ToStringMap(facade.CacheToml.Get("redis")))
 
 	if !utils.Is.Number(params["port"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 只能是数字！", "port"), 400)
@@ -1325,6 +1405,9 @@ func (this *Toml) putStorageOSS(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.StorageToml.Get("oss")))
+
 	if utils.Is.Empty(params["access_key_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
 		return
@@ -1439,6 +1522,9 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"secret_key", "secret_id"}, cast.ToStringMap(facade.StorageToml.Get("cos")))
+
 	if utils.Is.Empty(params["secret_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "secret_id"), 400)
 		return
@@ -1528,6 +1614,9 @@ func (this *Toml) putStorageKODO(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（避免把脱敏密钥写回配置）
+	this.restoreSecretParams(params, []string{"access_key", "secret_key"}, cast.ToStringMap(facade.StorageToml.Get("kodo")))
 
 	if utils.Is.Empty(params["access_key"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key"), 400)
@@ -1725,4 +1814,50 @@ func (this *Toml) putStorage(ctx *gin.Context) {
 	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
+}
+
+// getNotification - 获取通知配置
+func (this *Toml) getNotification(ctx *gin.Context) {
+	retentionDays := cast.ToInt(facade.AppToml.Get("notification.retention_days", 30))
+	this.json(ctx, map[string]any{
+		"retention_days": retentionDays,
+	}, facade.Lang(ctx, "数据请求成功！"), 200)
+}
+
+// putNotification - 修改通知配置（保留天数）
+func (this *Toml) putNotification(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	retentionDays := cast.ToInt(params["retention_days"])
+	if retentionDays <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 必须大于 0！", "retention_days"), 400)
+		return
+	}
+
+	const appTomlPath = "config/app.toml"
+
+	// 读取现有配置（文件不存在时用模板兜底）
+	content := facade.TempApp
+	if utils.File().Exist(appTomlPath) {
+		if bytes := utils.File().Byte(appTomlPath).Byte; len(bytes) > 0 {
+			content = string(bytes)
+		}
+	}
+
+	newValue := fmt.Sprintf("retention_days = %d", retentionDays)
+
+	switch {
+	case strings.Contains(content, "retention_days"):
+		// 已有 retention_days 键，替换其值
+		reg := regexp.MustCompile(`(?m)^retention_days\s*=.*$`)
+		content = reg.ReplaceAllString(content, newValue)
+	case strings.Contains(content, "[notification]"):
+		// 有 [notification] 段但无 retention_days，在段名后插入
+		content = strings.Replace(content, "[notification]", fmt.Sprintf("[notification]\n%s", newValue), 1)
+	default:
+		// 无 [notification] 段，追加到文件末尾
+		content = strings.TrimRight(content, "\n") + fmt.Sprintf("\n\n[notification]\n%s\n", newValue)
+	}
+
+	this.saveTomlConfig(ctx, content, appTomlPath, "修改成功！")
 }

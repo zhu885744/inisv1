@@ -185,13 +185,11 @@ route.beforeEach(async (to, from, next) => {
     if (to.meta?.title) document.title = to.meta.title
 
     // 登录状态无效处理
-    const invalid = async (params = { path: '/' }) => {
+    const invalid = (params = { path: '/' }) => {
         cache.del('user-info')
-        const { code } = await axios.del('/api/comm/logout')
-        if (code !== 200) {
-            cache.del('user-info')
-            utils.clear.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN')
-        }
+        utils.clear.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN')
+        // 注意：token 失效时后端 Jwt 中间件已自动清除 cookie，
+        // 这里无需再发 logout 请求，避免 405 报错及与刷新时序冲突导致的“退出又恢复”问题
         next(params)
     }
 

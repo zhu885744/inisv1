@@ -8,6 +8,7 @@ import (
 	"inis/app/facade"
 
 	"github.com/unti-io/go-utils/utils"
+	"gorm.io/gorm"
 )
 
 type BanStruct struct{}
@@ -21,6 +22,11 @@ func (this *BanStruct) Run() {
 
 // autoUnban 自动解封到期用户
 func autoUnban() {
+	// 数据库未初始化（未安装）时跳过
+	if facade.DB == nil {
+		return
+	}
+
 	now := time.Now().Unix()
 
 	// 查找所有到期但未解封的封禁记录（expires_at > 0 且 <= 当前时间，且状态为生效中）
@@ -36,23 +42,27 @@ func autoUnban() {
 	}
 
 	for _, record := range records {
-		// 更新封禁记录状态为已解封
-		_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", record.Id).Update(map[string]any{
-			"status":     model.BanStatusExpired,
-			"unban_time": now,
-		})
-		if err != nil {
-			facade.Log.Error(map[string]any{"record_id": record.Id, "error": err}, "自动解封更新记录失败")
-			continue
-		}
-
-		// 恢复用户状态
-		_, err = facade.DB.Model(&model.Users{}).Where("id", record.Uid).Update(map[string]any{
+		// 恢复用户状态（若封禁时同时冻结了用户，则一并恢复为正常）
+		userUpdate := map[string]any{
 			"current_ban_id": 0,
 			"restrictions":   0,
+		}
+		if record.FreezeUser == 1 {
+			userUpdate["status"] = model.UserStatusNormal
+		}
+
+		// 事务：更新封禁记录状态 + 恢复用户状态
+		err = facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.UserBanRecords{}).Where("id", record.Id).Updates(map[string]any{
+				"status":     model.BanStatusExpired,
+				"unban_time": now,
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Users{}).Where("id", record.Uid).Updates(userUpdate).Error
 		})
 		if err != nil {
-			facade.Log.Error(map[string]any{"uid": record.Uid, "error": err}, "自动解封更新用户失败")
+			facade.Log.Error(map[string]any{"record_id": record.Id, "error": err}, "自动解封失败")
 			continue
 		}
 

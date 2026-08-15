@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"net"
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
-	"os"
 )
 
 type Info struct {
@@ -42,13 +44,29 @@ func (this *Info) IDEL(ctx *gin.Context) {
 
 // INDEX - GET请求本体
 func (this *Info) INDEX(ctx *gin.Context) {
+	// 根路径返回系统信息，属于敏感信息，需本机访问
+	if !this.isLocal(ctx) {
+		this.json(ctx, nil, "禁止访问！", DefaultErrorCode)
+		return
+	}
 	this.json(ctx, map[string]any{
 		"system": this.getSystemInfo(ctx),
 	}, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
+// isLocal - 判断请求是否来自本机（loopback）
+func (this *Info) isLocal(ctx *gin.Context) bool {
+	ip := ctx.ClientIP()
+	parsed := net.ParseIP(ip)
+	return parsed != nil && parsed.IsLoopback()
+}
+
 // system - 系统信息
 func (this *Info) system(ctx *gin.Context) {
+	if !this.isLocal(ctx) {
+		this.json(ctx, nil, "禁止访问！", DefaultErrorCode)
+		return
+	}
 	var memory map[string]any
 	if vm, err := mem.VirtualMemory(); err == nil {
 		memory = map[string]any{
@@ -88,6 +106,10 @@ func (this *Info) version(ctx *gin.Context) {
 
 // device - 设备信息
 func (this *Info) device(ctx *gin.Context) {
+	if !this.isLocal(ctx) {
+		this.json(ctx, nil, "禁止访问！", DefaultErrorCode)
+		return
+	}
 	item := facade.Comm.Device()
 	if item.Error != nil {
 		this.json(ctx, nil, item.Error.Error(), DefaultErrorCode)
@@ -103,6 +125,10 @@ func (this *Info) time(ctx *gin.Context) {
 
 // renew - 更新
 func (this *Info) renew(ctx *gin.Context) {
+	if !this.isLocal(ctx) {
+		this.json(ctx, nil, "禁止访问！", DefaultErrorCode)
+		return
+	}
 	path, err := os.Executable()
 	if err != nil {
 		this.json(ctx, nil, err.Error(), DefaultErrorCode)
@@ -122,6 +148,10 @@ func (this *Info) renew(ctx *gin.Context) {
 
 // kill 杀死进程
 func (this *Info) kill(ctx *gin.Context) {
+	if !this.isLocal(ctx) {
+		this.json(ctx, nil, "禁止访问！", DefaultErrorCode)
+		return
+	}
 	go func() {
 		// 延迟执行，确保响应先返回
 		os.Exit(0)

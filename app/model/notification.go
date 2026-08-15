@@ -43,6 +43,7 @@ func InitNotification() {
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_uid ON inis_notification(uid)")
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_type ON inis_notification(type)")
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON inis_notification(is_read)")
+	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_create_time ON inis_notification(create_time)")
 }
 
 // NotificationRead 广播通知的用户状态表
@@ -428,4 +429,57 @@ func (this *Notification) GetNotifications(uid int, typ string, isRead int, page
 	}
 
 	return data, count
+}
+
+// CleanExpired 清理过期的通知记录（供定时任务调用）
+// 规则：
+//   - 个人通知（uid != 0）：仅删除「已读」且 create_time 早于保留阈值的记录
+//   - 广播通知（uid = 0）：按 create_time 直接删除，并连带清理 notification_read 中的读取状态
+// days: 保留天数，<= 0 时回退为 30 天
+func (this *Notification) CleanExpired(days int) (int64, error) {
+	if days <= 0 {
+		days = 30
+	}
+	threshold := time.Now().Unix() - int64(days)*86400
+
+	var cleaned int64
+
+	err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+		// 1. 删除已读的个人通知
+		res := tx.Unscoped().
+			Where("uid != ?", 0).
+			Where("is_read = ?", 1).
+			Where("create_time < ?", threshold).
+			Delete(&Notification{})
+		if res.Error != nil {
+			return res.Error
+		}
+		cleaned += res.RowsAffected
+
+		// 2. 删除过期的广播通知（含连带清理读取状态）
+		var broadcastIds []int
+		if err := tx.Model(&Notification{}).
+			Where("uid = ?", 0).
+			Where("create_time < ?", threshold).
+			Pluck("id", &broadcastIds).Error; err != nil {
+			return err
+		}
+
+		if len(broadcastIds) > 0 {
+			// 清理广播通知的读取状态，避免残留孤儿数据
+			if err := tx.Where("notification_id IN ?", broadcastIds).Delete(&NotificationRead{}).Error; err != nil {
+				return err
+			}
+			// 删除广播通知本体
+			res := tx.Where("id IN ?", broadcastIds).Unscoped().Delete(&Notification{})
+			if res.Error != nil {
+				return res.Error
+			}
+			cleaned += res.RowsAffected
+		}
+
+		return nil
+	})
+
+	return cleaned, err
 }

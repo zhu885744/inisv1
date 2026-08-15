@@ -56,7 +56,7 @@
                     </el-input>
                 </el-form-item>
                 <el-form-item label="过期时间">
-                    <el-input v-model="state.struct.expire" placeholder="7 * 24 * 60 * 60"></el-input>
+                    <el-input v-model="state.struct.expire" placeholder="15 * 24 * 60 * 60"></el-input>
                 </el-form-item>
             </el-form>
         </template>
@@ -68,6 +68,7 @@
 </template>
 
 <script setup>
+import utils from '{src}/utils/utils.js'
 import axios from '{src}/utils/request.js'
 
 const { ctx, proxy } = getCurrentInstance()
@@ -125,7 +126,10 @@ const method = {
 
         state.status.wait   = true
 
-        const { code, msg } = await axios.put('/api/toml/crypt-jwt', state.struct)
+        // 密钥已脱敏隐藏时，不提交该字段，由后端保留原值
+        const data = utils.object.withoutMasked(state.struct, ['key'])
+
+        const { code, msg } = await axios.put('/api/toml/crypt-jwt', data)
 
         state.status.wait   = false
 

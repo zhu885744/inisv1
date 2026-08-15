@@ -72,6 +72,8 @@ const connect = (uri = null, params = {}) => {
         console.log('Socket 连接成功')
         // 启动心跳
         startHeartbeat()
+        // 前后端分离（跨域）场景：WebSocket 握手无法携带 Cookie，连接后主动发送 token 鉴权升级身份
+        sendAuth()
         // 触发事件
         emit('open', event)
     }
@@ -187,6 +189,20 @@ const send = (data = {}) => {
     } catch (error) {
         console.error('发送消息失败:', error)
         return false
+    }
+}
+
+// 连接后发送 auth 消息，用于跨域场景的身份认证（升级 client 身份）
+const sendAuth = () => {
+    try {
+        const tokenName = globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN'
+        const token = utils.get.cookie(tokenName)
+        if (!utils.is.empty(token)) {
+            send({ type: 'auth', token })
+            console.log('已发送 auth 鉴权消息')
+        }
+    } catch (error) {
+        console.error('发送 auth 消息失败:', error)
     }
 }
 

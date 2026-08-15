@@ -162,8 +162,10 @@ const method = {
             if (code !== 200) return ElMessage.error(msg)
 
             ElMessage.success(`注册成功！欢迎您，${state.struct.nickname}！`)
-            cache.set('user-info', data.user, 7 * 24 * 60)
-            utils.set.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN', data.token, 7 * 24 * 60 * 60)
+            // 登录会话有效期（秒），后端返回，回退到 15 天
+            const validSeconds = Number(data.valid_time) > 0 ? Number(data.valid_time) : 15 * 24 * 60 * 60
+            cache.set('user-info', data.user, Math.ceil(validSeconds / 60))
+            utils.set.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN', data.token, validSeconds)
             store.comm.login.finish = true
             store.comm.login.user = data.user
             router.push('/admin')

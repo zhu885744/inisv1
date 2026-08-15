@@ -146,18 +146,23 @@ const method = {
 
         let field = ['access_key_id', 'access_key_secret', 'endpoint', 'sign_name', 'verify_code']
 
+        // 密钥已脱敏隐藏时，跳过「是否有变化」检查（用户可能仅修改其他字段）
+        const secretChanged = !utils.is.masked(state.struct.access_key_secret)
+
         // 检查关键配置是否有变化
-        if (!utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成阿里云短信测试')
+        if (secretChanged && !utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先完成阿里云短信测试')
 
         if (utils.is.empty(state.struct.access_key_id))      return ElMessage.warning('请填写阿里云AccessKey ID！')
-        if (utils.is.empty(state.struct.access_key_secret))  return ElMessage.warning('请填写阿里云AccessKey Secret！')
+        if (utils.is.masked(state.struct.access_key_secret)) return ElMessage.warning('AccessKey Secret 已隐藏，如需修改请重新输入！')
         if (utils.is.empty(state.struct.endpoint))           return ElMessage.warning('请填写阿里云短信服务endpoint！')
         if (utils.is.empty(state.struct.sign_name))          return ElMessage.warning('请填写短信签名！')
         if (utils.is.empty(state.struct.verify_code))        return ElMessage.warning('请填写验证码模板！')
 
         state.status.wait   = true
 
-        const { code, msg } = await axios.put('/api/toml/sms-aliyun', state.struct)
+        // 剔除脱敏占位字段，由后端保留原值
+        const data = utils.object.withoutMasked(state.struct, ['access_key_secret'])
+        const { code, msg } = await axios.put('/api/toml/sms-aliyun', data)
 
          state.status.wait   = false
 
@@ -170,6 +175,7 @@ const method = {
 
         if (utils.is.empty(state.struct.phone))              return ElMessage.warning('请填写接收者手机号！')
         if (utils.is.empty(state.struct.access_key_id))      return ElMessage.warning('请填写阿里云AccessKey ID！')
+        if (utils.is.masked(state.struct.access_key_secret)) return ElMessage.warning('AccessKey Secret 已隐藏，请重新输入后再测试！')
         if (utils.is.empty(state.struct.access_key_secret))  return ElMessage.warning('请填写阿里云AccessKey Secret！')
         if (utils.is.empty(state.struct.endpoint))           return ElMessage.warning('请填写阿里云短信服务endpoint！')
         if (utils.is.empty(state.struct.sign_name))          return ElMessage.warning('请填写短信签名！')

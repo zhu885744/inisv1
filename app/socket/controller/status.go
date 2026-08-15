@@ -491,22 +491,22 @@ func getSystemStatus() map[string]any {
 	return allStatus
 }
 
-// 推送状态给所有客户端
+// 推送状态给管理员客户端（系统状态仅对管理员可见，非管理员不推送）
 func pushStatusToClients(status map[string]any) {
-	// 构造消息
-	message := map[string]any{
-		"type":      "status",
-		"content":   status,
-		"timestamp": time.Now().Unix(),
+	// 构造完整版消息（仅管理员可见）
+	fullMessage := map[string]any{
+		"type":       "status",
+		"content":    status,
+		"admin_only": true,
+		"timestamp":  time.Now().Unix(),
 	}
 
-	// 序列化消息
-	msgBytes, err := json.Marshal(message)
+	// 序列化
+	fullBytes, err := json.Marshal(fullMessage)
 	if err != nil {
 		return
 	}
 
-	// 广播消息给所有客户端
-	// 修复：使用 Hub.notice 通道发送消息，而不是直接调用 broadcast 方法
-	Hub.notice <- msgBytes
+	// 仅推送给管理员
+	Hub.notice <- fullBytes
 }

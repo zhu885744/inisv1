@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"inis/app/facade"
+	"inis/app/model"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cast"
@@ -100,6 +103,15 @@ func (this Index) Connect(ctx *gin.Context) {
 			Type:    "connect",
 			Content: "连接成功",
 		},
+		isAdmin: cast.ToBool(ctx.GetBool("is_admin")),
+		ip:      clientIP,
+	}
+	client.lastActive.Store(time.Now().Unix())
+	// 登录用户：记录用户名（访客无用户名，前端显示「访客」）
+	if user, ok := ctx.Get("user"); ok {
+		if userMap, ok := user.(map[string]any); ok {
+			client.username = cast.ToString(userMap["nickname"])
+		}
 	}
 
 	Hub.addIPConnection(clientIP, cast.ToString(id))
@@ -132,6 +144,9 @@ func (this *client) read() {
 			}
 			break
 		}
+
+		// 更新最后活跃时间
+		this.lastActive.Store(time.Now().Unix())
 
 		if wsMsgType == websocket.PingMessage {
 			socketLog("收到ping消息，回复pong: %s", this.info.ID)
@@ -178,6 +193,12 @@ func (this *client) read() {
 				continue
 			}
 
+			if msgType == "auth" {
+				// 连接后鉴权，升级身份（跨域场景下 Cookie 无法携带，前端主动发 token）
+				this.handleAuth(cast.ToString(item["token"]))
+				continue
+			}
+
 			if !this.hub.checkRateLimit(this.info.ID) {
 				socketLog("消息频率超限，丢弃消息: %s", this.info.ID)
 				continue
@@ -212,6 +233,47 @@ func (this *client) handleAck(msgId string) {
 	if _, ok := this.hub.pendingMessages[msgId]; ok {
 		socketLog("收到ACK确认: %s, 客户端: %s", msgId, this.info.ID)
 		delete(this.hub.pendingMessages, msgId)
+	}
+}
+
+// handleAuth 处理客户端身份认证消息，鉴权成功后升级连接身份
+// 用于前后端分离（跨域）场景：WebSocket 握手无法携带 Cookie，前端连接后主动发送 token
+func (this *client) handleAuth(token string) {
+	if token == "" {
+		return
+	}
+
+	// 解析 token
+	jwt := facade.Jwt().Parse(token)
+	if jwt.Error != nil {
+		socketLog("auth token 解析失败: %s, 错误: %v", this.info.ID, jwt.Error)
+		return
+	}
+
+	uid := cast.ToInt(jwt.Data["uid"])
+	if uid <= 0 {
+		return
+	}
+
+	// 查询用户
+	user, _ := facade.DB.Model(&model.Users{}).Find(uid)
+	if utils.Is.Empty(user) {
+		return
+	}
+	userMap := cast.ToStringMap(user)
+
+	// 校验密码哈希（与 Jwt 中间件 validatePasswordHash 逻辑一致）
+	if utils.Hash.Sum32(userMap["password"]) != jwt.Data["hash"] {
+		socketLog("auth token 密码哈希不匹配: %s", this.info.ID)
+		return
+	}
+
+	// 提交身份升级请求给 hub.run（统一在 hub goroutine 内更新，避免并发读写）
+	this.hub.upgrade <- &clientUpgrade{
+		client:   this,
+		uid:      uid,
+		username: cast.ToString(userMap["nickname"]),
+		isAdmin:  model.IsRootAdmin(uid),
 	}
 }
 
@@ -364,7 +426,12 @@ func (hub *hub) run() {
 		case message := <-hub.notice:
 			content := Json(message)
 			msgType := cast.ToString(content["type"])
-			if empty := utils.Is.Empty(msgType); empty || msgType == "broadcast" || msgType == "status" {
+			if msgType == "status" {
+				// 系统状态：仅推送给管理员（非管理员不推送）
+				hub.recordMessage("broadcast")
+				hub.broadcastToAdmin(message)
+			} else if utils.Is.Empty(msgType) || msgType == "broadcast" {
+				// 客户端广播：发给所有在线客户端（含管理员）
 				hub.recordMessage("broadcast")
 				hub.broadcast(message)
 			} else if msgType == "single" || msgType == "notification" {
@@ -375,21 +442,41 @@ func (hub *hub) run() {
 				hub.privatecast(message)
 			}
 		case status := <-hub.status:
+			// 该通道当前无写入方（系统状态统一走 notice 通道），
+			// 保留此分支但仅推送给管理员，防止未来误用导致敏感信息泄露给非管理员
 			statusMsg, _ := json.Marshal(map[string]any{
-				"type":    "status",
-				"content": status,
+				"type":       "status",
+				"content":    status,
+				"admin_only": true,
 			})
-			hub.broadcast(statusMsg)
+			hub.broadcastToAdmin(statusMsg)
+		case up := <-hub.upgrade:
+			// 身份升级：更新用户名与管理员标记，并重新广播在线状态
+			// 注意：仅更新显示身份与权限，client_id（info.ID）保持不变，
+			// 以避免与 read goroutine 并发读写 info.ID 产生数据竞争。
+			up.client.username = up.username
+			up.client.isAdmin = up.isAdmin
+			socketLog("客户端身份升级: %s (uid=%d, 管理员=%v)", up.client.info.ID, up.uid, up.isAdmin)
+			hub.broadcastStatus()
 		}
 	}
 }
 
 // 广播在线状态
 func (hub *hub) broadcastStatus() {
-	// 收集在线用户ID
-	onlineUsers := []string{}
-	for clientId := range hub.clients {
-		onlineUsers = append(onlineUsers, clientId)
+	// 收集在线用户信息（用户名/访客 + 脱敏 IP + 活跃时间）
+	onlineUsers := make([]map[string]any, 0, len(hub.clients))
+	for _, client := range hub.clients {
+		name := client.username
+		if name == "" {
+			name = "访客"
+		}
+		onlineUsers = append(onlineUsers, map[string]any{
+			"id":          client.info.ID,
+			"name":        name,
+			"ip":          maskIP(client.ip),
+			"last_active": client.lastActive.Load(),
+		})
 	}
 
 	// 构建状态消息
@@ -405,9 +492,45 @@ func (hub *hub) broadcastStatus() {
 	hub.broadcast(statusMsg)
 }
 
+// maskIP 对 IP 地址脱敏：IPv4 保留前两段，IPv6 保留前两组
+func maskIP(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	if strings.Contains(ip, ":") {
+		// IPv6
+		parts := strings.Split(ip, ":")
+		if len(parts) >= 2 {
+			return parts[0] + ":" + parts[1] + ":****"
+		}
+		return ip
+	}
+	// IPv4
+	parts := strings.Split(ip, ".")
+	if len(parts) == 4 {
+		return parts[0] + "." + parts[1] + ".*.*"
+	}
+	return ip
+}
+
 // 广播消息
 func (hub *hub) broadcast(message []byte) {
 	for _, client := range hub.clients {
+		select {
+		case client.send <- message:
+		default:
+			close(client.send)
+			delete(hub.clients, client.info.ID)
+		}
+	}
+}
+
+// broadcastToAdmin 仅广播给管理员客户端（完整版状态数据）
+func (hub *hub) broadcastToAdmin(message []byte) {
+	for _, client := range hub.clients {
+		if !client.isAdmin {
+			continue
+		}
 		select {
 		case client.send <- message:
 		default:

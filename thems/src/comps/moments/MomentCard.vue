@@ -362,7 +362,7 @@ const refreshCounts = async () => {
             isLiked.value = !!res.data?.is_liked
             likeCount.value = res.data?.count || 0
           }
-        })
+        }).catch(() => null)
       )
       requests.push(
         request.get('/api/user-collects/is-collected', {
@@ -372,7 +372,7 @@ const refreshCounts = async () => {
             isCollected.value = !!res.data?.is_collected
             collectCount.value = res.data?.count || 0
           }
-        })
+        }).catch(() => null)
       )
     } else {
       requests.push(

@@ -206,7 +206,6 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 const totalPages = ref(1)
 const unreadCount = ref(0)
-const counts = ref({ all: 0, unread: 0, comment: 0, like: 0, collection: 0, follow: 0, system: 0 })
 const pageSize = 20
 
 // ---------- API 请求 ----------
@@ -298,7 +297,6 @@ const removeMessage = async (id) => {
     messages.value = messages.value.filter(m => m.id !== id)
     totalCount.value = Math.max(0, totalCount.value - 1)
     await fetchUnreadCount()
-    await fetchCounts()
     notifyUnreadChange()
   } catch (err) {
     console.error('删除消息失败:', err)
@@ -317,7 +315,6 @@ const clearAll = async () => {
     messages.value = []
     totalCount.value = 0
     await fetchUnreadCount()
-    await fetchCounts()
     notifyUnreadChange()
   } catch (err) {
     console.error('清空消息失败:', err)
@@ -470,7 +467,6 @@ const formatContent = (content) => {
 onMounted(async () => {
   await fetchNotifications()
   await fetchUnreadCount()
-  await fetchCounts()
 })
 
 // 监听Tab切换

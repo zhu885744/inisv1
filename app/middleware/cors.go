@@ -58,13 +58,23 @@ func Cors() gin.HandlerFunc {
 		header.Set("Access-Control-Expose-Headers", strings.TrimSpace(exposedHeaders))
 
 		origin := ctx.Request.Header.Get("Origin")
+		// 仅当来源在允许列表中时才回显该来源；否则不设置跨域头（浏览器将阻止跨域读取）
 		if origin != "" {
 			if allowedOrigins[origin] {
 				header.Set("Access-Control-Allow-Origin", origin)
+				// 非通配符来源时，允许携带凭证
+				header.Set("Vary", "Origin")
 			} else {
-				header.Set("Access-Control-Allow-Origin", defaultOrigin)
+				// 非白名单来源：不放行跨域，OPTIONS 预检直接拒绝
+				if strings.ToUpper(ctx.Request.Method) == "OPTIONS" {
+					ctx.AbortWithStatus(http.StatusForbidden)
+					return
+				}
+				ctx.Next()
+				return
 			}
 		} else {
+			// 同源/非跨域请求（无 Origin 头），回退到默认来源
 			header.Set("Access-Control-Allow-Origin", defaultOrigin)
 		}
 

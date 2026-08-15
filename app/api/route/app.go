@@ -24,7 +24,8 @@ var defaultMiddleware = []gin.HandlerFunc{
 // 所有可用的控制器
 var controllers = map[string]controller.ApiInterface{
 	"exp":           &controller.EXP{},
-	"test":          &controller.Test{},
+	// 注意：test 控制器为遗留的开发测试接口（含无鉴权文件上传等风险），已下线，不再注册路由
+	// "test":          &controller.Test{},
 	"comm":          &controller.Comm{},
 	"toml":          &controller.Toml{},
 	"tags":          &controller.Tags{},

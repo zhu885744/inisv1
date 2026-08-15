@@ -95,6 +95,11 @@ func init() {
 	}
 	gocron.Start()
 
+	// 未安装（存在安装锁）时跳过数据库初始化，避免空配置导致连接失败 panic
+	if utils.File().Exist(installLockFile) {
+		return
+	}
+
 	facade.WatchDB(true)
 	if cast.ToBool(facade.NewToml(facade.TomlDb).Get("mysql.migrate")) {
 		go InitTable()

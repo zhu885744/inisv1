@@ -14,25 +14,33 @@ const checkToken = (state = {}) => {
     axios.post('/api/comm/check-token').then(({ code, msg, data })=> {
 
         if (code === 412) return
-        if (code === 401) return logout(state)
+        // token 已失效，仅清除本地登录状态，不要再次发起 logout 请求（避免失效 token 触发 401/405）
+        if (code === 401) return clearLogin(state)
         if (code !== 200) return notyf.error(msg)
 
         state.login.user   = data.user
         state.login.finish = true
-        cache.set(cacheName, data.user, 7 * 24 * 60)
+        // 登录会话有效期（秒），后端返回，回退到 15 天
+        const validSeconds = Number(data.valid_time) > 0 ? Number(data.valid_time) : 15 * 24 * 60 * 60
+        cache.set(cacheName, data.user, Math.ceil(validSeconds / 60))
     })
+}
+
+// 仅清除本地登录状态（不发起网络请求）
+const clearLogin = (state = {}) => {
+    state.login.user   = {}
+    state.login.finish = false
+    cache.del('user-info')
+    utils.clear.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN')
 }
 
 // 登出
 const logout = (state = {}, path = null) => {
 
-    // 清除登录信息
-    state.login.user   = {}
-    state.login.finish = false
-    cache.del('user-info')
-    utils.clear.cookie(globalThis?.inis?.token_name || 'INIS_LOGIN_TOKEN')
+    clearLogin(state)
 
-    axios.del('/api/comm/logout').then(res => res)
+    // 登出请求失败不影响本地状态清除，忽略错误
+    axios.post('/api/comm/logout').catch(() => {})
 
     // 返回首页
     if (!utils.is.empty(path)) setTimeout(() => {

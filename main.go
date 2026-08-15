@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 	api "inis/app/api/route"
 	dev "inis/app/dev/route"
 	index "inis/app/index/route"
@@ -42,8 +44,9 @@ func watch() {
 // shutdownServer - 关闭服务
 func shutdownServer() {
 	if app.Server != nil {
-		err := app.Server.Shutdown(nil)
-		if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := app.Server.Shutdown(ctx); err != nil {
 			fmt.Println("关闭服务发生错误: ", err)
 		}
 	}

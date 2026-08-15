@@ -196,8 +196,9 @@ const router = useRouter()
 const store = useCommStore()
 const bannerStore = useBannerStore()
 
-// 登录状态
-const isLogin = computed(() => !!store.login?.finish)
+// 登录状态：使用 isLoggedIn getter（finish 且 user 非空），
+// 避免仅凭 finish 判断导致未登录（游客态 finish=true 但 user={}）时误判为已登录
+const isLogin = computed(() => store.isLoggedIn)
 const isDarkMode = computed(() => store.darkMode)
 
 // 动态列表数据

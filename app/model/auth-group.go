@@ -153,3 +153,21 @@ func (this *AuthGroup) BeforeDelete(tx *gorm.DB) (err error) {
 	}
 	return
 }
+
+// IsRootAdmin 判断用户是否为超级管理员（root 权限组且拥有全部权限 all）
+func IsRootAdmin(uid int) bool {
+	if uid == 0 {
+		return false
+	}
+
+	var table []AuthGroup
+	facade.DB.Model(&table).Where("root", 1).Like("uids", "%|"+cast.ToString(uid)+"|%").Select()
+
+	for _, item := range table {
+		if utils.InArray("all", strings.Split(cast.ToString(item.Rules), ",")) {
+			return true
+		}
+	}
+
+	return false
+}

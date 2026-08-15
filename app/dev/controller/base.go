@@ -96,7 +96,7 @@ func (this base) setToken(ctx *gin.Context, token any) {
 	if strings.Contains(host, ":") {
 		host = strings.Split(host, ":")[0]
 	}
-	expire := cast.ToInt(facade.AppToml.Get("jwt.expire", "7200"))
+	expire := cast.ToInt(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", host, false, false)
 }

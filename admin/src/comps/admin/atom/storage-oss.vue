@@ -184,17 +184,22 @@ const method = {
 
         let field = ['access_key_id', 'access_key_secret', 'endpoint', 'bucket']
 
+        // 密钥已脱敏隐藏时，跳过「是否有变化」检查
+        const secretChanged = !utils.is.masked(state.struct.access_key_secret)
+
         // 检查关键配置是否有变化
-        if (!utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先OSS连接测试')
+        if (secretChanged && !utils.object.equal(state.struct, state.backup, field)) return ElMessage.warning('请先OSS连接测试')
 
         if (utils.is.empty(state.struct.access_key_id))     return ElMessage.warning('请填写 AccessKey ID！')
-        if (utils.is.empty(state.struct.access_key_secret)) return ElMessage.warning('请填写 AccessKey Secret！')
+        if (utils.is.masked(state.struct.access_key_secret)) return ElMessage.warning('AccessKey Secret 已隐藏，如需修改请重新输入！')
         if (utils.is.empty(state.struct.endpoint))          return ElMessage.warning('请填写 Endpoint！')
         if (utils.is.empty(state.struct.bucket))            return ElMessage.warning('请填写 Bucket！')
 
         state.status.wait   = true
 
-        const { code, msg } = await axios.put('/api/toml/storage-oss', state.struct)
+        // 剔除脱敏占位字段，由后端保留原值
+        const data = utils.object.withoutMasked(state.struct, ['access_key_secret'])
+        const { code, msg } = await axios.put('/api/toml/storage-oss', data)
 
         state.status.wait   = false
 
@@ -206,6 +211,7 @@ const method = {
     test: async () => {
 
         if (utils.is.empty(state.struct.access_key_id))     return ElMessage.warning('请填写 AccessKey ID！')
+        if (utils.is.masked(state.struct.access_key_secret)) return ElMessage.warning('AccessKey Secret 已隐藏，请重新输入后再测试！')
         if (utils.is.empty(state.struct.access_key_secret)) return ElMessage.warning('请填写 AccessKey Secret！')
         if (utils.is.empty(state.struct.endpoint))          return ElMessage.warning('请填写 Endpoint！')
         if (utils.is.empty(state.struct.bucket))            return ElMessage.warning('请填写 Bucket！')

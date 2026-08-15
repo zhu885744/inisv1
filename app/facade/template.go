@@ -33,6 +33,11 @@ enable_ip_ban = false           # 是否启用IP临时封禁
 ip_ban_threshold = 3            # IP连续超限几次后临时封禁
 ip_ban_duration = 300           # IP临时封禁时长(秒)
 
+# 通知配置
+[notification]
+# 通知保留天数（已读通知与广播通知超过该天数后自动清理）
+retention_days = 30
+
 # CORS配置
 [system.cors]
 # 是否启用CORS

@@ -105,7 +105,7 @@
           
           <!-- 签到按钮 -->
           <button 
-            v-if="store.comm.login.finish && store.comm.login.user"
+            v-if="store.comm.isLoggedIn"
             class="btn btn-outline-secondary me-2" 
             type="button" 
             @click="doSign"
@@ -117,7 +117,7 @@
 
           <!-- 通知按钮（含未读角标），仅登录后显示 -->
           <button 
-            v-if="store.comm.login.finish && store.comm.login.user"
+            v-if="store.comm.isLoggedIn"
             class="btn btn-outline-secondary me-2 position-relative" 
             type="button" 
             @click="method.showNotification()"
@@ -134,7 +134,7 @@
           </button>
           
           <!-- 用户相关功能 -->
-          <div class="d-flex align-items-center" v-if="store.comm.login.finish && store.comm.login.user">
+          <div class="d-flex align-items-center" v-if="store.comm.isLoggedIn">
             <!-- 已登录用户信息 -->
             <div class="dropdown" ref="userDropdownRef">
               <button 
@@ -481,7 +481,7 @@ const clearCache = () => {
     localStorage.removeItem(STORAGE_KEYS.LAST_COMMENT_TIME)
     
     if (userInfo) {
-      cache.set('user-info', userInfo, 7 * 24 * 60)
+      cache.set('user-info', userInfo, 15 * 24 * 60)
     }
     if (uid) {
       localStorage.setItem(STORAGE_KEYS.UID, uid)
@@ -601,8 +601,8 @@ const method = {
   // 登出（核心修改：适配后端 DELETE /api/comm/logout 接口）
   logout: async () => {
     try {
-      // 1. 调用后端退出登录接口（DELETE 请求）
-      const response = await request.delete('/api/comm/logout')
+      // 1. 调用后端退出登录接口（POST 请求）
+      const response = await request.post('/api/comm/logout')
       
       // 2. 处理接口响应（根据后端返回状态码判断）
       if (response.code === 200) {

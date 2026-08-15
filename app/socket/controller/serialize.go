@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"inis/config"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -31,6 +32,14 @@ type client struct {
 	send chan []byte
 	// websocket 连接。
 	conn *websocket.Conn
+	// 是否为管理员（用于系统状态的分级推送）
+	isAdmin bool
+	// 客户端 IP
+	ip string
+	// 用户名（登录用户昵称，访客为空）
+	username string
+	// 最后活跃时间（Unix 秒，原子操作避免并发读写竞争）
+	lastActive atomic.Int64
 }
 
 // 客户端信息结构体
@@ -40,6 +49,14 @@ type info struct {
 	Type    string `json:"type"`
 	Content any    `json:"data"`
 	MsgId   string `json:"msg_id,omitempty"`
+}
+
+// clientUpgrade 客户端身份升级请求（WebSocket 连接后通过 auth 消息鉴权升级）
+type clientUpgrade struct {
+	client   *client
+	uid      int
+	username string
+	isAdmin  bool
 }
 
 type ackInfo struct {
@@ -131,6 +148,7 @@ type hub struct {
 	connect              chan *client
 	close                chan *client
 	status               chan map[string]any
+	upgrade              chan *clientUpgrade
 	pendingMessages      map[string]*pendingMessage
 	ackTimeout           time.Duration
 	maxRetries           int
@@ -168,6 +186,7 @@ var Hub = func() *hub {
 		connect:              make(chan *client),
 		close:                make(chan *client),
 		status:               make(chan map[string]any),
+		upgrade:              make(chan *clientUpgrade),
 		clients:              make(map[string]*client),
 		pendingMessages:      make(map[string]*pendingMessage),
 		clientStates:         make(map[string]*clientState),
@@ -471,7 +490,7 @@ func (hub *hub) ValidateMessage(message []byte) (bool, string) {
 	}
 
 	msgType := cast.ToString(content["type"])
-	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification"}
+	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification", "auth"}
 	found := false
 	for _, t := range allowedTypes {
 		if t == msgType {

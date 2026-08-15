@@ -150,6 +150,8 @@ const method = {
     let field = ['access_key_id', 'access_key_secret', 'endpoint', 'sign_name', 'template_code']
     // 关键配置校验
     for (let key of field) {
+      // 密钥已脱敏隐藏时，允许不修改（后端保留原值）
+      if (key === 'access_key_secret' && utils.is.masked(state.struct[key])) continue
       if (utils.is.empty(state.struct[key])) {
         return ElMessage.warning(`${key} 不能为空！`)
       }
@@ -157,7 +159,9 @@ const method = {
 
     state.status.wait = true
 
-    const { code, msg } = await axios.put('/api/toml/sms-aliyun-number-verify', state.struct)
+    // 剔除脱敏占位字段，由后端保留原值
+    const data = utils.object.withoutMasked(state.struct, ['access_key_secret'])
+    const { code, msg } = await axios.put('/api/toml/sms-aliyun-number-verify', data)
 
     state.status.wait = false
 
@@ -180,6 +184,9 @@ const method = {
     // 必传参数校验
     let checkField = ['access_key_id', 'access_key_secret', 'endpoint', 'sign_name', 'template_code']
     for (let key of checkField) {
+      if (key === 'access_key_secret' && utils.is.masked(state.struct[key])) {
+        return ElMessage.warning('AccessKey Secret 已隐藏，请重新输入后再测试！')
+      }
       if (utils.is.empty(state.struct[key])) {
         return ElMessage.warning(`${key} 不能为空！`)
       }

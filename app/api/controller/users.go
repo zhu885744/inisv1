@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
+	"gorm.io/gorm"
 )
 
 type Users struct {
@@ -147,9 +148,16 @@ func (this *Users) one(ctx *gin.Context) {
 		}
 	}
 
+	user := this.user(ctx)
+	isAdmin := this.meta.root(ctx)
+	isOwnData := table.Id == user.Id && user.Id != 0
+
 	cacheName := this.cache.name(ctx)
+	// 管理员或本人查看时，不读写共享缓存，避免未脱敏数据进入缓存后被他人命中（越权泄露）
+	cacheEnable := this.cache.enable(ctx) && !isAdmin && !isOwnData
+
 	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
+	if cacheEnable && facade.Cache.Has(cacheName) {
 
 		// 从缓存中获取数据
 		msg[1] = "（来自缓存）"
@@ -161,10 +169,6 @@ func (this *Users) one(ctx *gin.Context) {
 		mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 
 		mold.WithoutField("password")
-
-		user := this.user(ctx)
-		isAdmin := this.meta.root(ctx)
-		isOwnData := table.Id == user.Id && user.Id != 0
 
 		// 从数据库中获取数据
 		item, _ := mold.Where(table).Find()
@@ -190,8 +194,8 @@ func (this *Users) one(ctx *gin.Context) {
 		// 排除字段
 		data = facade.Comm.WithField(item, params["field"])
 
-		// 缓存数据
-		if this.cache.enable(ctx) {
+		// 缓存数据（仅非管理员且非本人写入，保证缓存中始终为脱敏数据）
+		if cacheEnable {
 			go facade.Cache.Set(cacheName, data)
 		}
 	}
@@ -236,9 +240,13 @@ func (this *Users) all(ctx *gin.Context) {
 	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 	count, _ := mold.Where(table).Count()
 
+	isAdmin := this.meta.root(ctx)
 	cacheName := this.cache.name(ctx)
+	// 管理员不读写共享缓存，避免未脱敏数据进入缓存后被普通用户命中（越权泄露）
+	cacheEnable := this.cache.enable(ctx) && !isAdmin
+
 	// 开启了缓存 并且 缓存中有数据
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
+	if cacheEnable && facade.Cache.Has(cacheName) {
 
 		// 从缓存中获取数据
 		msg[1] = "（来自缓存）"
@@ -247,8 +255,6 @@ func (this *Users) all(ctx *gin.Context) {
 	} else {
 
 		mold.WithoutField("password")
-
-		isAdmin := this.meta.root(ctx)
 
 		// 从数据库中获取数据
 		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
@@ -278,8 +284,8 @@ func (this *Users) all(ctx *gin.Context) {
 			data = dataList
 		}
 
-		// 缓存数据
-		if this.cache.enable(ctx) {
+		// 缓存数据（仅非管理员写入，保证缓存中始终为脱敏数据）
+		if cacheEnable {
 			go facade.Cache.Set(cacheName, data)
 		}
 	}
@@ -679,6 +685,15 @@ func (this *Users) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade.M
 		return nil, ""
 	}
 
+	// 禁止对敏感字段进行聚合（防止泄露密码等）
+	sensitiveFields := []any{"password"}
+	for _, field := range fields {
+		if utils.In.Array(field, sensitiveFields) {
+			this.json(ctx, nil, facade.Lang(ctx, "字段 %s 不允许操作！", field), 400)
+			return nil, ""
+		}
+	}
+
 	// 从缓存或数据库获取数据
 	return this.getFromCache(ctx, params, func() any {
 		query := this.buildQuery(ctx, &model.Users{}, params)
@@ -695,13 +710,16 @@ func (this *Users) getFromCache(ctx *gin.Context, params map[string]any, fetchFu
 	msg := ""
 	cacheName := this.cache.name(ctx)
 
-	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {
+	// 管理员不读写共享缓存，避免未脱敏数据进入缓存后被普通用户命中（越权泄露）
+	cacheEnable := this.cache.enable(ctx) && !this.meta.root(ctx)
+
+	if cacheEnable && facade.Cache.Has(cacheName) {
 		msg = "（来自缓存）"
 		return facade.Cache.Get(cacheName), msg
 	}
 
 	data := fetchFunc()
-	if this.cache.enable(ctx) {
+	if cacheEnable {
 		go facade.Cache.Set(cacheName, data)
 	}
 	return data, msg
@@ -1341,8 +1359,27 @@ func (this *Users) ban(ctx *gin.Context) {
 		UpdateTime:    now,
 	}
 
-	// 事务：创建记录 + 更新用户状态
-	_, err := facade.DB.Model(&record).Create(&record)
+	// 更新用户封禁信息
+	userUpdate := map[string]any{
+		"ban_count":      violationNum,
+		"current_ban_id": 0, // 占位，事务中写入实际记录 ID
+		"last_ban_at":    now,
+		"restrictions":   banType,
+	}
+
+	// 若选择冻结用户，同时将用户状态标记为冻结
+	if freezeUser == 1 {
+		userUpdate["status"] = model.UserStatusFrozen
+	}
+
+	// 事务：创建封禁记录 + 更新用户状态，保证数据一致性
+	err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&record).Error; err != nil {
+			return err
+		}
+		userUpdate["current_ban_id"] = record.Id
+		return tx.Model(&model.Users{}).Where("id", uid).Updates(userUpdate).Error
+	})
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
@@ -1361,20 +1398,7 @@ func (this *Users) ban(ctx *gin.Context) {
 		}()
 	}
 
-	// 更新用户封禁信息
-	userUpdate := map[string]any{
-		"ban_count":      violationNum,
-		"current_ban_id": record.Id,
-		"last_ban_at":    now,
-		"restrictions":   banType,
-	}
-
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(userUpdate)
-	if err != nil {
-		this.json(ctx, nil, err.Error(), 400)
-		return
-	}
 
 	// 清除目标用户的缓存，强制下线
 	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
@@ -1465,20 +1489,24 @@ func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
 
 	uid := cast.ToInt(recordMap["uid"])
 
-	// 更新封禁记录状态
-	_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
-		"status":     model.BanStatusRevoked,
-		"unban_time": now,
-	})
-	if err != nil {
-		this.json(ctx, nil, err.Error(), 400)
-		return
-	}
-
-	// 恢复用户状态
-	_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+	// 恢复用户状态（若封禁时同时冻结了用户，则一并恢复为正常）
+	userUpdate := map[string]any{
 		"current_ban_id": 0,
 		"restrictions":   0,
+	}
+	if cast.ToInt(recordMap["freeze_user"]) == 1 {
+		userUpdate["status"] = model.UserStatusNormal
+	}
+
+	// 事务：更新封禁记录 + 恢复用户状态
+	err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.UserBanRecords{}).Where("id", recordId).Updates(map[string]any{
+			"status":     model.BanStatusRevoked,
+			"unban_time": now,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Users{}).Where("id", uid).Updates(userUpdate).Error
 	})
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
@@ -1705,22 +1733,26 @@ func (this *Users) appealHandle(ctx *gin.Context) {
 	uid := cast.ToInt(recordMap["uid"])
 
 	if action == "approve" {
-		// 申诉通过：更新记录状态 + 恢复用户
-		_, err := facade.DB.Model(&model.UserBanRecords{}).Where("id", recordId).Update(map[string]any{
-			"status":            model.BanStatusAppealApproved,
-			"unban_time":        now,
-			"appeal_reply":      reply,
-			"appeal_reply_time": now,
-		})
-		if err != nil {
-			this.json(ctx, nil, err.Error(), 400)
-			return
-		}
-
-		// 恢复用户状态
-		_, err = facade.DB.Model(&model.Users{}).Where("id", uid).Update(map[string]any{
+		// 恢复用户状态（若封禁时同时冻结了用户，则一并恢复为正常）
+		userUpdate := map[string]any{
 			"current_ban_id": 0,
 			"restrictions":   0,
+		}
+		if cast.ToInt(recordMap["freeze_user"]) == 1 {
+			userUpdate["status"] = model.UserStatusNormal
+		}
+
+		// 申诉通过：事务更新记录状态 + 恢复用户
+		err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.UserBanRecords{}).Where("id", recordId).Updates(map[string]any{
+				"status":            model.BanStatusAppealApproved,
+				"unban_time":        now,
+				"appeal_reply":      reply,
+				"appeal_reply_time": now,
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Users{}).Where("id", uid).Updates(userUpdate).Error
 		})
 		if err != nil {
 			this.json(ctx, nil, err.Error(), 400)

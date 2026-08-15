@@ -84,6 +84,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=register&name=注册账户&type=common",
 				"path=check-token&name=校验登录&type=common",
 				"path=reset-password&name=重置密码&type=common",
+				"path=logout&name=退出登录&type=common",
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
@@ -94,6 +95,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=crypt&name=获取加密服务配置",
 				"path=log&name=获取日志服务配置",
 				"path=storage&name=获取存储服务配置",
+				"path=notification&name=获取通知配置",
 			},
 			"PUT": {
 				"path=sms&name=修改SMS服务配置",
@@ -113,6 +115,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=storage-cos&name=修改COS存储配置",
 				"path=storage-kodo&name=修改KODO存储配置",
 				"path=storage-attachment&name=修改附件配置",
+				"path=notification&name=修改通知配置",
 			},
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",

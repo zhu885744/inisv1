@@ -461,10 +461,19 @@ func (this *Links) checkURLStatus(urlStr string) (bool, int) {
 		urlStr = "https://" + urlStr
 	}
 
+	// SSRF 防护：禁止访问内网地址
+	if err := facade.Comm.IsSafeOutboundURL(urlStr); err != nil {
+		return false, 0
+	}
+
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+			// SSRF 防护：禁止重定向到内网地址
+			if err := facade.Comm.IsSafeOutboundURL(req.URL.String()); err != nil {
 				return http.ErrUseLastResponse
 			}
 			return nil

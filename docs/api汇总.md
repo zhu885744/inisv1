@@ -119,7 +119,7 @@ type ApiInterface interface {
 | 2 | `QpsPoint()` | 单接口 QPS 限流 |
 | 3 | `QpsGlobal()` | 全局 QPS 限流 |
 | 4 | `Params()` | 统一参数解析 |
-| 5 | `Jwt()` | JWT 鉴权（校验登录态） |
+| 5 | `Jwt()` | JWT 鉴权（校验登录态；无 token 时以访客身份放行，是否强制登录由 `Rule()` 的规则类型决定） |
 | 6 | `Rule()` | 接口权限规则校验 |
 | 7 | `ApiKey()` | API Key 校验 |
 | 8 | `Restriction()` | 用户限制（封禁/冻结等） |
@@ -128,7 +128,8 @@ type ApiInterface interface {
 
 | 路由 | 中间件 | 说明 |
 | :--- | :--- | :--- |
-| `/dev/*` | `Params()` | 开发/安装接口，仅解析参数 |
+| `/dev/install/*` | `LocalOnly()` + `Params()` | 安装接口，仅允许本机 loopback 访问 |
+| `/dev/info/*` | `Params()` | 信息接口；`time`/`version` 公开，`system`/`device`/`renew`/`kill` 仅本机 loopback 访问 |
 | `/socket` | `Jwt()` + `App()` | WebSocket 鉴权与 App 校验 |
 
 ---
@@ -140,7 +141,7 @@ type ApiInterface interface {
 | # | 控制器 key | 控制器类 | 中文名 | 主要能力 |
 | :---: | :--- | :--- | :--- | :--- |
 | 1 | `comm` | `Comm` | 公共/认证 | 登录、注册、Token、重置密码、退出 |
-| 2 | `test` | `Test` | 测试 | 调试接口、上传测试 |
+| 2 | `test` | `Test` | 测试 | 调试接口、上传测试（已下线，不再注册路由） |
 | 3 | `exp` | `EXP` | 经验值 | 经验/签到/活跃榜 |
 | 4 | `toml` | `Toml` | 配置管理 | 短信/缓存/存储/加密等配置读写与测试 |
 | 5 | `tags` | `Tags` | 标签 | 标签 CRUD |

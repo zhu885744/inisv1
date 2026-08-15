@@ -116,6 +116,9 @@
                             <el-col :span="8">
                                 <atom-exp-rules ref="exp-rules" v-on:refresh="method.refresh"></atom-exp-rules>
                             </el-col>
+                            <el-col :span="8">
+                                <atom-notification ref="notification" v-on:refresh="method.refresh"></atom-notification>
+                            </el-col>
                         </el-row>
                     </el-tab-pane>
 
@@ -158,6 +161,7 @@ import AtomPage from '{src}/comps/admin/atom/page.vue'
 import AtomArticle from '{src}/comps/admin/atom/article.vue'
 import AtomComment from '{src}/comps/admin/atom/comment.vue'
 import AtomExpRules from '{src}/comps/admin/atom/exp-rules.vue'
+import AtomNotification from '{src}/comps/admin/atom/notification.vue'
 import AtomUpgrade from '{src}/comps/admin/atom/upgrade.vue'
 
 const { ctx, proxy } = getCurrentInstance()
@@ -171,7 +175,7 @@ const state  = reactive({
     },
     refresh: {
         inis    : ['device-bind','upgrade'],
-        other   : ['page','article','comment','exp-rules'],
+        other   : ['page','article','comment','exp-rules','notification'],
         optimize: ['cache-redis','cache-file','cache-ram'],
         sms     : ['sms-email','sms-aliyun','sms-aliyun-verify','sms-tencent'],
         storage : ['storage-local','storage-oss','storage-cos','storage-kodo'],

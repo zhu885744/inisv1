@@ -6,7 +6,7 @@ const DEV = import.meta.env.DEV
 const DEFAULT_TIMEOUT = 60 * 1000
 const MAX_RETRY = 2
 const MAX_CACHE_SIZE = 500
-const API_WHITELIST = ['/api/']
+const API_WHITELIST = ['/api/', '/dev/']
 
 const axiosInstance = axios.create({
   timeout: DEFAULT_TIMEOUT,
@@ -448,7 +448,7 @@ const handleLogout = async () => {
     utils.clear.cookie(TOKEN_NAME)
     
     try {
-      await axios.delete('/api/comm/logout', { withCredentials: true })
+      await axios.post('/api/comm/logout', {}, { withCredentials: true })
     } catch (err) {
       console.error('登出接口调用失败：', err)
     }
@@ -476,7 +476,7 @@ const requestWithRetry = async (method, url, dataOrParams, options = {}) => {
     throw new Error('请在配置文件中设置后端API地址（api_uri）')
   }
 
-  const { skipRetry = false, skipToken = false, silentError = false } = options
+  const { skipRetry = false, skipToken = false, silentError = false, skipAuthLogout = false } = options
   
   const requestKey = buildRequestKey(method, url, dataOrParams)
   if (!options.skipDuplicate && pendingRequests.has(requestKey)) {
@@ -518,6 +518,11 @@ const requestWithRetry = async (method, url, dataOrParams, options = {}) => {
         const responseData = response.data
         
         if (responseData?.code === 401) {
+          // skipAuthLogout：由调用方自行处理 401（如 check-token 需要拿到原始 401 码做本地状态清理），
+          // 这里不再触发全局登出，而是把 401 响应原样返回给调用方
+          if (skipAuthLogout) {
+            return responseData
+          }
           handleLogout()
           return Promise.reject({
             code: 401,
