@@ -55,7 +55,7 @@ allow_credentials = true
 # 预检请求的缓存时间（秒）
 max_age = 1800
 # 默认的源（当请求源不在白名单中时使用）
-default_origin = "https://zhuxu.asia/"
+default_origin = "http://localhost:8642"
 `
 
 // TempDatabase - 数据库配置模板

@@ -41,32 +41,11 @@ export default defineConfig(({ mode }) => {
       hmr: { overlay: false, timeout: 3000 },
       proxy: {
         '/api': {
-          target: 'https://inis.zhuxu.asia',
+          target: 'https://cs.zhuxu.asia',
           changeOrigin: true,
           timeout: 60000,
           ws: true
         }
-      },
-      headers: {
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'SAMEORIGIN',
-        'X-XSS-Protection': '1; mode=block',
-        'Referrer-Policy': 'strict-origin-when-cross-origin',
-        'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://inis.zhuxu.asia wss://inis.zhuxu.asia; frame-src 'none';",
-        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-        'Permissions-Policy': 'geolocation=(), camera=(), microphone=(), payment=(), usb=()'
-      }
-    },
-
-    preview: {
-      headers: {
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'SAMEORIGIN',
-        'X-XSS-Protection': '1; mode=block',
-        'Referrer-Policy': 'strict-origin-when-cross-origin',
-        'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://inis.zhuxu.asia wss://inis.zhuxu.asia; frame-src 'none';",
-        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-        'Permissions-Policy': 'geolocation=(), camera=(), microphone=(), payment=(), usb=()'
       }
     },
 

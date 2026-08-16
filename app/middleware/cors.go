@@ -19,8 +19,8 @@ const (
 	defaultCorsAllowedMethods        = "GET, POST, PATCH, PUT, DELETE, OPTIONS"
 	defaultCorsAllowedHeaders        = "X-Khronos, X-Gorgon, X-Argus, X-Ss-Stub, Token, Authorization, i-api-key, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-CSRF-TOKEN, X-Requested-With"
 	defaultCorsExposedHeaders        = "Content-Type, Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers"
-	defaultCorsDefaultOrigin         = "https://cs.zhuxu.asia"
-	defaultCorsAllowedOriginsDefault = "https://zhuxu.asia,http://localhost:3000,http://127.0.0.1:3000"
+	defaultCorsDefaultOrigin         = "http://localhost:8642"
+	defaultCorsAllowedOriginsDefault = "http://localhost:3000,http://127.0.0.1:3000"
 )
 
 // Cors - 跨域中间件
