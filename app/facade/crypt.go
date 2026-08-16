@@ -3,6 +3,8 @@ package facade
 import (
 	"crypto/md5"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	JWT "github.com/golang-jwt/jwt/v5"
@@ -29,20 +31,41 @@ func init() {
 }
 
 // initCryptToml - 初始化Crypt配置文件
+// 关键：JWT 签名密钥（jwt.key）必须持久化且稳定，
+// 否则每次后端重启都会生成新密钥，导致已签发的 token 全部失效（signature is invalid）。
 func initCryptToml() {
-	key := fmt.Sprintf("%s-%v", uuid.New().String(), time.Now().Unix())
-	secret := fmt.Sprintf("INIS-%x", md5.Sum([]byte(key)))
+
+	// 配置文件路径
+	filePath := fmt.Sprintf("%s/%s.%s", ConfigPath, ConfigNameCrypt, ModeToml)
+
+	// 读取已存在的密钥（若文件已生成过则复用，保证密钥稳定）
+	secret := readCryptKey(filePath)
+
+	// 文件不存在或密钥为空时，生成随机密钥并写入文件
+	if utils.Is.Empty(secret) {
+		key := fmt.Sprintf("%s-%v", uuid.New().String(), time.Now().Unix())
+		secret = fmt.Sprintf("INIS-%x", md5.Sum([]byte(key)))
+
+		// 确保文件存在（父目录已存在，这里直接写入）
+		content := utils.Replace(TempCrypt, map[string]any{
+			"${jwt.key}":     secret,
+			"${jwt.expire}":  DefaultJwtExpire,
+			"${jwt.issuer}":  DefaultJwtIssuer,
+			"${jwt.subject}": DefaultJwtSubject,
+		})
+		if err := os.WriteFile(filePath, []byte(content), 0755); err != nil {
+			Log.Error(map[string]any{
+				"error":     err,
+				"func_name": utils.Caller().FuncName,
+				"file_name": utils.Caller().FileName,
+				"file_line": utils.Caller().Line}, "Crypt配置文件写入失败")
+		}
+	}
 
 	item := utils.Viper(utils.ViperModel{
 		Path: ConfigPath,
 		Mode: ModeToml,
 		Name: ConfigNameCrypt,
-		Content: utils.Replace(TempCrypt, map[string]any{
-			"${jwt.key}":     secret,
-			"${jwt.expire}":  DefaultJwtExpire,
-			"${jwt.issuer}":  DefaultJwtIssuer,
-			"${jwt.subject}": DefaultJwtSubject,
-		}),
 	}).Read()
 
 	if item.Error != nil {
@@ -53,7 +76,34 @@ func initCryptToml() {
 			"file_line": utils.Caller().Line}, "Crypt配置初始化错误")
 	}
 
+	// 兜底：若因某种原因（如文件被并发写坏）未能读取到密钥，则在内存中保留本次生成的密钥
+	if utils.Is.Empty(item.Get("jwt.key", "")) {
+		item.Viper.Set("jwt.key", secret)
+		item.Result["jwt"] = map[string]any{"key": secret}
+	}
+
 	CryptToml = &item
+}
+
+// readCryptKey - 读取已存在的 crypt.toml 中的 jwt.key（用于复用稳定密钥）
+func readCryptKey(filePath string) (key string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+	// 简单解析 toml 中的 key = "..." 或 key = '...' 或 key = value
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "key") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key = strings.TrimSpace(parts[1])
+				key = strings.Trim(key, `"'`)
+				return key
+			}
+		}
+	}
+	return ""
 }
 
 func initCrypt() {

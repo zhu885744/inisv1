@@ -11,19 +11,23 @@
                 <div class="drawer-header">
                     <div class="logo-section">
                         <div class="logo">
-                            <el-icon :size="24" class="logo-icon">
-                                <component :is="componentMap['LayoutDashboard']" />
-                            </el-icon>
+                            <div class="logo-mark">
+                                <el-icon :size="18">
+                                    <component :is="componentMap['Menu']" />
+                                </el-icon>
+                            </div>
                             <span class="logo-title">管理后台</span>
                         </div>
                         <button @click="state.drawer.show = false" class="close-btn">
                             <el-icon :size="18">
-                                <component :is="componentMap['X']" />
+                                <component :is="componentMap['Close']" />
                             </el-icon>
                         </button>
                     </div>
                     <div v-if="store.comm.getLogin.finish" class="user-section">
-                        <el-avatar :src="store.comm.getLogin.user?.avatar" :size="48" class="user-avatar" />
+                        <el-avatar :src="store.comm.getLogin.user?.avatar" :size="44" class="user-avatar">
+                            {{ store.comm.getLogin.user?.nickname?.[0] }}
+                        </el-avatar>
                         <div class="user-info">
                             <span class="user-nickname">{{ store.comm.getLogin.user?.nickname }}</span>
                             <span class="user-title">{{ store.comm.getLogin.user?.title || '管理员' }}</span>
@@ -37,40 +41,36 @@
                     :default-active="activeMenu"
                     unique-opened
                 >
-                    <el-menu-item index="/admin" @click="handleNavClick(push('/admin'))">
-                        <el-icon :size="18" class="menu-icon">
-                            <component :is="componentMap['House']" />
-                        </el-icon>
-                        <span>首页</span>
+                    <el-menu-item index="/admin" @click="go('/admin')">
+                        <template #title>
+                            <span>首页</span>
+                        </template>
+                    </el-menu-item>
+                    <el-menu-item index="/admin/profile" @click="go('/admin/profile')">
+                        <template #title>
+                            <span>个人中心</span>
+                        </template>
                     </el-menu-item>
                     <template v-for="(item, index) in state.menu" :key="index">
                         <el-sub-menu v-if="item.children?.length" :index="item.name">
                             <template #title>
-                                <span v-if="item.icon" class="nav-svg-icon" v-html="item.icon" />
-                                <el-icon :size="18" class="menu-icon" v-else>
-                                    <component :is="getIcon(item)" />
-                                </el-icon>
                                 <span>{{ item.label }}</span>
                             </template>
                             <el-menu-item
                                 v-for="(child, key) in item.children"
                                 :key="key"
                                 :index="child.path"
-                                @click="handleNavClick(child.fn())"
+                                @click="go(child.path)"
                             >
-                                <span v-if="child.icon" class="nav-svg-icon" v-html="child.icon" />
-                                <el-icon :size="14" class="submenu-icon" v-else>
-                                    <component :is="componentMap['Circle']" />
-                                </el-icon>
-                                <span>{{ child.label }}</span>
+                                <template #title>
+                                    <span>{{ child.label }}</span>
+                                </template>
                             </el-menu-item>
                         </el-sub-menu>
-                        <el-menu-item v-else :index="item.path" @click="handleNavClick(item.fn?.())">
-                            <span v-if="item.icon" class="nav-svg-icon" v-html="item.icon" />
-                            <el-icon :size="18" class="menu-icon" v-else>
-                                <component :is="getIcon(item)" />
-                            </el-icon>
-                            <span>{{ item.label }}</span>
+                        <el-menu-item v-else :index="item.path" @click="go(item.path)">
+                            <template #title>
+                                <span>{{ item.label }}</span>
+                            </template>
                         </el-menu-item>
                     </template>
                 </el-menu>
@@ -79,7 +79,7 @@
                 <div class="drawer-footer">
                     <el-button text class="logout-btn" @click="store.comm.logout('/')">
                         <el-icon :size="16" class="mr-1">
-                            <component :is="componentMap['LogOut']" />
+                            <component :is="componentMap['SwitchButton']" />
                         </el-icon>
                         <span>退出登录</span>
                     </el-button>
@@ -100,7 +100,9 @@
                     :src="store.comm.getLogin.user?.avatar"
                     :size="28"
                     class="user-avatar-sm"
-                />
+                >
+                    {{ store.comm.getLogin.user?.nickname?.[0] }}
+                </el-avatar>
             </div>
         </el-header>
     </div>
@@ -128,18 +130,10 @@ const componentMap = new Proxy({}, { get: (_, name) => name })
 
 const activeMenu = computed(() => route.path)
 
-const getIcon = (item) => {
-    const iconMap = {
-        'create': 'Edit',
-        'manage': 'Grid3x3',
-        'security': 'Shield',
-    }
-    return componentMap[iconMap[item.name] || 'Menu']
-}
-
-const handleNavClick = (fn) => {
+// 导航跳转：跳转并关闭抽屉
+const go = (path) => {
     state.drawer.show = false
-    fn
+    push(path)
 }
 
 onMounted(async () => {
@@ -164,20 +158,21 @@ onMounted(async () => {
     left: 0;
     right: 0;
     height: 56px;
-    background: #fff;
-    border-bottom: 1px solid #e8e8e8;
+    background: #ffffff;
+    border-bottom: 1px solid #f0f0f0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding: 0 12px;
     z-index: 100;
+    box-shadow: 0 1px 4px rgba(0, 21, 41, 0.04);
 }
 
 .menu-btn {
     background: transparent;
     border: none;
     padding: 8px;
-    color: #595959;
+    color: #262626;
     cursor: pointer;
     border-radius: 4px;
 }
@@ -189,7 +184,7 @@ onMounted(async () => {
 .header-title {
     font-size: 16px;
     font-weight: 600;
-    color: #262626;
+    color: rgba(0, 0, 0, 0.85);
 }
 
 .mobile-header .header-right {
@@ -201,19 +196,27 @@ onMounted(async () => {
 .user-avatar-sm {
     cursor: pointer;
     border: none;
+    background: #1890ff;
+    color: #fff;
+    font-size: 13px;
+}
+
+.mobile-drawer :deep(.el-drawer__header) {
+    padding: 0;
+    margin-bottom: 0;
 }
 
 .mobile-drawer :deep(.el-drawer__body) {
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: #fff;
+    background: #ffffff;
     padding: 0;
 }
 
 .drawer-header {
     padding: 16px 20px;
-    border-bottom: 1px solid #e8e8e8;
+    border-bottom: 1px solid #f0f0f0;
 }
 
 .logo-section {
@@ -229,27 +232,35 @@ onMounted(async () => {
     gap: 10px;
 }
 
-.logo-icon {
-    color: #1890ff;
+.logo-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: #1890ff;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .logo-title {
     font-size: 18px;
     font-weight: 600;
-    color: #262626;
+    color: rgba(0, 0, 0, 0.85);
 }
 
 .close-btn {
     background: transparent;
     border: none;
     padding: 8px;
-    color: #8c8c8c;
+    color: #595959;
     cursor: pointer;
     border-radius: 4px;
 }
 
 .close-btn:hover {
     background: #f5f5f5;
+    color: #262626;
 }
 
 .user-section {
@@ -258,11 +269,14 @@ onMounted(async () => {
     gap: 12px;
     padding: 12px;
     background: #f5f5f5;
-    border-radius: 4px;
+    border-radius: 6px;
 }
 
 .user-avatar {
     border: none;
+    background: #1890ff;
+    color: #fff;
+    font-size: 16px;
 }
 
 .user-section .user-info {
@@ -273,18 +287,23 @@ onMounted(async () => {
 .user-nickname {
     font-size: 15px;
     font-weight: 600;
-    color: #262626;
+    color: rgba(0, 0, 0, 0.85);
 }
 
 .user-title {
     font-size: 12px;
-    color: #8c8c8c;
+    color: rgba(0, 0, 0, 0.45);
 }
 
 .drawer-menu {
     flex: 1;
     border-right: none;
     padding: 8px 0;
+    background: transparent;
+    --el-menu-bg-color: transparent;
+    --el-menu-text-color: #595959;
+    --el-menu-hover-bg-color: #f5f5f5;
+    --el-menu-active-color: #1890ff;
 }
 
 .drawer-menu :deep(.el-menu-item),
@@ -305,8 +324,10 @@ onMounted(async () => {
 .drawer-menu :deep(.el-menu-item.is-active) {
     background: #e6f7ff;
     color: #1890ff;
-    border-left: 3px solid #1890ff;
-    padding-left: 17px;
+}
+
+.drawer-menu :deep(.el-sub-menu .el-menu-item) {
+    padding-left: 30px;
 }
 
 .menu-icon {
@@ -328,19 +349,30 @@ onMounted(async () => {
     height: 18px;
 }
 
+/* 覆盖 SVG 内联的 fill 颜色，使图标跟随当前文字颜色（hover/active 变色） */
+.nav-svg-icon :deep(svg path),
+.nav-svg-icon :deep(svg rect),
+.nav-svg-icon :deep(svg circle) {
+    fill: currentColor;
+}
+
 .submenu-icon {
     margin-right: 10px;
-    color: #bfbfbf;
+    color: rgba(0, 0, 0, 0.35);
 }
 
 .drawer-footer {
     padding: 12px 20px;
-    border-top: 1px solid #e8e8e8;
+    border-top: 1px solid #f0f0f0;
 }
 
 .logout-btn {
     width: 100%;
     justify-content: center;
-    color: #ff4d4f;
+    color: #595959;
+}
+
+.logout-btn:hover {
+    color: #1890ff;
 }
 </style>

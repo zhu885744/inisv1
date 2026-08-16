@@ -6,7 +6,11 @@
         >
             <div class="sidebar-header">
                 <div class="logo" @click="method.push('/admin')">
-                    <el-icon><Menu /></el-icon>
+                    <div class="logo-mark">
+                        <el-icon :size="18">
+                            <component :is="componentMap['Menu']" />
+                        </el-icon>
+                    </div>
                     <span v-show="!state.sidebarCollapsed" class="logo-title">管理后台</span>
                 </div>
             </div>
@@ -16,48 +20,49 @@
                     :default-active="activeMenu"
                     mode="vertical"
                     :collapse="state.sidebarCollapsed"
+                    :collapse-transition="false"
                     unique-opened
                     @select="handleMenuSelect"
                     class="el-menu-vertical"
                 >
                     <el-menu-item index="/admin">
-                            <el-icon :size="16">
-                                <House />
-                            </el-icon>
-                            <span>首页</span>
-                        </el-menu-item>
-                        <template v-for="(item, index) in state.menu" :key="index">
+                        <span class="menu-text-short">{{ '首页'.slice(0, 2) }}</span>
+                        <template #title>
+                            <span>{{ '首页' }}</span>
+                        </template>
+                    </el-menu-item>
+
+                    <template v-for="(item, index) in state.menu" :key="index">
                         <el-sub-menu v-if="item.children?.length" :index="item.name">
                             <template #title>
-                                <el-icon :size="16" v-if="item.icon" v-html="item.icon" />
-                                <el-icon :size="16" v-else>
-                                    <component :is="getIcon(item)" />
-                                </el-icon>
                                 <span>{{ item.label }}</span>
+                                <span class="menu-text-short">{{ item.label.slice(0, 2) }}</span>
                             </template>
                             <el-menu-item
                                 v-for="(child, key) in item.children"
                                 :key="key"
                                 :index="child.path"
                             >
-                                <el-icon :size="12" v-if="child.isSvg && child.icon" v-html="child.icon" />
-                                <i-svg v-else-if="child.icon" :name="child.icon" size="14px" />
-                                <el-icon :size="12" v-else>
-                                    <component :is="componentMap['Dot']" />
-                                </el-icon>
-                                <span>{{ child.label }}</span>
+                                <template #title>
+                                    <span>{{ child.label }}</span>
+                                    <span class="menu-text-short">{{ child.label.slice(0, 2) }}</span>
+                                </template>
                             </el-menu-item>
                         </el-sub-menu>
+
                         <el-menu-item v-else :index="item.path">
-                            <el-icon :size="16" v-if="item.icon" v-html="item.icon" />
-                            <el-icon :size="16" v-else>
-                                <component :is="getIcon(item)" />
-                            </el-icon>
-                            <span>{{ item.label }}</span>
+                            <template #title>
+                                <span>{{ item.label }}</span>
+                                <span class="menu-text-short">{{ item.label.slice(0, 2) }}</span>
+                            </template>
                         </el-menu-item>
                     </template>
                 </el-menu>
             </nav>
+
+            <div class="sidebar-footer">
+                <span class="version-text">v{{ state.version }}</span>
+            </div>
         </el-aside>
 
         <el-container
@@ -71,7 +76,7 @@
                         @click="state.sidebarCollapsed = !state.sidebarCollapsed"
                     >
                         <el-icon :size="18">
-                            <DArrowLeft />
+                            <component :is="componentMap[state.sidebarCollapsed ? 'Expand' : 'Fold']" />
                         </el-icon>
                     </button>
                     <el-breadcrumb separator="/" class="breadcrumb">
@@ -85,24 +90,33 @@
                 </div>
 
                 <div class="header-right">
-                    <div class="header-actions">
-                        <el-dropdown trigger="click" class="user-menu">
-                            <div class="user-info">
-                                <el-avatar :src="store.comm.getLogin.user?.avatar" size="small" class="user-avatar" />
-                                <span v-show="!state.sidebarCollapsed" class="user-name">{{ store.comm.getLogin.user?.nickname }}</span>
-                                <el-icon :size="12">
-                                    <component :is="componentMap['ChevronDown']" />
-                                </el-icon>
-                            </div>
-                            <template #dropdown>
-                                <el-dropdown-menu>
-                                    <el-dropdown-item @click="store.comm.logout('/')">
-                                        <span>退出登录</span>
-                                    </el-dropdown-item>
-                                </el-dropdown-menu>
-                            </template>
-                        </el-dropdown>
-                    </div>
+                    <el-dropdown trigger="click" class="user-menu">
+                        <div class="user-info">
+                            <el-avatar :src="store.comm.getLogin.user?.avatar" :size="28" class="user-avatar">
+                                {{ store.comm.getLogin.user?.nickname?.[0] }}
+                            </el-avatar>
+                            <span class="user-name">{{ store.comm.getLogin.user?.nickname }}</span>
+                            <el-icon :size="12" class="user-arrow">
+                                <component :is="componentMap['ArrowDown']" />
+                            </el-icon>
+                        </div>
+                        <template #dropdown>
+                            <el-dropdown-menu>
+                                <el-dropdown-item @click="method.push('/admin/profile')">
+                                    <el-icon :size="14">
+                                        <component :is="componentMap['User']" />
+                                    </el-icon>
+                                    <span>个人中心</span>
+                                </el-dropdown-item>
+                                <el-dropdown-item divided @click="store.comm.logout('/')">
+                                    <el-icon :size="14">
+                                        <component :is="componentMap['SwitchButton']" />
+                                    </el-icon>
+                                    <span>退出登录</span>
+                                </el-dropdown-item>
+                            </el-dropdown-menu>
+                        </template>
+                    </el-dropdown>
                 </div>
             </el-header>
 
@@ -144,7 +158,6 @@ const store = {
 const state = reactive({
     sidebarCollapsed: false,
     menu: [],
-    searchText: '',
     version: '1.0.0',
 })
 
@@ -168,15 +181,6 @@ const breadcrumbList = computed(() => {
     }
     return list
 })
-
-const getIcon = (item) => {
-    const iconMap = {
-        'create': 'PenTool',
-        'manage': 'LayoutGrid',
-        'security': 'ShieldCheck',
-    }
-    return componentMap[iconMap[item.name] || 'FileText']
-}
 
 const handleMenuSelect = (index) => {
     if (index.startsWith('/')) push(index)
@@ -207,10 +211,12 @@ nextTick(() => {
 .main-sidebar {
     background: #ffffff;
     color: #595959;
+    /* 覆盖全局的浅灰菜单图标色，白色侧边栏需使用深色图标 */
+    --menu-icon-color: 89, 89, 89;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid #e8e8e8;
-    transition: width 0.3s ease;
+    border-right: 1px solid #f0f0f0;
+    transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
     position: fixed;
     left: 0;
@@ -224,9 +230,10 @@ nextTick(() => {
     padding: 0 16px;
     display: flex;
     align-items: center;
-    border-bottom: 1px solid #e8e8e8;
     background: #ffffff;
+    border-bottom: 1px solid #f0f0f0;
     flex-shrink: 0;
+    overflow: hidden;
 }
 
 .logo {
@@ -234,28 +241,56 @@ nextTick(() => {
     align-items: center;
     gap: 10px;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .logo:hover {
-    opacity: 0.8;
+    opacity: 0.85;
+}
+
+.logo-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: #1890ff;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .logo-title {
     font-size: 16px;
     font-weight: 600;
-    color: #262626;
+    color: rgba(0, 0, 0, 0.85);
     white-space: nowrap;
+    letter-spacing: 0.5px;
 }
 
 .sidebar-menu {
     flex: 1;
     padding: 8px 0;
     overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidebar-menu::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar-menu::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 2px;
 }
 
 .el-menu-vertical {
     border: none;
     background: transparent;
+    --el-menu-bg-color: transparent;
+    --el-menu-text-color: #595959;
+    --el-menu-hover-bg-color: #f5f5f5;
+    --el-menu-active-color: #1890ff;
 }
 
 .el-menu-vertical :deep(.el-menu-item),
@@ -263,21 +298,11 @@ nextTick(() => {
     color: #595959;
     height: 44px;
     line-height: 44px;
-    margin: 2px 8px;
+    margin: 4px 8px;
     border-radius: 4px;
     padding: 0 12px;
     transition: all 0.2s ease;
     font-size: 14px;
-}
-
-.el-menu-vertical :deep(.el-menu-item i),
-.el-menu-vertical :deep(.el-sub-menu__title i),
-.el-menu-vertical :deep(.el-menu-item svg),
-.el-menu-vertical :deep(.el-sub-menu__title svg) {
-    margin-right: 8px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
 }
 
 .el-menu-vertical :deep(.el-menu-item:hover),
@@ -289,8 +314,6 @@ nextTick(() => {
 .el-menu-vertical :deep(.el-menu-item.is-active) {
     background: #e6f7ff;
     color: #1890ff;
-    box-shadow: none;
-    box-shadow: inset 3px 0 0 #1890ff;
 }
 
 .el-menu-vertical :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
@@ -298,7 +321,7 @@ nextTick(() => {
 }
 
 .el-menu-vertical :deep(.el-sub-menu .el-menu-item) {
-    padding-left: 36px;
+    padding-left: 30px;
     margin: 2px 8px;
     border-radius: 4px;
     font-size: 13px;
@@ -309,69 +332,128 @@ nextTick(() => {
 .el-menu-vertical :deep(.el-sub-menu .el-menu-item.is-active) {
     background: #e6f7ff;
     color: #1890ff;
-    box-shadow: none;
-    border-left: 3px solid #1890ff;
-    padding-left: 33px;
 }
 
-.sidebar-footer {
-    padding: 12px;
-    border-top: 1px solid #e8e8e8;
-    flex-shrink: 0;
-}
-
-.collapse-btn {
-    width: 100%;
-    padding: 8px;
-    background: #f5f5f5;
-    border: 1px solid #d9d9d9;
-    border-radius: 4px;
-    color: #595959;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
+.menu-svg-icon {
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.menu-svg-icon :deep(svg) {
+    width: 16px;
+    height: 16px;
+}
+
+/* 覆盖 SVG 内联的 fill 颜色，使图标跟随当前文字颜色（hover/active 变色） */
+.menu-svg-icon :deep(svg path),
+.menu-svg-icon :deep(svg rect),
+.menu-svg-icon :deep(svg circle) {
+    fill: currentColor;
+}
+
+/* 默认展开状态：隐藏短文字，显示完整文字 */
+/* 默认展开状态：隐藏短文字，显示完整文字 */
+.menu-text-short {
+    display: none;
+}
+
+/* 收缩（collapse）状态：菜单项居中 */
+.el-menu-vertical.el-menu--collapse :deep(.el-menu-item),
+.el-menu-vertical.el-menu--collapse :deep(.el-sub-menu__title) {
+    margin: 4px 8px;
+    padding: 0;
     justify-content: center;
 }
 
-.collapse-btn:hover {
-    background: #e6f7ff;
-    border-color: #1890ff;
-    color: #1890ff;
+/* 顶层菜单项（父级为 ElMenu，collapse 时标题移入 tooltip）的短文字 */
+.el-menu-vertical.el-menu--collapse :deep(.el-menu-item > .el-menu-tooltip__trigger) {
+    justify-content: center;
+    padding: 0;
+}
+
+.el-menu-vertical.el-menu--collapse :deep(.el-menu-item > .el-menu-tooltip__trigger .menu-text-short) {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 1px;
+}
+
+/* 子菜单（el-sub-menu）标题的短文字：覆盖 element-plus 对直接子 span 的隐藏规则 */
+.el-menu-vertical.el-menu--collapse :deep(.el-sub-menu__title > span.menu-text-short) {
+    visibility: visible !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    display: inline-block !important;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 1px;
+}
+
+/* 收缩状态：取消选中效果 */
+.el-menu-vertical.el-menu--collapse :deep(.el-menu-item.is-active) {
+    background: transparent;
+    color: #595959;
+}
+
+.el-menu-vertical.el-menu--collapse :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+    color: #595959;
+}
+
+.el-menu-vertical.el-menu--collapse :deep(.el-sub-menu .el-menu-item.is-active) {
+    background: transparent;
+    color: #595959;
+}
+
+.sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid #f0f0f0;
+    flex-shrink: 0;
+}
+
+.version-text {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.35);
 }
 
 .main-content-area {
     min-height: 100vh;
-    transition: margin-left 0.3s ease;
+    transition: margin-left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     padding-top: 56px;
     padding-bottom: 48px;
 }
 
 .top-header {
     background: #ffffff;
-    border-bottom: 1px solid #e8e8e8;
+    border-bottom: 1px solid #f0f0f0;
+    box-shadow: 0 1px 4px rgba(0, 21, 41, 0.04);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 16px;
     height: 56px;
     position: fixed;
     top: 0;
     right: 0;
     left: 220px;
     z-index: 99;
-    transition: left 0.3s ease;
+    transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 }
 
 .sidebar-toggle {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -389,88 +471,38 @@ nextTick(() => {
 }
 
 .breadcrumb {
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .breadcrumb :deep(.el-breadcrumb__item) {
-    color: #8c8c8c;
+    color: rgba(0, 0, 0, 0.45);
 }
 
-.breadcrumb :deep(.el-breadcrumb__item:last-child) {
-    color: #262626;
+.breadcrumb :deep(.el-breadcrumb__inner a),
+.breadcrumb :deep(.el-breadcrumb__inner.is-link) {
+    color: rgba(0, 0, 0, 0.45);
+    font-weight: 400;
+}
+
+.breadcrumb :deep(.el-breadcrumb__inner a:hover),
+.breadcrumb :deep(.el-breadcrumb__inner.is-link:hover) {
+    color: #1890ff;
+}
+
+.breadcrumb :deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
+    color: rgba(0, 0, 0, 0.85);
     font-weight: 500;
 }
 
 .breadcrumb :deep(.el-breadcrumb__separator) {
-    color: #d9d9d9;
-    margin: 0 6px;
+    color: rgba(0, 0, 0, 0.25);
+    margin: 0 8px;
 }
 
 .header-right {
     display: flex;
     align-items: center;
-    gap: 12px;
-}
-
-.search-input {
-    width: 200px;
-}
-
-.search-input :deep(.el-input__wrapper) {
-    border-radius: 4px;
-    background: #f5f5f5;
-    box-shadow: 0 0 0 1px #d9d9d9 inset;
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-    box-shadow: 0 0 0 1px #1890ff inset;
-    background: #ffffff;
-}
-
-.header-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.action-item {
-    cursor: pointer;
-}
-
-.action-btn {
-    width: 32px;
-    height: 32px;
-    border: none;
-    background: transparent;
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #8c8c8c;
-    position: relative;
-    transition: all 0.2s ease;
-}
-
-.action-btn:hover {
-    background: #f5f5f5;
-    color: #1890ff;
-}
-
-.badge {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    min-width: 16px;
-    height: 16px;
-    background: #ff4d4f;
-    color: #ffffff;
-    font-size: 10px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 4px;
+    gap: 8px;
 }
 
 .user-menu {
@@ -487,17 +519,23 @@ nextTick(() => {
 }
 
 .user-info:hover {
-    background: #f5f5f5;
+    background: rgba(0, 0, 0, 0.04);
 }
 
 .user-avatar {
+    background: #1890ff;
+    color: #fff;
+    font-size: 13px;
     border: none;
 }
 
 .user-name {
-    font-size: 13px;
-    color: #262626;
-    font-weight: 400;
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.85);
+}
+
+.user-arrow {
+    color: rgba(0, 0, 0, 0.45);
 }
 
 .content-wrapper {
@@ -506,15 +544,14 @@ nextTick(() => {
 
 .content-wrapper :deep(.page-container) {
     background: #ffffff;
-    border-radius: 8px;
+    border-radius: 4px;
     padding: 20px;
-    box-shadow: none;
-    border: 1px solid #e8e8e8;
+    border: 1px solid #f0f0f0;
 }
 
 .main-footer {
     background: #ffffff;
-    border-top: 1px solid #e8e8e8;
+    border-top: 1px solid #f0f0f0;
     padding: 0 20px;
     height: 48px;
     display: flex;
@@ -525,7 +562,7 @@ nextTick(() => {
     right: 0;
     left: 220px;
     z-index: 99;
-    transition: left 0.3s ease;
+    transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .footer-content {
@@ -533,11 +570,11 @@ nextTick(() => {
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: #8c8c8c;
+    color: rgba(0, 0, 0, 0.45);
 }
 
 .footer-divider {
-    color: #d9d9d9;
+    color: rgba(0, 0, 0, 0.25);
 }
 
 .fade-enter-active,

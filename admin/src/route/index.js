@@ -36,6 +36,11 @@ const admin = {
         meta: { title: '控制台', auth: false },
         component: () => import('{src}/views/admin/pages/index.vue'),
     },{
+        path: 'profile',
+        name: 'admin-profile',
+        meta: { title: '个人中心' },
+        component: () => import('{src}/views/admin/pages/profile.vue'),
+    },{
         path: 'users',
         name: 'admin-users',
         meta: { title: '用户管理' },
