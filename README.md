@@ -20,11 +20,11 @@ inis 是一款基于 Go 语言开发的高性能内容管理系统（CMS），�
 | P99响应时间 | - | - | 待压测 |
 
 ## 快速开始
-后端主程序开源仓库：[inisv1](https://github.com/zhu885744/inisv1)<br>
+后端主程序开源仓库：[inisv1](https://github.com/zhu885744/inisv1)
 
 ### 开发环境运行
 #### 步骤 1：安装依赖
-1. 安装 [Go](https://golang.org/dl/) 1.24.0+ 版本
+1. 安装 [Go](https://golang.org/dl/) 1.26.0+ 版本
 2. 克隆项目代码：
    ```bash
    git clone https://github.com/zhu885744/inisv1.git
@@ -556,26 +556,6 @@ A: 修改数据库配置文件，并确保安装了对应的数据库驱动。
 
 ### Q: 如何启用缓存？
 A: 在配置文件中设置缓存相关参数，支持文件缓存、内存缓存和 Redis 缓存。
-
-## Roadmap（计划支持的功能）
-
-### 近期目标（短期）
-- [ ] PostgreSQL 数据库完整支持
-- [ ] SQLite 轻量级数据库支持
-
-### 中期目标
-- [ ] 插件系统（支持第三方扩展）
-- [ ] WebSocket 实时消息推送增强
-- [ ] 全文搜索功能（Elasticsearch/Meilisearch）
-- [ ] 图片 CDN 自动优化
-- [ ] 性能监控与告警
-
-### 长期目标
-- [ ] 分布式部署支持
-- [ ] 多租户架构
-- [ ] GraphQL API 支持
-- [ ] 移动端 APP 支持
-- [ ] AI 内容辅助创作
 
 ## 贡献指南
 

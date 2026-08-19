@@ -411,14 +411,53 @@ func (this *Comm) register(ctx *gin.Context) {
 	}
 	utils.Struct.Set(&table, social, params["social"])
 
-	// 设置登录时间
-	utils.Struct.Set(&table, "login_time", time.Now().Unix())
+	// 未传入昵称时随机生成（如：用户_123456）
+	if utils.Is.Empty(table.Nickname) {
+		utils.Struct.Set(&table, "nickname", fmt.Sprintf("用户_%v", utils.Rand.Number(6)))
+	}
 
-	// 创建用户
-	_, err = facade.DB.Model(&table).Create(&table)
-	if err != nil {
-		this.json(ctx, nil, err.Error(), 400)
-		return
+	// 未传入账号时，生成从 10000001 开始递增的纯数字账号（8 位以内）
+	// 借助 account 唯一索引，创建冲突时自动重试取下一个可用账号
+	if utils.Is.Empty(table.Account) {
+		const maxRetry = 10
+		for i := 0; i < maxRetry; i++ {
+			maxAccount, _ := facade.DB.Model(&model.Users{}).Max("cast(account as unsigned)")
+			next := cast.ToInt64(maxAccount) + 1
+			// 起点 10000001，保证首个账号为 10000001 并依次递增
+			if next < 10000001 {
+				next = 10000001
+			}
+			// 限制 8 位以内（不超过 99999999）
+			if next > 99999999 {
+				next = 99999999
+			}
+			utils.Struct.Set(&table, "account", cast.ToString(next))
+			// 设置登录时间
+			utils.Struct.Set(&table, "login_time", time.Now().Unix())
+			// 创建用户
+			_, err = facade.DB.Model(&table).Create(&table)
+			if err == nil {
+				break
+			}
+			// 非唯一索引冲突（Error 1062）则重试，其他错误直接返回
+			if !strings.Contains(cast.ToString(err.Error()), "1062") {
+				this.json(ctx, nil, err.Error(), 400)
+				return
+			}
+		}
+		if err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "注册失败，请稍后重试！"), 400)
+			return
+		}
+	} else {
+		// 设置登录时间
+		utils.Struct.Set(&table, "login_time", time.Now().Unix())
+		// 创建用户
+		_, err = facade.DB.Model(&table).Create(&table)
+		if err != nil {
+			this.json(ctx, nil, err.Error(), 400)
+			return
+		}
 	}
 
 	// 删除验证码

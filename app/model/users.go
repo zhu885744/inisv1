@@ -22,7 +22,7 @@ const (
 
 type Users struct {
 	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
-	Account     string `gorm:"size:32; comment:帐号; default:Null;" json:"account"`
+	Account     string `gorm:"size:32; comment:帐号; default:Null; uniqueIndex:idx_account" json:"account"`
 	Password    string `gorm:"comment:密码;" json:"password"`
 	Nickname    string `gorm:"size:32; comment:昵称;" json:"nickname"`
 	Email       string `gorm:"size:128; comment:邮箱;" json:"email"`
@@ -58,6 +58,8 @@ func InitUsers() {
 		facade.Log.Error(map[string]any{"error": err}, "Users表迁移失败")
 		return
 	}
+	// 兼容旧库：确保账号唯一索引存在（AutoMigrate 在已有表上可能不自动创建 uniqueIndex）
+	facade.DB.Drive().Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_account ON inis_users(account)")
 }
 
 // AfterFind - 查询后的钩子
