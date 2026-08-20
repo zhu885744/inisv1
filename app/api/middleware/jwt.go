@@ -143,11 +143,6 @@ func Jwt() gin.HandlerFunc {
 			return
 		}
 
-		if err := validatePasswordHash(jwtResult.Data["hash"], user["password"]); err != nil {
-			abortWithError(ctx, tokenName, 401, err.Error())
-			return
-		}
-
 		ctx.Set("user", user)
 		ctx.Next()
 	}
