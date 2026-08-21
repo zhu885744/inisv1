@@ -100,9 +100,10 @@ func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 	// 替换 url 中的域名
 	this.Avatar = utils.Replace(this.Avatar, DomainTemp1())
 
-	this.Result = this.result()
+	// 先解码 Json，确保 result() 中的 userSetting() 能读到解析后的 map
 	this.Text = cast.ToString(this.Text)
 	this.Json = utils.Json.Decode(this.Json)
+	this.Result = this.result()
 	return
 }
 
@@ -211,6 +212,62 @@ func (this *Users) Rules(uid any) (slice []any) {
 	return rules
 }
 
+// UserPrivacySetting - 隐私设置
+// follows: 关注与粉丝列表可见范围
+//   - all       : 全部公开（默认）
+//   - following : 仅公开关注列表
+//   - followers : 仅公开粉丝列表
+//   - none      : 全部私密
+// collects: 是否公开我的收藏（1 公开 / 0 私密，默认 0）
+// likes: 是否公开我的点赞（1 公开 / 0 私密，默认 0）
+type UserPrivacySetting struct {
+	Follows  string `json:"follows"`
+	Collects int    `json:"collects"`
+	Likes    int    `json:"likes"`
+}
+
+// UserNotifySetting - 通知设置（1 开 / 0 关，默认 1）
+type UserNotifySetting struct {
+	LikeCollect int `json:"like_collect"` // 赞和收藏
+	Follow      int `json:"follow"`       // 新的关注
+	Comment     int `json:"comment"`      // 评论通知
+}
+
+// userSetting - 解析 users.json 中的隐私/通知设置，缺失字段使用默认值
+func (this *Users) userSetting() map[string]any {
+	setting := map[string]any{
+		"privacy": UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0},
+		"notify":  UserNotifySetting{LikeCollect: 1, Follow: 1, Comment: 1},
+	}
+
+	jsonMap, ok := this.Json.(map[string]any)
+	if !ok {
+		return setting
+	}
+
+	if raw, ok := jsonMap["privacy"]; ok {
+		m := cast.ToStringMap(raw)
+		privacy := UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+		if v := cast.ToString(m["follows"]); v != "" {
+			privacy.Follows = v
+		}
+		privacy.Collects = cast.ToInt(m["collects"])
+		privacy.Likes = cast.ToInt(m["likes"])
+		setting["privacy"] = privacy
+	}
+
+	if raw, ok := jsonMap["notify"]; ok {
+		m := cast.ToStringMap(raw)
+		notify := UserNotifySetting{LikeCollect: 1, Follow: 1, Comment: 1}
+		notify.LikeCollect = cast.ToInt(m["like_collect"])
+		notify.Follow = cast.ToInt(m["follow"])
+		notify.Comment = cast.ToInt(m["comment"])
+		setting["notify"] = notify
+	}
+
+	return setting
+}
+
 // result - 返回结果
 func (this *Users) result() (result map[string]any) {
 
@@ -226,9 +283,10 @@ func (this *Users) result() (result map[string]any) {
 	wg.Wait()
 
 	return map[string]any{
-		"auth":  auth,
-		"level": level,
-		"ban":   ban,
+		"auth":     auth,
+		"level":    level,
+		"ban":      ban,
+		"setting":  this.userSetting(),
 	}
 }
 
@@ -353,4 +411,31 @@ func (this *Users) banInfo(wg *sync.WaitGroup, result *any) {
 	}
 
 	*result = banInfo
+}
+
+// GetUserPrivacy - 获取指定用户的隐私设置（缺省返回默认值）
+func GetUserPrivacy(uid any) UserPrivacySetting {
+	item, _ := facade.DB.Model(&Users{}).Where("id", uid).Column("json")
+	if utils.Is.Empty(item) {
+		return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+	}
+	rows := cast.ToSlice(item)
+	if len(rows) == 0 {
+		return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+	}
+	row := cast.ToStringMap(rows[0])
+	jsonMap, ok := row["json"].(map[string]any)
+	if !ok {
+		jsonMap = cast.ToStringMap(row["json"])
+	}
+	privacy := UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+	if raw, ok := jsonMap["privacy"]; ok {
+		m := cast.ToStringMap(raw)
+		if v := cast.ToString(m["follows"]); v != "" {
+			privacy.Follows = v
+		}
+		privacy.Collects = cast.ToInt(m["collects"])
+		privacy.Likes = cast.ToInt(m["likes"])
+	}
+	return privacy
 }

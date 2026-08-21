@@ -192,11 +192,26 @@ func (this *UserLikes) all(ctx *gin.Context) {
 	limit := this.meta.limit(ctx)
 	var result []model.UserLikes
 
+	// 查看他人点赞：支持 uid 参数，并按隐私设置拦截
+	currentUid := this.user(ctx).Id
+	targetUid := currentUid
+	if !utils.Is.Empty(params["uid"]) {
+		targetUid = cast.ToInt(params["uid"])
+	}
+	if targetUid != currentUid && !this.meta.root(ctx) {
+		privacy := model.GetUserPrivacy(targetUid)
+		if privacy.Likes != 1 {
+			this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0, "private": true},
+				facade.Lang(ctx, "对方设置了私密，无法查看！"), 200)
+			return
+		}
+	}
+
 	query := facade.DB.Model(&result)
 	query = this.buildQuery(query, params)
 
 	if !this.meta.root(ctx) {
-		query = query.Where("uid", this.user(ctx).Id)
+		query = query.Where("uid", targetUid)
 	}
 
 	count, _ := query.Where(table).Count()
@@ -795,18 +810,31 @@ func (this *UserLikes) isLiked(ctx *gin.Context) {
 func (this *UserLikes) likes(ctx *gin.Context) {
 	params := this.params(ctx)
 
-	uid := this.meta.user(ctx).Id
-	if uid == 0 {
-		if !utils.Is.Empty(params["uid"]) {
-			uid = cast.ToInt(params["uid"])
-		} else {
-			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+	currentUid := this.meta.user(ctx).Id
+	targetUid := currentUid
+	if !utils.Is.Empty(params["uid"]) {
+		targetUid = cast.ToInt(params["uid"])
+	}
+	if currentUid == 0 && targetUid == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+	if targetUid == 0 {
+		targetUid = currentUid
+	}
+
+	// 查看他人点赞时按隐私设置拦截
+	if targetUid != currentUid && !this.meta.root(ctx) {
+		privacy := model.GetUserPrivacy(targetUid)
+		if privacy.Likes != 1 {
+			this.json(ctx, gin.H{"list": []any{}, "count": 0, "private": true},
+				facade.Lang(ctx, "对方设置了私密，无法查看！"), 200)
 			return
 		}
 	}
 
 	targetType := cast.ToString(params["target_type"])
-	data, count := (&model.UserLikes{}).GetLikesByUid(uid, targetType)
+	data, count := (&model.UserLikes{}).GetLikesByUid(targetUid, targetType)
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)

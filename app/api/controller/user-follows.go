@@ -680,11 +680,26 @@ func (this *UserFollows) following(ctx *gin.Context) {
 	})
 
 	uid := this.meta.user(ctx).Id
+	// 查看他人列表时使用的 uid（与当前登录用户不同即为查看他人）
+	targetUid := uid
 	if uid == 0 {
 		if !utils.Is.Empty(params["uid"]) {
 			uid = cast.ToInt(params["uid"])
+			targetUid = uid
 		} else {
 			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+			return
+		}
+	} else if !utils.Is.Empty(params["uid"]) {
+		targetUid = cast.ToInt(params["uid"])
+	}
+
+	// 查看他人关注列表时的隐私校验
+	if targetUid != uid {
+		privacy := model.GetUserPrivacy(targetUid)
+		if privacy.Follows == "none" || privacy.Follows == "followers" {
+			this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0, "private": true},
+				facade.Lang(ctx, "对方设置了私密，无法查看！"), 200)
 			return
 		}
 	}
@@ -712,11 +727,25 @@ func (this *UserFollows) followers(ctx *gin.Context) {
 	})
 
 	uid := this.meta.user(ctx).Id
+	targetUid := uid
 	if uid == 0 {
 		if !utils.Is.Empty(params["uid"]) {
 			uid = cast.ToInt(params["uid"])
+			targetUid = uid
 		} else {
 			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+			return
+		}
+	} else if !utils.Is.Empty(params["uid"]) {
+		targetUid = cast.ToInt(params["uid"])
+	}
+
+	// 查看他人粉丝列表时的隐私校验
+	if targetUid != uid {
+		privacy := model.GetUserPrivacy(targetUid)
+		if privacy.Follows == "none" || privacy.Follows == "following" {
+			this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0, "private": true},
+				facade.Lang(ctx, "对方设置了私密，无法查看！"), 200)
 			return
 		}
 	}
