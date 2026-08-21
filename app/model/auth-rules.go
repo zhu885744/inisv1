@@ -477,7 +477,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 				"path=is-collected&type=login&name=检查是否已收藏",
-				"path=collects&type=login&name=获取我的收藏列表",
+				"path=collects&type=common&name=获取收藏列表",
 				"path=counts&type=common&name=批量查询收藏数量",
 			},
 			"POST": {
@@ -506,8 +506,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=rand&type=common",
 				"path=count&type=common",
 				"path=column&type=common",
-				"path=following&type=login&name=获取关注列表",
-				"path=followers&type=login&name=获取粉丝列表",
+				"path=following&type=common&name=获取关注列表",
+				"path=followers&type=common&name=获取粉丝列表",
 				"path=is-following&type=login&name=检查是否已关注",
 				"path=counts&type=common&name=批量查询关注/粉丝数量",
 			},
@@ -538,7 +538,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 				"path=is-liked&type=login&name=检查是否已点赞",
-				"path=likes&type=login&name=获取我的点赞列表",
+				"path=likes&type=common&name=获取点赞列表",
 				"path=counts&type=common&name=批量查询点赞数量",
 			},
 			"POST": {

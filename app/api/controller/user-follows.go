@@ -679,23 +679,21 @@ func (this *UserFollows) following(ctx *gin.Context) {
 		"page": 1,
 	})
 
-	uid := this.meta.user(ctx).Id
-	// 查看他人列表时使用的 uid（与当前登录用户不同即为查看他人）
-	targetUid := uid
-	if uid == 0 {
-		if !utils.Is.Empty(params["uid"]) {
-			uid = cast.ToInt(params["uid"])
-			targetUid = uid
-		} else {
-			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-			return
-		}
-	} else if !utils.Is.Empty(params["uid"]) {
+	currentUid := this.meta.user(ctx).Id
+	// 公共接口：任何人都能通过 uid 查询对应用户数据。
+	// 已登录用户未传 uid（或 uid 等于自己）时查自己；未登录用户必须传 uid。
+	var targetUid int
+	if !utils.Is.Empty(params["uid"]) {
 		targetUid = cast.ToInt(params["uid"])
+	} else if currentUid > 0 {
+		targetUid = currentUid
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "请指定要查询的用户（uid）！"), 400)
+		return
 	}
 
 	// 查看他人关注列表时的隐私校验
-	if targetUid != uid {
+	if targetUid != currentUid {
 		privacy := model.GetUserPrivacy(targetUid)
 		if privacy.Follows == "none" || privacy.Follows == "followers" {
 			this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0, "private": true},
@@ -707,7 +705,7 @@ func (this *UserFollows) following(ctx *gin.Context) {
 	page := cast.ToInt(params["page"])
 	limit := this.meta.limit(ctx)
 
-	data, count := (&model.UserFollows{}).GetFollowing(uid, page, limit)
+	data, count := (&model.UserFollows{}).GetFollowing(targetUid, page, limit)
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -726,22 +724,21 @@ func (this *UserFollows) followers(ctx *gin.Context) {
 		"page": 1,
 	})
 
-	uid := this.meta.user(ctx).Id
-	targetUid := uid
-	if uid == 0 {
-		if !utils.Is.Empty(params["uid"]) {
-			uid = cast.ToInt(params["uid"])
-			targetUid = uid
-		} else {
-			this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-			return
-		}
-	} else if !utils.Is.Empty(params["uid"]) {
+	currentUid := this.meta.user(ctx).Id
+	// 公共接口：任何人都能通过 uid 查询对应用户数据。
+	// 已登录用户未传 uid（或 uid 等于自己）时查自己；未登录用户必须传 uid。
+	var targetUid int
+	if !utils.Is.Empty(params["uid"]) {
 		targetUid = cast.ToInt(params["uid"])
+	} else if currentUid > 0 {
+		targetUid = currentUid
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "请指定要查询的用户（uid）！"), 400)
+		return
 	}
 
 	// 查看他人粉丝列表时的隐私校验
-	if targetUid != uid {
+	if targetUid != currentUid {
 		privacy := model.GetUserPrivacy(targetUid)
 		if privacy.Follows == "none" || privacy.Follows == "following" {
 			this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0, "private": true},
@@ -753,7 +750,7 @@ func (this *UserFollows) followers(ctx *gin.Context) {
 	page := cast.ToInt(params["page"])
 	limit := this.meta.limit(ctx)
 
-	data, count := (&model.UserFollows{}).GetFollowers(uid, page, limit)
+	data, count := (&model.UserFollows{}).GetFollowers(targetUid, page, limit)
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)

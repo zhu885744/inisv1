@@ -787,16 +787,17 @@ func (this *UserCollects) collects(ctx *gin.Context) {
 	params := this.params(ctx)
 
 	currentUid := this.meta.user(ctx).Id
-	targetUid := currentUid
-	if !utils.Is.Empty(params["uid"]) {
-		targetUid = cast.ToInt(params["uid"])
-	}
-	if currentUid == 0 && targetUid == 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
-	if targetUid == 0 {
+	// 公共接口：任何人都能通过 uid 查询对应用户数据。
+	// 已登录用户未传 uid（或 uid 等于自己）时查自己；未登录用户必须传 uid。
+	var targetUid int
+	uidParam := cast.ToInt(params["uid"])
+	if uidParam > 0 {
+		targetUid = uidParam
+	} else if currentUid > 0 {
 		targetUid = currentUid
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "请指定要查询的用户（uid）！"), 400)
+		return
 	}
 
 	// 查看他人收藏时按隐私设置拦截

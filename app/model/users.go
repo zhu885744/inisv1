@@ -226,18 +226,10 @@ type UserPrivacySetting struct {
 	Likes    int    `json:"likes"`
 }
 
-// UserNotifySetting - 通知设置（1 开 / 0 关，默认 1）
-type UserNotifySetting struct {
-	LikeCollect int `json:"like_collect"` // 赞和收藏
-	Follow      int `json:"follow"`       // 新的关注
-	Comment     int `json:"comment"`      // 评论通知
-}
-
-// userSetting - 解析 users.json 中的隐私/通知设置，缺失字段使用默认值
+// userSetting - 解析 users.json 中的隐私设置，缺失字段使用默认值
 func (this *Users) userSetting() map[string]any {
 	setting := map[string]any{
 		"privacy": UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0},
-		"notify":  UserNotifySetting{LikeCollect: 1, Follow: 1, Comment: 1},
 	}
 
 	jsonMap, ok := this.Json.(map[string]any)
@@ -254,15 +246,6 @@ func (this *Users) userSetting() map[string]any {
 		privacy.Collects = cast.ToInt(m["collects"])
 		privacy.Likes = cast.ToInt(m["likes"])
 		setting["privacy"] = privacy
-	}
-
-	if raw, ok := jsonMap["notify"]; ok {
-		m := cast.ToStringMap(raw)
-		notify := UserNotifySetting{LikeCollect: 1, Follow: 1, Comment: 1}
-		notify.LikeCollect = cast.ToInt(m["like_collect"])
-		notify.Follow = cast.ToInt(m["follow"])
-		notify.Comment = cast.ToInt(m["comment"])
-		setting["notify"] = notify
 	}
 
 	return setting
@@ -415,19 +398,45 @@ func (this *Users) banInfo(wg *sync.WaitGroup, result *any) {
 
 // GetUserPrivacy - 获取指定用户的隐私设置（缺省返回默认值）
 func GetUserPrivacy(uid any) UserPrivacySetting {
-	item, _ := facade.DB.Model(&Users{}).Where("id", uid).Column("json")
-	if utils.Is.Empty(item) {
+	// 注意：Column("json") 单字段走 Pluck 分支，返回 []string（JSON 字符串）
+	rows, _ := facade.DB.Model(&Users{}).Where("id", uid).Column("json")
+
+	// 注意：cast.ToSlice 在 v1.10.0 中不支持 []string（会返回空切片），这里直接解析
+	var jsonMap map[string]any
+	switch v := rows.(type) {
+	case []string:
+		if len(v) == 0 {
+			return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+		}
+		if decoded := utils.Json.Decode(v[0]); decoded != nil {
+			jsonMap, _ = decoded.(map[string]any)
+		}
+	case []any:
+		if len(v) == 0 {
+			return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
+		}
+		switch item := v[0].(type) {
+		case string:
+			if decoded := utils.Json.Decode(item); decoded != nil {
+				jsonMap, _ = decoded.(map[string]any)
+			}
+		case map[string]any:
+			jsonMap = item
+		default:
+			if decoded := utils.Json.Decode(item); decoded != nil {
+				jsonMap, _ = decoded.(map[string]any)
+			}
+		}
+	default:
+		if decoded := utils.Json.Decode(cast.ToString(rows)); decoded != nil {
+			jsonMap, _ = decoded.(map[string]any)
+		}
+	}
+
+	if jsonMap == nil {
 		return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
 	}
-	rows := cast.ToSlice(item)
-	if len(rows) == 0 {
-		return UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
-	}
-	row := cast.ToStringMap(rows[0])
-	jsonMap, ok := row["json"].(map[string]any)
-	if !ok {
-		jsonMap = cast.ToStringMap(row["json"])
-	}
+
 	privacy := UserPrivacySetting{Follows: "all", Collects: 0, Likes: 0}
 	if raw, ok := jsonMap["privacy"]; ok {
 		m := cast.ToStringMap(raw)
