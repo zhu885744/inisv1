@@ -191,6 +191,22 @@ func (this *Links) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "links"})
 }
 
+// isSelfQuery - 判断当前查询是否针对本人（用于管理场景，允许查看自己所有状态的友链）
+func (this *Links) isSelfQuery(ctx *gin.Context, params map[string]any) bool {
+	uid := this.user(ctx).Id
+	if uid == 0 {
+		return false
+	}
+	where := params["where"]
+	var m map[string]any
+	if s, ok := where.(string); ok {
+		m = cast.ToStringMap(utils.Json.Decode(s))
+	} else {
+		m = cast.ToStringMap(where)
+	}
+	return cast.ToInt(m["uid"]) == uid
+}
+
 func (this *Links) one(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
@@ -274,7 +290,7 @@ func (this *Links) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
-	if !this.meta.root(ctx) {
+	if !this.meta.root(ctx) && !this.isSelfQuery(ctx, params) {
 		query = query.Where("audit", 1)
 	}
 	count, _ := query.Where(table).Count()
