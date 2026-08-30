@@ -2,6 +2,7 @@ package controller
 
 import (
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
@@ -34,6 +35,45 @@ func (this *Moments) buildQuery(query *facade.ModelStruct, params map[string]any
 		INot(params["not"]).
 		INull(params["null"]).
 		INotNull(params["notNull"])
+}
+
+// isSelfQuery - 判断当前查询是否为"查询自己的动态"（where.uid 等于当前登录用户）
+// 用户在「我的动态」中需要看到自己的草稿与待审核内容，
+// 因此这种情况下不再强制追加 audit=1 的过滤条件。
+func (this *Moments) isSelfQuery(ctx *gin.Context, params map[string]any) bool {
+
+	uid := this.meta.user(ctx).Id
+	if uid == 0 {
+		return false
+	}
+
+	var where map[string]any
+	switch val := params["where"].(type) {
+	case map[string]any:
+		where = val
+	case string:
+		if !utils.Is.Empty(val) {
+			_ = json.Unmarshal([]byte(val), &where)
+		}
+	}
+
+	if utils.Is.Empty(where) {
+		return false
+	}
+
+	val := where["uid"]
+
+	// 支持 where.uid = ["=", 123] 这类数组形式
+	if arr, ok := val.([]any); ok {
+		for _, v := range arr {
+			if !utils.Is.Empty(v) && cast.ToInt(v) == uid {
+				return true
+			}
+		}
+		return false
+	}
+
+	return cast.ToInt(val) == uid
 }
 
 func (this *Moments) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -215,7 +255,9 @@ func (this *Moments) all(ctx *gin.Context) {
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
 
-	if !this.meta.root(ctx) {
+	// 非管理员默认只能看已审核内容；但查询"自己的动态"时放开，
+	// 以便用户在「我的动态」中管理草稿与待审核内容
+	if !this.meta.root(ctx) && !this.isSelfQuery(ctx, params) {
 		query = query.Where("audit", 1)
 	}
 
