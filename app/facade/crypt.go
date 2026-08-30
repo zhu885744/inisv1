@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	JWT "github.com/golang-jwt/jwt/v5"
@@ -25,7 +24,6 @@ var CryptToml *utils.ViperResponse
 
 func init() {
 	initCryptToml()
-	initCrypt()
 
 	WatchConfigChange(CryptToml, initCrypt)
 }
@@ -86,28 +84,30 @@ func initCryptToml() {
 }
 
 // readCryptKey - 读取已存在的 crypt.toml 中的 jwt.key（用于复用稳定密钥）
+// 使用 viper 解析，避免旧的"逐行前缀匹配"在文件被后台重写后读不到 key，
+// 否则重启会重新随机生成密钥，导致所有已签发 token 集体失效。
 func readCryptKey(filePath string) (key string) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-	// 简单解析 toml 中的 key = "..." 或 key = '...' 或 key = value
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "key") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key = strings.TrimSpace(parts[1])
-				key = strings.Trim(key, `"'`)
-				return key
-			}
-		}
+	item := utils.Viper(utils.ViperModel{
+		Path: ConfigPath,
+		Mode: ModeToml,
+		Name: ConfigNameCrypt,
+	}).Read()
+	if item.Error == nil {
+		return cast.ToString(item.Get("jwt.key", ""))
 	}
 	return ""
 }
 
 func initCrypt() {
-
+	// 配置热更新时记录 jwt.key，便于排查"全员掉线"问题：
+	// 若运行时 jwt.key 发生变化，所有在线用户的 token 将立即验签失败。
+	if CryptToml == nil || CryptToml.Viper == nil {
+		return
+	}
+	Log.Warn(map[string]any{
+		"jwt.key":    CryptToml.Get("jwt.key", ""),
+		"jwt.expire": CryptToml.Get("jwt.expire", ""),
+	}, "crypt 配置热更新（若 jwt.key 变化将导致所有在线 token 失效，属预期行为，请确认非误改）")
 }
 
 // JWT相关结构体和接口

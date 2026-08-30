@@ -179,6 +179,50 @@ func (this *Tags) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "tags"})
 }
 
+// articleCountByTagId - 统计单个标签被引用的文章数量
+// 文章 tags 存储格式为 |1|2|3|，使用 LIKE %|id|% 精确匹配，避免 |1| 误匹配到 |11|
+// 口径：只统计已审核（audit=1）且未删除的文章，与前端文章列表可见数量保持一致
+func (this *Tags) articleCountByTagId(tagId any) int {
+
+	if utils.Is.Empty(tagId) {
+		return 0
+	}
+
+	count, _ := facade.DB.Model(&[]model.Article{}).Where("audit", 1).Like("tags", "%|"+cast.ToString(tagId)+"|%").Count()
+
+	return cast.ToInt(count)
+}
+
+// articleCountByTagIds - 批量统计标签被引用的文章数量
+// 一次性取出全部文章的 tags 列在内存中统计，避免逐个标签查询造成 N+1 问题
+// 口径：只统计已审核（audit=1）且未删除的文章，与前端文章列表可见数量保持一致
+func (this *Tags) articleCountByTagIds() map[string]int {
+
+	result := make(map[string]int)
+
+	column, err := facade.DB.Model(&[]model.Article{}).Where("audit", 1).Column("tags")
+	if err != nil || utils.Is.Empty(column) {
+		return result
+	}
+
+	items, ok := column.([]string)
+	if !ok {
+		items = cast.ToStringSlice(column)
+	}
+
+	for _, item := range items {
+		// 文章 tags 存储格式：|1|2|3|
+		for _, id := range utils.ArrayUnique(utils.ArrayEmpty(strings.Split(item, "|"))) {
+			if utils.Is.Empty(id) {
+				continue
+			}
+			result[cast.ToString(id)]++
+		}
+	}
+
+	return result
+}
+
 // getFromCache 通用缓存处理
 func (this *Tags) getFromCache(ctx *gin.Context, params map[string]any, fetchFunc func() any) (any, string) {
 	msg := ""
@@ -274,6 +318,11 @@ func (this *Tags) one(ctx *gin.Context) {
 		mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 		item, _ := mold.Where(table).Find()
 
+		// 注入该标签被引用的文章数量
+		if !utils.Is.Empty(item) {
+			item["article_count"] = this.articleCountByTagId(item["id"])
+		}
+
 		// 排除字段
 		data = facade.Comm.WithField(item, params["field"])
 
@@ -335,6 +384,15 @@ func (this *Tags) all(ctx *gin.Context) {
 
 		// 从数据库中获取数据
 		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+
+		// 批量注入每个标签被引用的文章数量（仅一次查询）
+		counts := this.articleCountByTagIds()
+		for _, val := range item {
+			if utils.Is.Empty(val) {
+				continue
+			}
+			val["article_count"] = counts[cast.ToString(val["id"])]
+		}
 
 		// 排除字段
 		data = utils.ArrayMapWithField(item, params["field"])

@@ -15,6 +15,7 @@ type Comment struct {
 	Pid      int    `gorm:"type:int(32); comment:父级ID; default:0;" json:"pid"`
 	Uid      int    `gorm:"type:int(32); comment:用户ID; default:0;" json:"uid"`
 	Content  string `gorm:"type:varchar(1024); comment:内容; default:Null;" json:"content"`
+	Images   string `gorm:"type:text; comment:图片; default:Null;" json:"images"`
 	Ip       string `gorm:"comment:IP; default:Null;" json:"ip"`
 	Agent    string `gorm:"type:varchar(512); comment:浏览器信息; default:Null;" json:"agent"`
 	BindId   int    `gorm:"type:int(32); comment:绑定ID; default:0;" json:"bind_id"`

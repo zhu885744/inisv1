@@ -151,6 +151,8 @@ func (this *Article) INDEX(ctx *gin.Context) {
 
 func (this *Article) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "article"})
+	// 文章变动会影响标签的引用文章数（tags 接口的 article_count），同步清理标签缓存
+	facade.Cache.DelTags([]any{"[GET]", "tags"})
 }
 
 func (this *Article) one(ctx *gin.Context) {

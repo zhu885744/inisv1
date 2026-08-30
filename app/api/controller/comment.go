@@ -21,11 +21,11 @@ type Comment struct {
 }
 
 const (
-	commentAllowFields = "pid,content,bind_id,bind_type,editor,json,text"
+	commentAllowFields = "pid,content,images,bind_id,bind_type,editor,json,text"
 	commentAllowQuery  = "id,pid,bind_id,bind_type,editor"
 )
 
-var commentAllowFieldsSlice = []any{"pid", "content", "bind_id", "bind_type", "editor", "json", "text"}
+var commentAllowFieldsSlice = []any{"pid", "content", "images", "bind_id", "bind_type", "editor", "json", "text"}
 var commentAllowQuerySlice = []any{"id", "pid", "bind_id", "bind_type", "editor"}
 
 func (this *Comment) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -780,7 +780,7 @@ func (this *Comment) update(ctx *gin.Context) {
 	}
 
 	table := model.Comment{}
-	allow := []any{"content", "editor", "json", "text"}
+	allow := []any{"content", "images", "editor", "json", "text"}
 	async := utils.Async[map[string]any]()
 
 	root := this.meta.root(ctx)
