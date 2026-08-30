@@ -12,17 +12,13 @@ import (
 
 type UserCollects struct {
 	Id         int    `gorm:"type:int(32); comment:主键;" json:"id"`
-	Uid        int    `gorm:"type:int(32); comment:用户ID;" json:"uid"`
-	TargetType string `gorm:"type:varchar(32); comment:目标类型(article/page/moment);" json:"target_type"`
-	TargetId   int    `gorm:"type:int(32); comment:目标ID;" json:"target_id"`
+	Uid        int    `gorm:"type:int(32); comment:用户ID; uniqueIndex:uk_uid_target;" json:"uid"`
+	TargetType string `gorm:"type:varchar(32); comment:目标类型(article/page/moment); uniqueIndex:uk_uid_target;" json:"target_type"`
+	TargetId   int    `gorm:"type:int(32); comment:目标ID; uniqueIndex:uk_uid_target;" json:"target_id"`
 	Json       any    `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any    `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
 	Result     any    `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
 	CreateTime int64  `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
-}
-
-func (this *UserCollects) TableName() string {
-	return "user_collects"
 }
 
 func InitUserCollects() {
@@ -31,7 +27,6 @@ func InitUserCollects() {
 		facade.Log.Error(map[string]any{"error": err}, "UserCollects表迁移失败")
 		return
 	}
-	facade.DB.Drive().Exec("ALTER TABLE user_collects ADD UNIQUE INDEX uk_uid_target (uid, target_type, target_id)")
 }
 
 func (this *UserCollects) AfterFind(tx *gorm.DB) (err error) {

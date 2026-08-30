@@ -416,22 +416,19 @@ func (this *Comm) register(ctx *gin.Context) {
 		utils.Struct.Set(&table, "nickname", fmt.Sprintf("用户_%v", utils.Rand.Number(6)))
 	}
 
-	// 未传入账号时，生成从 10000001 开始递增的纯数字账号（8 位以内）
-	// 借助 account 唯一索引，创建冲突时自动重试取下一个可用账号
+	// 未传入头像时随机设置默认头像
+	if utils.Is.Empty(table.Avatar) {
+		utils.Struct.Set(&table, "avatar", fmt.Sprintf("https://img.zhuxu.asia/tx/%d.png", utils.Rand.Int(1, 5)))
+	}
+
+	// 未传入账号时，随机生成「小写字母 + 数字」的组合账号（无位数限制）
+	// 借助 account 唯一索引，冲突时自动重新生成
 	if utils.Is.Empty(table.Account) {
-		const maxRetry = 10
+		const maxRetry = 20
 		for i := 0; i < maxRetry; i++ {
-			maxAccount, _ := facade.DB.Model(&model.Users{}).Max("cast(account as unsigned)")
-			next := cast.ToInt64(maxAccount) + 1
-			// 起点 10000001，保证首个账号为 10000001 并依次递增
-			if next < 10000001 {
-				next = 10000001
-			}
-			// 限制 8 位以内（不超过 99999999）
-			if next > 99999999 {
-				next = 99999999
-			}
-			utils.Struct.Set(&table, "account", cast.ToString(next))
+			// 小写字母 + 数字随机值
+			account := utils.Rand.String(10, "abcdefghijklmnopqrstuvwxyz0123456789")
+			utils.Struct.Set(&table, "account", account)
 			// 设置登录时间
 			utils.Struct.Set(&table, "login_time", time.Now().Unix())
 			// 创建用户
