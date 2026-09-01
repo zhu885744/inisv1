@@ -859,7 +859,9 @@ func (this *UserLikes) counts(ctx *gin.Context) {
 	}
 
 	targetType := cast.ToString(params["target_type"])
-	targetIds := cast.ToIntSlice(params["target_ids"])
+	// target_ids 可能是逗号分隔字符串（如 "1,2,3"），cast.ToIntSlice 在 v1.10 无法解析字符串，
+	// 需先经 utils.Unity.Ids 归一化（项目内标准做法），否则批量查询会返回空结果
+	targetIds := cast.ToIntSlice(utils.Unity.Ids(params["target_ids"]))
 
 	var counts map[int]int64
 

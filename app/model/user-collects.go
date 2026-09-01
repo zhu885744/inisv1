@@ -131,17 +131,11 @@ func (this *UserCollects) Collect(uid, targetId int, targetType string) (err err
 		return errors.New("已经收藏过了")
 	}
 
-	tx, err := facade.DB.Model(&UserCollects{}).Create(&UserCollects{
+	_, err = facade.DB.Model(&UserCollects{}).Create(&UserCollects{
 		Uid:        uid,
 		TargetType: targetType,
 		TargetId:   targetId,
 	})
-
-	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
-		facade.DB.Model(&Moments{}).
-			Where("id", targetId).
-			UpdateColumn("favorites", gorm.Expr("favorites + 1"))
-	}
 
 	return
 }
@@ -151,17 +145,11 @@ func (this *UserCollects) Uncollect(uid, targetId int, targetType string) (err e
 		return errors.New("参数错误")
 	}
 
-	tx, err := facade.DB.Model(&UserCollects{}).
+	_, err = facade.DB.Model(&UserCollects{}).
 		Where("uid", uid).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
 		Delete()
-
-	if err == nil && tx.RowsAffected > 0 && targetType == "moment" {
-		facade.DB.Model(&Moments{}).
-			Where("id", targetId).
-			UpdateColumn("favorites", gorm.Expr("GREATEST(favorites - 1, 0)"))
-	}
 
 	return
 }

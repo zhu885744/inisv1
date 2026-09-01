@@ -142,17 +142,11 @@ func (this *UserLikes) Like(uid, targetId int, targetType string) (err error) {
 		return errors.New("已经点赞过了")
 	}
 
-	tx, err := facade.DB.Model(&UserLikes{}).Create(&UserLikes{
+	_, err = facade.DB.Model(&UserLikes{}).Create(&UserLikes{
 		Uid:        uid,
 		TargetType: targetType,
 		TargetId:   targetId,
 	})
-
-	if err == nil && tx.RowsAffected > 0 && targetType == "moments" {
-		facade.DB.Model(&Moments{}).
-			Where("id", targetId).
-			UpdateColumn("likes", gorm.Expr("likes + 1"))
-	}
 
 	return
 }
@@ -162,17 +156,11 @@ func (this *UserLikes) Unlike(uid, targetId int, targetType string) (err error) 
 		return errors.New("参数错误")
 	}
 
-	tx, err := facade.DB.Model(&UserLikes{}).
+	_, err = facade.DB.Model(&UserLikes{}).
 		Where("uid", uid).
 		Where("target_type", targetType).
 		Where("target_id", targetId).
 		Delete()
-
-	if err == nil && tx.RowsAffected > 0 && targetType == "moments" {
-		facade.DB.Model(&Moments{}).
-			Where("id", targetId).
-			UpdateColumn("likes", gorm.Expr("GREATEST(likes - 1, 0)"))
-	}
 
 	return
 }
