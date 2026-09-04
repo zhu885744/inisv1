@@ -68,6 +68,34 @@
                     </el-table-column>
                 </el-table>
             </div>
+
+            <el-card shadow="never" style="margin-top: 16px">
+                <template #header>
+                    <div style="display: flex; align-items: center; gap: 8px">
+                        <span style="font-weight: 600">签到进阶设置</span>
+                        <el-tag size="small" type="warning">提升用户活跃度</el-tag>
+                    </div>
+                </template>
+                <el-form label-width="110px" size="small">
+                    <el-form-item label="连续签到加成">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                            <el-switch v-model="state.checkInAdvance.streak_bonus.enabled" :active-value="1" :inactive-value="0" />
+                            <span style="font-size: 12px; color: var(--el-text-color-secondary)">每连续签到一天，额外奖励</span>
+                            <el-input-number v-model="state.checkInAdvance.streak_bonus.per_day" :min="0" :max="999" />
+                            <span style="font-size: 12px; color: var(--el-text-color-secondary)">经验，上限</span>
+                            <el-input-number v-model="state.checkInAdvance.streak_bonus.max" :min="0" :max="9999" />
+                        </div>
+                    </el-form-item>
+                    <el-form-item label="里程碑奖励">
+                        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+                            <div v-for="m in milestoneDays" :key="m" style="display: flex; align-items: center; gap: 6px">
+                                <span style="font-size: 12px">连续 {{ m }} 天</span>
+                                <el-input-number v-model="state.checkInAdvance.milestones[m]" :min="0" :max="9999" />
+                            </div>
+                        </div>
+                    </el-form-item>
+                </el-form>
+            </el-card>
         </template>
         <template #footer>
             <el-button v-on:click="method.reset()">重置默认</el-button>
@@ -91,7 +119,7 @@ const DEFAULT_EXP_RULES = {
     share: { name: '分享', value: 1, daily_limit: 10 },
     login: { name: '登录', value: 5, daily_limit: 1 },
     comment: { name: '评论', value: 1, daily_limit: 10 },
-    'check-in': { name: '签到', value: 10, daily_limit: 1 },
+    'check-in': { name: '签到', value: 10, daily_limit: 1, streak_bonus: { enabled: 1, per_day: 2, max: 50 }, milestones: { 7: 50, 15: 100, 30: 200 } },
     moments: { name: '发布动态', value: 50, daily_limit: 1 },
     'article-create': { name: '发布文章', value: 5, daily_limit: 10 },
     'article-like': { name: '内容获赞', value: 5, daily_limit: 10 },
@@ -116,6 +144,8 @@ const EXP_TYPES = {
     'comment-like': { label: '评论获赞', desc: '评论被点赞获得经验值（自动触发）' }
 }
 
+const milestoneDays = [7, 15, 30]
+
 const state = reactive({
     cache: {
         name: 'exp-rules',
@@ -127,6 +157,10 @@ const state = reactive({
     },
     expRulesList: [],
     expTypes: EXP_TYPES,
+    checkInAdvance: {
+        streak_bonus: { enabled: 1, per_day: 2, max: 50 },
+        milestones: { 7: 50, 15: 100, 30: 200 }
+    },
     status: {
         finish: false,
         loading: true,
@@ -154,6 +188,7 @@ const method = {
 
         if (code !== 200) return
         state.struct = data
+        method.syncCheckInAdvance()
         
         state.status.finish  = true
     },
@@ -172,7 +207,21 @@ const method = {
             }
         })
         
+        method.syncCheckInAdvance()
         state.status.dialog = true
+    },
+    syncCheckInAdvance() {
+        const rule = state.struct.json?.['check-in'] || DEFAULT_EXP_RULES['check-in']
+        state.checkInAdvance.streak_bonus = {
+            enabled: rule.streak_bonus?.enabled ?? 1,
+            per_day: rule.streak_bonus?.per_day ?? 2,
+            max: rule.streak_bonus?.max ?? 50
+        }
+        state.checkInAdvance.milestones = {
+            7: rule.milestones?.[7] ?? 50,
+            15: rule.milestones?.[15] ?? 100,
+            30: rule.milestones?.[30] ?? 200
+        }
     },
     reset() {
         ElMessageBox.confirm('确定要重置为默认值吗？', '提示', {
@@ -184,6 +233,8 @@ const method = {
                 key,
                 ...DEFAULT_EXP_RULES[key]
             }))
+            state.checkInAdvance.streak_bonus = { enabled: 1, per_day: 2, max: 50 }
+            state.checkInAdvance.milestones = { 7: 50, 15: 100, 30: 200 }
             ElMessage.success('已重置为默认值')
         }).catch(() => {})
     },
@@ -192,11 +243,17 @@ const method = {
         
         const rules = {}
         state.expRulesList.forEach(item => {
-            rules[item.key] = {
+            const rule = {
                 name: item.name,
                 value: item.value,
                 daily_limit: ['login', 'check-in'].includes(item.key) ? 1 : item.daily_limit
             }
+            // 签到写入进阶配置（连续加成、里程碑）
+            if (item.key === 'check-in') {
+                rule.streak_bonus = { ...state.checkInAdvance.streak_bonus }
+                rule.milestones = { ...state.checkInAdvance.milestones }
+            }
+            rules[item.key] = rule
         })
         state.struct.json = rules
         

@@ -506,6 +506,8 @@
 | `name` | string | 操作名称（用于显示和描述） |
 | `value` | int | 单次操作获得的经验值 |
 | `daily_limit` | int | 每日限制次数（0表示不限制） |
+| `streak_bonus` | object | 连续签到加成（仅 `check-in` 生效）：`enabled` 是否启用、`per_day` 每连续一天额外奖励、`max` 加成上限 |
+| `milestones` | object | 里程碑奖励（仅 `check-in` 生效）：`{天数: 奖励经验}` 键值对 |
 
 **支持的经验值类型**:
 
@@ -530,7 +532,13 @@
   "share": {"name": "分享", "value": 1, "daily_limit": 10},
   "login": {"name": "登录", "value": 5, "daily_limit": 1},
   "comment": {"name": "评论", "value": 1, "daily_limit": 10},
-  "check-in": {"name": "签到", "value": 10, "daily_limit": 1},
+  "check-in": {
+    "name": "签到",
+    "value": 10,
+    "daily_limit": 1,
+    "streak_bonus": { "enabled": 1, "per_day": 2, "max": 50 },
+    "milestones": { "7": 50, "15": 100, "30": 200 }
+  },
   "moments": {"name": "发布动态", "value": 50, "daily_limit": 1}
 }
 ```

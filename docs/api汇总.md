@@ -236,6 +236,7 @@ type ApiInterface interface {
 | GET | `active` | `/api/exp/active` | 经验活跃榜 |
 | GET | `check-in-status` | `/api/exp/check-in-status` | 当日签到状态 |
 | GET | `check-in-rank` | `/api/exp/check-in-rank` | 签到排行榜 |
+| GET | `check-in-calendar` | `/api/exp/check-in-calendar` | 签到日历 |
 | POST | `save` / `create` | `/api/exp/{method}` | 通用 |
 | POST | `share` | `/api/exp/share` | 分享奖励 |
 | POST | `check-in` | `/api/exp/check-in` | 每日签到 |

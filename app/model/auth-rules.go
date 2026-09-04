@@ -373,6 +373,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=active&type=common&name=活跃度排行",
 				"path=check-in-status&type=login&name=签到状态",
 				"path=check-in-rank&type=common&name=签到排行",
+				"path=check-in-calendar&type=login&name=签到日历",
 			},
 			"PUT": {"update", "restore"},
 			"POST": {

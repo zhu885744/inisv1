@@ -122,9 +122,10 @@ func (this *EXP) IGET(ctx *gin.Context) {
 		"rand":            this.rand,
 		"count":           this.count,
 		"column":          this.column,
-		"active":          this.active,
-		"check-in-status": this.checkInStatus,
-		"check-in-rank":   this.checkInRank,
+		"active":           this.active,
+		"check-in-status":  this.checkInStatus,
+		"check-in-rank":    this.checkInRank,
+		"check-in-calendar": this.checkInCalendar,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -620,31 +621,33 @@ func (this *EXP) checkInStatus(ctx *gin.Context) {
 		checkInTime = cast.ToInt64(item["create_time"])
 	}
 
-	streak := 0
+	// 连续签到天数：已签到含今天，未签到则展示截至昨天的连续天数
+	var streak int
 	if checked {
-		for i := 0; i < 365; i++ {
-			dayStart := today.AddDate(0, 0, -i)
-			dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
-			has, _ := facade.DB.Model(&model.EXP{}).Where([]any{
-				[]any{"uid", "=", user.Id},
-				[]any{"type", "=", "check-in"},
-				[]any{"create_time", ">=", dayStart.Unix()},
-				[]any{"create_time", "<=", dayEnd.Unix()},
-			}).Exist()
-			if has {
-				streak++
-			} else {
-				break
-			}
-		}
+		streak = model.CheckInStreak(user.Id, today)
+	} else {
+		streak = model.CheckInStreak(user.Id, today.AddDate(0, 0, -1))
 	}
 
+	rule := model.GetExpConfig()["check-in"]
+
+	// 奖励明细：已签到为今日实际；未签到时展示签到后的预期奖励
+	rewardStreak := streak
+	if !checked {
+		rewardStreak = streak + 1
+	}
+	base, bonus, milestone := model.CheckInReward(rule, rewardStreak)
+
 	this.json(ctx, gin.H{
-		"checked":       checked,
-		"value":         value,
-		"check_in_time": checkInTime,
-		"streak":        streak,
-		"today":         today.Unix(),
+		"checked":        checked,
+		"value":          value,
+		"base":           base,
+		"bonus":          bonus,
+		"milestone":      milestone,
+		"check_in_time":  checkInTime,
+		"streak":         streak,
+		"today":          today.Unix(),
+		"next_milestone": model.NextMilestone(rule, streak),
 	}, facade.Lang(ctx, "查询成功！"), 200)
 }
 
@@ -711,6 +714,77 @@ func (this *EXP) checkInRank(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
+func (this *EXP) checkInCalendar(ctx *gin.Context) {
+	user := this.user(ctx)
+	if user.Id == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	params := this.params(ctx)
+	now := time.Now()
+	year := cast.ToInt(params["year"])
+	month := cast.ToInt(params["month"])
+	if year == 0 {
+		year = now.Year()
+	}
+	if month == 0 {
+		month = int(now.Month())
+	}
+
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+
+	// 查询当月签到记录
+	var table []model.EXP
+	sql := "SELECT create_time, value FROM inis_exp WHERE uid = ? AND type = 'check-in' AND create_time >= ? AND create_time <= ?"
+	total, _ := facade.DB.Model(&table).Query(sql, user.Id, start.Unix(), end.Unix()).Column("create_time", "value")
+
+	// 按天聚合
+	dayMap := make(map[int]int)
+	for _, val := range cast.ToSlice(total) {
+		item := cast.ToStringMap(val)
+		day := time.Unix(cast.ToInt64(item["create_time"]), 0).Day()
+		dayMap[day] = cast.ToInt(item["value"])
+	}
+
+	daysInMonth := end.Day()
+	days := make([]gin.H, daysInMonth)
+	for d := 1; d <= daysInMonth; d++ {
+		checked := false
+		value := 0
+		if v, ok := dayMap[d]; ok {
+			checked = true
+			value = v
+		}
+		days[d-1] = gin.H{"day": d, "checked": checked, "value": value}
+	}
+
+	// 连续签到天数：当月截至今天/昨天，历史月份截至月末
+	var streak int
+	today := 0
+	if year == now.Year() && month == int(now.Month()) {
+		today = now.Day()
+		current := time.Date(year, time.Month(month), now.Day(), 0, 0, 0, 0, now.Location())
+		if _, ok := dayMap[now.Day()]; ok {
+			streak = model.CheckInStreak(user.Id, current)
+		} else {
+			streak = model.CheckInStreak(user.Id, current.AddDate(0, 0, -1))
+		}
+	} else {
+		streak = model.CheckInStreak(user.Id, end)
+	}
+
+	this.json(ctx, gin.H{
+		"year":   year,
+		"month":  month,
+		"days":   days,
+		"streak": streak,
+		"total":  len(dayMap),
+		"today":  today,
+	}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
 func (this *EXP) checkIn(ctx *gin.Context) {
 	user := this.user(ctx)
 	if user.Id == 0 {
@@ -728,9 +802,19 @@ func (this *EXP) checkIn(ctx *gin.Context) {
 		return
 	}
 
-	expConfig := model.GetExpConfig()
-	value := cast.ToInt(expConfig["check-in"]["value"])
-	this.json(ctx, gin.H{"value": value}, facade.Lang(ctx, "签到成功！"), 200)
+	// 计算本次签到的连续天数与奖励明细
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	streak := model.CheckInStreak(user.Id, today)
+	base, bonus, milestone := model.CheckInReward(model.GetExpConfig()["check-in"], streak)
+
+	this.json(ctx, gin.H{
+		"value":     base + bonus + milestone,
+		"base":      base,
+		"bonus":     bonus,
+		"milestone": milestone,
+		"streak":    streak,
+	}, facade.Lang(ctx, "签到成功！"), 200)
 }
 
 func (this *EXP) share(ctx *gin.Context) {

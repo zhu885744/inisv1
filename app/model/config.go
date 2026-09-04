@@ -71,7 +71,21 @@ func InitConfig() {
 			"share":           facade.H{"name": "分享", "value": 1, "daily_limit": 10},
 			"login":           facade.H{"name": "登录", "value": 5, "daily_limit": 1},
 			"comment":         facade.H{"name": "评论", "value": 1, "daily_limit": 10},
-			"check-in":        facade.H{"name": "签到", "value": 10, "daily_limit": 1},
+			"check-in": facade.H{
+				"name":        "签到",
+				"value":       10,
+				"daily_limit": 1,
+				"streak_bonus": facade.H{
+					"enabled":  1,
+					"per_day":  2,
+					"max":      50,
+				},
+				"milestones": facade.H{
+					"7":  50,
+					"15": 100,
+					"30": 200,
+				},
+			},
 			"moments":         facade.H{"name": "发布动态", "value": 50, "daily_limit": 1},
 			"article-create":  facade.H{"name": "发布文章", "value": 5, "daily_limit": 10},
 			"article-like":    facade.H{"name": "内容获赞", "value": 5, "daily_limit": 10},

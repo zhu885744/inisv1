@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"inis/app/facade"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,9 +25,23 @@ func GetExpConfig() map[string]facade.H {
 		"collect":         {"name": "收藏", "value": 1, "daily_limit": 10},
 		"visit":           {"name": "访问", "value": 1, "daily_limit": 10},
 		"share":           {"name": "分享", "value": 1, "daily_limit": 10},
-		"login":           {"name": "登录", "value": 5, "daily_limit": 1},
-		"comment":         {"name": "评论", "value": 1, "daily_limit": 10},
-		"check-in":        {"name": "签到", "value": 10, "daily_limit": 1},
+		"login":   {"name": "登录", "value": 5, "daily_limit": 1},
+		"comment": {"name": "评论", "value": 1, "daily_limit": 10},
+		"check-in": {
+			"name":        "签到",
+			"value":       10,
+			"daily_limit": 1,
+			"streak_bonus": facade.H{
+				"enabled": 1,
+				"per_day": 2,
+				"max":     50,
+			},
+			"milestones": facade.H{
+				"7":  50,
+				"15": 100,
+				"30": 200,
+			},
+		},
 		"moments":         {"name": "发布动态", "value": 50, "daily_limit": 1},
 		"article-create":  {"name": "发布文章", "value": 5, "daily_limit": 10},
 		"article-like":    {"name": "内容获赞", "value": 5, "daily_limit": 10},
@@ -44,6 +59,7 @@ func GetExpConfig() map[string]facade.H {
 					data[k] = v
 				}
 			}
+			ensureCheckInRule(data, defaultConfig)
 			return data
 		}
 	}
@@ -64,12 +80,28 @@ func GetExpConfig() map[string]facade.H {
 					expConfig[k] = v
 				}
 			}
+			ensureCheckInRule(expConfig, defaultConfig)
 			facade.Cache.Set(ExpCacheKey, expConfig)
 			return expConfig
 		}
 	}
 
 	return defaultConfig
+}
+
+// ensureCheckInRule - 字段级补全签到规则，确保连续签到加成与里程碑配置存在
+func ensureCheckInRule(config map[string]facade.H, defaults map[string]facade.H) {
+	rule, ok := config["check-in"]
+	if !ok {
+		config["check-in"] = defaults["check-in"]
+		return
+	}
+	if _, exists := rule["streak_bonus"]; !exists {
+		rule["streak_bonus"] = defaults["check-in"]["streak_bonus"]
+	}
+	if _, exists := rule["milestones"]; !exists {
+		rule["milestones"] = defaults["check-in"]["milestones"]
+	}
 }
 
 type EXP struct {
@@ -109,6 +141,79 @@ func (this *EXP) AfterFind(tx *gorm.DB) (err error) {
 	return
 }
 
+// CheckInStreak - 计算用户连续签到天数（从 end 当天往前回溯，end 当天未签到则为 0）
+func CheckInStreak(uid int, end time.Time) (streak int) {
+
+	for i := 0; i < 365; i++ {
+		dayStart := end.AddDate(0, 0, -i)
+		dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		has, _ := facade.DB.Model(&EXP{}).Where([]any{
+			[]any{"uid", "=", uid},
+			[]any{"type", "=", "check-in"},
+			[]any{"create_time", ">=", dayStart.Unix()},
+			[]any{"create_time", "<=", dayEnd.Unix()},
+		}).Exist()
+		if has {
+			streak++
+		} else {
+			break
+		}
+	}
+
+	return
+}
+
+// CheckInReward - 计算签到奖励明细
+// 返回：base 基础经验、bonus 连续签到加成、milestone 里程碑奖励
+func CheckInReward(rule facade.H, streak int) (base int, bonus int, milestone int) {
+
+	base = cast.ToInt(rule["value"])
+
+	// 连续签到加成：每连续一天额外增加 per_day，上限 max
+	if streakBonus := cast.ToStringMap(rule["streak_bonus"]); cast.ToInt(streakBonus["enabled"]) == 1 {
+		perDay := cast.ToInt(streakBonus["per_day"])
+		maxBonus := cast.ToInt(streakBonus["max"])
+		bonus = streak * perDay
+		if maxBonus > 0 && bonus > maxBonus {
+			bonus = maxBonus
+		}
+	}
+
+	// 里程碑奖励：达到指定连续天数时一次性奖励
+	if milestones := cast.ToStringMap(rule["milestones"]); len(milestones) > 0 {
+		milestone = cast.ToInt(milestones[cast.ToString(streak)])
+	}
+
+	return
+}
+
+// NextMilestone - 获取当前连续签到天数之后的下一个里程碑（天数与奖励），无则返回 nil
+func NextMilestone(rule facade.H, streak int) map[string]any {
+
+	milestones := cast.ToStringMap(rule["milestones"])
+	if len(milestones) == 0 {
+		return nil
+	}
+
+	// 里程碑天数升序排序
+	var days []int
+	for key := range milestones {
+		days = append(days, cast.ToInt(key))
+	}
+	sort.Ints(days)
+
+	for _, day := range days {
+		if day > streak {
+			return map[string]any{
+				"day":    day,
+				"reward": cast.ToInt(milestones[cast.ToString(day)]),
+			}
+		}
+	}
+
+	return nil
+}
+
 // Add - 增加经验值
 func (this *EXP) Add(table EXP) (err error) {
 
@@ -139,6 +244,9 @@ func (this *EXP) Add(table EXP) (err error) {
 	// 检查是否可以增加经验值
 	var canAddExp bool = true
 
+	// 签到相关的奖励明细（连续签到加成、里程碑奖励）
+	var checkInStreak, checkInBonus, checkInMilestone int
+
 	// 根据操作类型进行不同的处理
 	switch table.Type {
 	case "check-in", "login":
@@ -159,6 +267,12 @@ func (this *EXP) Add(table EXP) (err error) {
 			default:
 				return errors.New("未知的经验值类型！")
 			}
+		}
+
+		// 签到：计算连续签到天数与阶梯/里程碑奖励
+		if table.Type == "check-in" {
+			checkInStreak = CheckInStreak(table.Uid, today.AddDate(0, 0, -1)) + 1
+			_, checkInBonus, checkInMilestone = CheckInReward(expConfig["check-in"], checkInStreak)
 		}
 	case "like", "collect", "share", "comment":
 		exist, _ := facade.DB.Model(&EXP{}).Where([]any{
@@ -190,6 +304,18 @@ func (this *EXP) Add(table EXP) (err error) {
 	if canAddExp {
 		// 每次增加的经验值
 		table.Value = cast.ToInt(expConfig[table.Type]["value"])
+
+		// 签到：叠加连续签到加成与里程碑奖励，并记录奖励明细
+		if table.Type == "check-in" {
+			table.Value += checkInBonus + checkInMilestone
+			table.Json = utils.Json.Encode(facade.H{
+				"base":      cast.ToInt(expConfig["check-in"]["value"]),
+				"bonus":     checkInBonus,
+				"milestone": checkInMilestone,
+				"streak":    checkInStreak,
+			})
+		}
+
 		if utils.Is.Empty(table.Description) {
 			table.Description = fmt.Sprintf("%s奖励", expConfig[table.Type]["name"])
 		}

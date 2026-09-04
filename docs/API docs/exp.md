@@ -195,7 +195,17 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 **请求方式**：POST  
 **请求路径**：`/api/exp/check-in`
 
-**说明**：用户每日签到获取经验值，每日仅可签到一次，重复签到返回 202 状态码。经验值数量由 `SYSTEM_EXP_RULES` 配置项决定（默认为 +10 EXP）。
+**说明**：用户每日签到获取经验值，每日仅可签到一次，重复签到返回 202 状态码。签到奖励由「基础经验 + 连续签到加成 + 里程碑奖励」构成，规则由 `SYSTEM_EXP_RULES` 配置项决定（默认基础 +10 EXP，每连续一天额外 +2，上限 +50，连续 7/15/30 天分别额外奖励 50/100/200 EXP）。
+
+**响应字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| value | int | 本次签到获得的总经验值（base + bonus + milestone） |
+| base | int | 基础经验值 |
+| bonus | int | 连续签到加成 |
+| milestone | int | 里程碑奖励（达到 7/15/30 天时额外奖励，否则为 0） |
+| streak | int | 签到后的连续签到天数 |
 
 **响应示例**：
 
@@ -204,7 +214,11 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
   "code": 200,
   "msg": "签到成功！",
   "data": {
-    "value": 10
+    "value": 74,
+    "base": 10,
+    "bonus": 14,
+    "milestone": 50,
+    "streak": 7
   }
 }
 ```
@@ -233,10 +247,14 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | checked | bool | 今天是否已签到 |
-| value | int | 签到获得的经验值（未签到时为 0） |
+| value | int | 今日签到获得的总经验值（未签到时为 0） |
+| base | int | 基础经验值（未签到时为签到后的预期值） |
+| bonus | int | 连续签到加成（未签到时为签到后的预期值） |
+| milestone | int | 里程碑奖励（未签到时为签到后的预期值） |
 | check_in_time | int64 | 签到时间戳（未签到时为 0） |
-| streak | int | 连续签到天数（从今天往回数，最多 365 天） |
+| streak | int | 连续签到天数（已签到含今天，未签到截至昨天） |
 | today | int64 | 今天 0 点的时间戳 |
+| next_milestone | object | 下一个里程碑 `{day, reward}`，无则 null |
 
 **响应示例**：
 
@@ -246,10 +264,17 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
   "msg": "查询成功！",
   "data": {
     "checked": true,
-    "value": 10,
+    "value": 74,
+    "base": 10,
+    "bonus": 14,
+    "milestone": 50,
     "check_in_time": 1750982400,
     "streak": 7,
-    "today": 1750953600
+    "today": 1750953600,
+    "next_milestone": {
+      "day": 15,
+      "reward": 100
+    }
   }
 }
 ```
@@ -307,7 +332,62 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 }
 ```
 
-#### 19. 分享 [业务接口]
+#### 19. 签到日历 [业务接口]
+
+**请求方式**：GET  
+**请求路径**：`/api/exp/check-in-calendar`
+
+**说明**：获取指定月份的签到日历（需登录），用于前端月历视图展示
+
+**请求参数**：
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+|--------|------|------|--------|------|
+| year | int | 否 | 当前年份 | 查询年份 |
+| month | int | 否 | 当前月份 | 查询月份（1-12） |
+
+**响应字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| year | int | 年份 |
+| month | int | 月份 |
+| days | array | 当月每天的签到状态数组 |
+| streak | int | 连续签到天数 |
+| total | int | 当月已签到天数 |
+| today | int | 今天日期（非当月时为 0） |
+
+`days` 数组项字段：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| day | int | 日期（1-31） |
+| checked | bool | 当天是否已签到 |
+| value | int | 当天签到获得的经验值（未签到时为 0） |
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "msg": "查询成功！",
+  "data": {
+    "year": 2026,
+    "month": 9,
+    "days": [
+      { "day": 1, "checked": true, "value": 10 },
+      { "day": 2, "checked": true, "value": 12 },
+      { "day": 3, "checked": false, "value": 0 },
+      { "day": 4, "checked": true, "value": 16 }
+    ],
+    "streak": 2,
+    "total": 3,
+    "today": 4
+  }
+}
+```
+
+#### 20. 分享 [业务接口]
 
 **请求方式**：POST  
 **请求路径**：`/api/exp/share`
@@ -333,7 +413,7 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 }
 ```
 
-#### 20. 活跃用户排行 [业务接口]
+#### 21. 活跃用户排行 [业务接口]
 
 **请求方式**：GET  
 **请求路径**：`/api/exp/active`
@@ -446,12 +526,20 @@ curl -X POST "/api/exp/give" \
 | `name` | string | 操作名称（用于显示） |
 | `value` | int | 单次操作获得的经验值 |
 | `daily_limit` | int | 每日限制次数 |
+| `streak_bonus` | object | 连续签到加成（仅 `check-in` 生效）：`enabled` 是否启用、`per_day` 每连续一天额外奖励、`max` 加成上限 |
+| `milestones` | object | 里程碑奖励（仅 `check-in` 生效）：`{天数: 奖励经验}` 键值对 |
 
 **配置示例**：
 ```json
 {
   "like": {"name": "点赞", "value": 1, "daily_limit": 10},
-  "check-in": {"name": "签到", "value": 10, "daily_limit": 1},
+  "check-in": {
+    "name": "签到",
+    "value": 10,
+    "daily_limit": 1,
+    "streak_bonus": { "enabled": 1, "per_day": 2, "max": 50 },
+    "milestones": { "7": 50, "15": 100, "30": 200 }
+  },
   "moments": {"name": "发布动态", "value": 50, "daily_limit": 1}
 }
 ```
