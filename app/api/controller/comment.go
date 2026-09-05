@@ -543,6 +543,10 @@ func (this *Comment) create(ctx *gin.Context) {
 			BindType:    table.BindType,
 			Description: "发表评论奖励",
 		})
+		_ = (&model.Integral{}).Add(model.Integral{
+			Uid:  user.Id,
+			Type: "comment",
+		})
 	}()
 
 	go func() {

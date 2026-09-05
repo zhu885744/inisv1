@@ -57,6 +57,8 @@ var controllers = map[string]controller.ApiInterface{
 	"user-collects": &controller.UserCollects{},
 	"user-follows":  &controller.UserFollows{},
 	"notification":  &controller.Notification{},
+	"integral":      &controller.Integral{},
+	"goods":         &controller.Goods{},
 }
 
 // registerRoutes 注册路由

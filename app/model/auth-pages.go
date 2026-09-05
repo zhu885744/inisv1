@@ -71,6 +71,8 @@ func InitAuthPages() {
 		{Name: "标签管理", Icon: "tag", Path: "/admin/tags", Size: "14px"},
 		{Name: "等级管理", Icon: "level", Path: "/admin/level", Size: "14px"},
 		{Name: "经验管理", Icon: "level", Path: "/admin/exp", Size: "14px"},
+		{Name: "商品管理", Icon: "level", Path: "/admin/goods", Size: "14px"},
+		{Name: "积分管理", Icon: "level", Path: "/admin/integral", Size: "14px"},
 		{Name: "消息通知", Icon: "bell", Path: "/admin/message", Size: "14px"},
 		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},

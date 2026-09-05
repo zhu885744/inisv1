@@ -387,6 +387,10 @@ func (this *Moments) create(ctx *gin.Context) {
 			BindType:    "moments",
 			Description: "发布动态奖励",
 		})
+		go (&model.Integral{}).Add(model.Integral{
+			Uid:  uid,
+			Type: "moments",
+		})
 	}
 }
 

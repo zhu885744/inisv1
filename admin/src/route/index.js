@@ -161,6 +161,16 @@ const admin = {
         meta: { title: '经验管理' },
         component: () => import('{src}/views/admin/pages/exp.vue'),
     },{
+        path: 'goods',
+        name: 'admin-goods',
+        meta: { title: '商品管理' },
+        component: () => import('{src}/views/admin/pages/goods.vue'),
+    },{
+        path: 'integral',
+        name: 'admin-integral',
+        meta: { title: '积分管理' },
+        component: () => import('{src}/views/admin/pages/integral.vue'),
+    },{
         path: 'message',
         name: 'admin-message',
         meta: { title: '消息通知' },

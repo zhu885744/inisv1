@@ -136,7 +136,7 @@ type ApiInterface interface {
 
 ## 五、控制器总览
 
-共 **35 个控制器**：`/api` 下 33 个，`/dev` 下 2 个。
+共 **37 个控制器**：`/api` 下 35 个，`/dev` 下 2 个。
 
 | # | 控制器 key | 控制器类 | 中文名 | 主要能力 |
 | :---: | :--- | :--- | :--- | :--- |
@@ -173,8 +173,10 @@ type ApiInterface interface {
 | 31 | `user-collects` | `UserCollects` | 收藏 | 收藏/取消收藏、收藏统计 |
 | 32 | `user-follows` | `UserFollows` | 关注 | 关注/取关、关注粉丝列表 |
 | 33 | `notification` | `Notification` | 通知 | 通知收发、已读管理 |
-| 34 | `info` | `Info` | 系统信息（dev） | 系统/版本/设备/时间信息 |
-| 35 | `install` | `Install` | 安装（dev） | 安装锁、数据库初始化、创建管理员 |
+| 34 | `integral` | `Integral` | 积分 | 积分余额、流水、任务规则、调整 |
+| 35 | `goods` | `Goods` | 商品/积分商城 | 商品、订单、兑换购买 |
+| 36 | `info` | `Info` | 系统信息（dev） | 系统/版本/设备/时间信息 |
+| 37 | `install` | `Install` | 安装（dev） | 安装锁、数据库初始化、创建管理员 |
 
 ---
 
@@ -237,6 +239,7 @@ type ApiInterface interface {
 | GET | `check-in-status` | `/api/exp/check-in-status` | 当日签到状态 |
 | GET | `check-in-rank` | `/api/exp/check-in-rank` | 签到排行榜 |
 | GET | `check-in-calendar` | `/api/exp/check-in-calendar` | 签到日历 |
+| GET | `rules` | `/api/exp/rules` | 经验任务规则 |
 | POST | `save` / `create` | `/api/exp/{method}` | 通用 |
 | POST | `share` | `/api/exp/share` | 分享奖励 |
 | POST | `check-in` | `/api/exp/check-in` | 每日签到 |
@@ -605,6 +608,30 @@ type ApiInterface interface {
 | `partial` | 部分用户（需传 `user_ids`） |
 | `single` | 单个用户（需传 `user_ids`） |
 
+### 34. integral 积分控制器
+
+| HTTP | method | 完整路径 | 说明 |
+| :--- | :--- | :--- | :--- |
+| GET | `status` | `/api/integral/status` | 查询当前用户积分余额（登录） |
+| GET | `all` | `/api/integral/all` | 积分流水列表（登录，仅自己的） |
+| GET | `rules` | `/api/integral/rules` | 积分任务规则（公开） |
+| POST | `give` | `/api/integral/give` | 调整用户积分（管理员） |
+
+### 35. goods 商品控制器
+
+| HTTP | method | 完整路径 | 说明 |
+| :--- | :--- | :--- | :--- |
+| GET | `all` | `/api/goods/all` | 商品列表（公开，仅上架；管理员可查全部） |
+| GET | `one` | `/api/goods/one` | 商品详情（公开） |
+| GET | `count` | `/api/goods/count` | 商品数量 |
+| GET | `orders` | `/api/goods/orders` | 我的订单（登录，仅自己的） |
+| GET | `orders-all` | `/api/goods/orders-all` | 全部订单（管理员） |
+| POST | `buy` | `/api/goods/buy` | 购买商品（登录） |
+| POST | `save` / `create` | `/api/goods/{method}` | 商品保存/创建（管理员） |
+| PUT | `update` / `restore` | `/api/goods/{method}` | 商品更新/恢复（管理员） |
+| PUT | `order-status` | `/api/goods/order-status` | 更新订单状态（管理员） |
+| DELETE | `remove` / `delete` / `clear` | `/api/goods/{method}` | 商品删除（管理员） |
+
 ---
 
 ## 八、其他路由（dev / socket / index）
@@ -674,7 +701,8 @@ type ApiInterface interface {
 
 - 认证相关：`/api/comm/*`、`/api/oauth/*`
 - 内容相关：`/api/article/*`、`/api/comment/*`、`/api/moments/*`、`/api/placard/*`、`/api/pages/*`、`/api/tags/*`、`/api/search/*`、`/api/rss`
-- 用户相关：`/api/users/*`、`/api/level/*`、`/api/exp/*`、`/api/user-likes/*`、`/api/user-collects/*`、`/api/user-follows/*`、`/api/notification/*`
+- 用户相关：`/api/users/*`、`/api/level/*`、`/api/exp/*`、`/api/user-likes/*`、`/api/user-collects/*`、`/api/user-follows/*`、`/api/notification/*`、`/api/integral/*`
+- 积分商城：`/api/goods/*`
 - 内容组织：`/api/article-group/*`、`/api/links/*`、`/api/links-group/*`
 - 系统管理：`/api/config/*`、`/api/toml/*`、`/api/api-keys/*`、`/api/attachment/*`、`/api/banner/*`
 - 权限与安全：`/api/auth-group/*`、`/api/auth-pages/*`、`/api/auth-rules/*`、`/api/ip-black/*`、`/api/ip-white/*`、`/api/qps-warn/*`

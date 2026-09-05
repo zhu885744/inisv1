@@ -32,6 +32,7 @@ type Users struct {
 	Title       string `gorm:"comment:头衔; default:Null;" json:"title"`
 	Gender      string `gorm:"comment:性别; default:Null;" json:"gender"`
 	Exp         int    `gorm:"type:int(32); comment:经验值; default:0;" json:"exp"`
+	Integral    int    `gorm:"type:int(32); comment:积分余额; default:0;" json:"integral"`
 	Source      string `gorm:"size:32; default:'default'; comment:注册来源;" json:"source"`
 	Remark      string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 封禁相关字段

@@ -445,6 +445,37 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 }
 ```
 
+#### 22. 经验任务规则 [业务接口]
+
+**请求方式**：GET  
+**请求路径**：`/api/exp/rules`
+
+**说明**：获取经验任务规则列表（公共接口，无需登录），返回各行为可获得的经验值及每日上限
+
+**响应字段**（数组项）：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| type | string | 任务类型（check-in/login/article-create 等） |
+| name | string | 任务名称 |
+| value | int | 单次获得的经验值 |
+| daily_limit | int | 每日限制次数（0 表示不限制） |
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "msg": "查询成功！",
+  "data": [
+    { "type": "check-in", "name": "签到", "value": 10, "daily_limit": 1 },
+    { "type": "login", "name": "登录", "value": 5, "daily_limit": 1 },
+    { "type": "article-create", "name": "发布文章", "value": 5, "daily_limit": 10 },
+    { "type": "comment", "name": "评论", "value": 1, "daily_limit": 10 }
+  ]
+}
+```
+
 #### 23. 发放/扣除经验值 [业务接口-管理员专用]
 
 **请求方式**：POST  

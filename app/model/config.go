@@ -93,6 +93,13 @@ func InitConfig() {
 			"comment-create":  facade.H{"name": "发表评论", "value": 5, "daily_limit": 10},
 			"comment-like":    facade.H{"name": "评论获赞", "value": 5, "daily_limit": 10},
 		}), Remark: "经验值规则配置"},
+		{Key: "SYSTEM_INTEGRAL_RULES", Json: utils.Json.Encode(facade.H{
+			"check-in":       facade.H{"name": "每日签到", "value": 5, "daily_limit": 1},
+			"login":          facade.H{"name": "每日登录", "value": 2, "daily_limit": 1},
+			"article-create": facade.H{"name": "发布文章", "value": 10, "daily_limit": 5},
+			"comment":        facade.H{"name": "发表评论", "value": 2, "daily_limit": 10},
+			"moments":        facade.H{"name": "发布动态", "value": 20, "daily_limit": 1},
+		}), Remark: "积分规则配置"},
 	}
 
 	for _, item := range configs {

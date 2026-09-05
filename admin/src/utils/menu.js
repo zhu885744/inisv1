@@ -68,7 +68,7 @@ const list = async () => {
         </svg>`,
         items: [
             '/admin/users', '/admin/bill', '/admin/order', '/admin/comment', '/admin/placard', '/admin/banner', '/admin/tags', '/admin/badge', '/admin/level', '/admin/links',
-            '/admin/links/group', '/admin/system/version', '/admin/exp','/admin/message', '/admin/notification-preferences', '/admin/attachment', '/admin/system'
+            '/admin/links/group', '/admin/system/version', '/admin/exp', '/admin/goods', '/admin/integral', '/admin/message', '/admin/notification-preferences', '/admin/attachment', '/admin/system'
         ],
         children: [],
     },{

@@ -114,17 +114,18 @@ func (this *EXP) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":             this.one,
-		"all":             this.all,
-		"sum":             this.sum,
-		"min":             this.min,
-		"max":             this.max,
-		"rand":            this.rand,
-		"count":           this.count,
-		"column":          this.column,
-		"active":           this.active,
-		"check-in-status":  this.checkInStatus,
-		"check-in-rank":    this.checkInRank,
+		"one":               this.one,
+		"all":               this.all,
+		"sum":               this.sum,
+		"min":               this.min,
+		"max":               this.max,
+		"rand":              this.rand,
+		"count":             this.count,
+		"column":            this.column,
+		"active":            this.active,
+		"rules":             this.rules,
+		"check-in-status":   this.checkInStatus,
+		"check-in-rank":     this.checkInRank,
 		"check-in-calendar": this.checkInCalendar,
 	}
 	err := this.call(allow, method, ctx)
@@ -592,6 +593,21 @@ func (this *EXP) restore(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
+// rules - 获取经验任务规则列表（公共接口）
+func (this *EXP) rules(ctx *gin.Context) {
+	config := model.GetExpConfig()
+	result := make([]facade.H, 0, len(config))
+	for key, rule := range config {
+		result = append(result, facade.H{
+			"type":        key,
+			"name":        rule["name"],
+			"value":       rule["value"],
+			"daily_limit": rule["daily_limit"],
+		})
+	}
+	this.json(ctx, result, facade.Lang(ctx, "查询成功！"), 200)
+}
+
 func (this *EXP) checkInStatus(ctx *gin.Context) {
 	user := this.user(ctx)
 	if user.Id == 0 {
@@ -801,6 +817,12 @@ func (this *EXP) checkIn(ctx *gin.Context) {
 		this.json(ctx, gin.H{"value": 0}, err.Error(), 202)
 		return
 	}
+
+	// 签到任务联动：同时赚取积分（失败不影响签到结果）
+	_ = (&model.Integral{}).Add(model.Integral{
+		Uid:  user.Id,
+		Type: "check-in",
+	})
 
 	// 计算本次签到的连续天数与奖励明细
 	now := time.Now()

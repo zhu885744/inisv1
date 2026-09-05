@@ -371,6 +371,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=count&type=common",
 				"path=column&type=common",
 				"path=active&type=common&name=活跃度排行",
+				"path=rules&type=common&name=经验任务规则",
 				"path=check-in-status&type=login&name=签到状态",
 				"path=check-in-rank&type=common&name=签到排行",
 				"path=check-in-calendar&type=login&name=签到日历",
@@ -384,6 +385,40 @@ func createAuthRules() (result []AuthRules) {
 				"path=share&type=login&name=分享",
 			},
 			"DELETE": {"remove", "delete", "clear"},
+		},
+		"integral": {
+			"GET": {
+				"path=status&type=login&name=积分余额",
+				"path=all&type=login&name=积分流水",
+				"path=rules&type=common&name=积分任务规则",
+			},
+			"POST": {
+				"path=give&type=root&name=调整积分",
+			},
+		},
+		"goods": {
+			"GET": {
+				"path=one&type=common&name=商品详情",
+				"path=all&type=common&name=商品列表",
+				"path=orders&type=login&name=我的订单",
+				"path=orders-all&type=root&name=全部订单",
+				"path=count&type=common&name=商品数量",
+			},
+			"PUT": {
+				"path=update&type=root&name=更新商品",
+				"path=restore&type=root&name=恢复商品",
+				"path=order-status&type=root&name=更新订单状态",
+			},
+			"POST": {
+				"path=buy&type=login&name=购买商品",
+				"path=save&type=root&name=保存商品",
+				"path=create&type=root&name=创建商品",
+			},
+			"DELETE": {
+				"path=remove&type=root&name=删除商品",
+				"path=delete&type=root&name=彻底删除商品",
+				"path=clear&type=root&name=清空回收站",
+			},
 		},
 		"qps-warn": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
@@ -626,6 +661,8 @@ func createAuthRules() (result []AuthRules) {
 		"moments":       "【动态 API】",
 		"attachment":    "【附件 API】",
 		"notification":  "【消息通知 API】",
+		"integral":      "【积分 API】",
+		"goods":         "【商品 API】",
 	}
 
 	// 基础方法

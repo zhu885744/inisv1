@@ -776,6 +776,11 @@ func (this *Comm) loginExp(uid any) {
 		Uid:         cast.ToInt(uid),
 		Description: "登录奖励！",
 	})
+	// 登录同时赚取积分
+	_ = (&model.Integral{}).Add(model.Integral{
+		Type: "login",
+		Uid:  cast.ToInt(uid),
+	})
 }
 
 // 添加默认权限

@@ -345,7 +345,7 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
-	// 发布文章时触发经验值
+	// 发布文章时触发经验值与积分
 	if status == 1 {
 		go func() {
 			(&model.EXP{}).Add(model.EXP{
@@ -354,6 +354,10 @@ func (this *Article) create(ctx *gin.Context) {
 				BindType:    "article",
 				BindId:      table.Id,
 				Description: "发布文章奖励",
+			})
+			_ = (&model.Integral{}).Add(model.Integral{
+				Uid:  uid,
+				Type: "article-create",
 			})
 		}()
 	}
