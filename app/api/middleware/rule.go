@@ -82,21 +82,40 @@ func Rule() gin.HandlerFunc {
 
 		async.Wait()
 
-		if isCommonRoute(cast.ToString(rule["type"])) {
+		ruleType := cast.ToString(rule["type"])
+
+		// 公共接口（type=common）：无论是否携带 token、token 是否有效，一律放行。
+		// 这是"匿名请求携带旧/跨实例 cookie 时不被 401 拖累"的关键。
+		if isCommonRoute(ruleType) {
 			ctx.Next()
 			return
 		}
 
-		if isLoginRoute(cast.ToString(rule["type"])) {
-			if user.Id == 0 {
-				ctx.JSON(200, gin.H{"code": 401, "msg": facade.Lang(ctx, "请先登录！"), "data": nil})
-				ctx.Abort()
-				return
-			}
+		// 以下分支均要求有效登录身份：
+
+		// 1) token 解析失败/用户失效（Jwt() 暂存的错误）→ 401，
+		//    同时通过 abortWithError 清除客户端无效 cookie，实现"自愈"：
+		//    下一次请求即为匿名，可重新登录获取有效 token。
+		if jwtErr, ok := ctx.Get(jwtErrorKey); ok {
+			err, _ := jwtErr.(error)
+			abortWithError(ctx, getTokenName(), 401, jwtErrorMessage(ctx, err))
+			return
+		}
+
+		// 2) 未登录（无 token）→ 401
+		if user.Id == 0 {
+			ctx.JSON(200, gin.H{"code": 401, "msg": facade.Lang(ctx, "请先登录！"), "data": nil})
+			ctx.Abort()
+			return
+		}
+
+		// 3) 仅要求登录的接口（type=login）——已登录即放行
+		if isLoginRoute(ruleType) {
 			ctx.Next()
 			return
 		}
 
+		// 4) 默认（type=default / 未标注）：需具备对应权限点
 		rules := (&model.Users{}).Rules(user.Id)
 		name := fmt.Sprintf("[%v][%v]", strings.ToUpper(ctx.Request.Method), ctx.Request.URL.Path)
 

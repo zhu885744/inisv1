@@ -20,6 +20,10 @@ const (
 	cacheUserPrefix  = "user[%v]"
 	tokenNameKey     = "app.token_name"
 	defaultTokenName = "INIS_LOGIN_TOKEN"
+	// jwtErrorKey - Jwt() 解析失败时暂存错误的上下文键。
+	// Rule() 依据接口类型决定是否因此拒绝请求：
+	// 公共接口（type=common）不受坏 token 影响，需登录的接口才会 401。
+	jwtErrorKey = "jwt_error"
 )
 
 var getTokenName = func() string {
@@ -93,12 +97,6 @@ func logJwtFailure(ctx *gin.Context, token string, err error) {
 		"origin": ctx.Request.Header.Get("Origin"),
 		"referer": ctx.Request.Header.Get("Referer"),
 	}, "JWT 校验失败（非过期原因）：若 iat 早于本实例密钥启用时间或签名与最近签发的 token 不一致，说明该 token 由其他后端实例或旧密钥签发")
-}
-
-// handleJwtError 处理 JWT 解析错误
-func handleJwtError(ctx *gin.Context, tokenName string, jwtResult facade.JwtResponse, token string) {
-	logJwtFailure(ctx, token, jwtResult.Error)
-	abortWithError(ctx, tokenName, 401, jwtErrorMessage(ctx, jwtResult.Error))
 }
 
 // getUserInfoWithCache 获取用户信息（带缓存逻辑）
@@ -176,11 +174,22 @@ func abortWithError(ctx *gin.Context, tokenName string, code int, msg string) {
 	ctx.Abort()
 }
 
-// Jwt - JWT 中间件
+// Jwt - JWT 校验中间件（容错模式）
+//
+// 语义设计：本中间件只负责「身份识别」，不负责「访问控制」。
+//   - 无 token           → 按匿名放行（是否允许由 Rule() 依据接口类型决定）
+//   - token 有效         → 校验用户存在/状态后写入 ctx["user"]
+//   - token 无效（坏/过期/他实例签发）→ 不中断请求，
+//     仅记录日志并把错误暂存 ctx[jwtErrorKey]，交给 Rule() 决策：
+//     公共接口（type=common）即使携带坏 token 也正常返回；
+//     真正需要登录的接口才会 401，并顺带清除客户端无效 cookie。
+//
+// 此前的实现是「有 token 就必须有效，否则 401」，导致携带旧/跨实例 cookie
+// 的匿名访问（含公共 GET 与登录接口本身）全部被拒，表现为"无论是否登录，
+// 所有接口都返回登录状态异常"，用户连重新登录的入口都没有。
 func Jwt() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		tokenName := getTokenName()
-		token := getTokenFromHeaderOrCookie(ctx, tokenName)
+		token := getTokenFromHeaderOrCookie(ctx, getTokenName())
 
 		if utils.Is.Empty(token) {
 			ctx.Next()
@@ -189,18 +198,23 @@ func Jwt() gin.HandlerFunc {
 
 		jwtResult := facade.Jwt().Parse(token)
 		if jwtResult.Error != nil {
-			handleJwtError(ctx, tokenName, jwtResult, token)
+			// 记录失败上下文（含 token 指纹，便于定位是否由他实例/旧密钥签发）
+			logJwtFailure(ctx, token, jwtResult.Error)
+			ctx.Set(jwtErrorKey, jwtResult.Error)
+			ctx.Next()
 			return
 		}
 
 		user, err := getUserInfoWithCache(jwtResult.Data["uid"], jwtResult.Valid)
 		if err != nil {
-			abortWithError(ctx, tokenName, 401, err.Error())
+			ctx.Set(jwtErrorKey, err)
+			ctx.Next()
 			return
 		}
 
 		if err := validateUserStatus(user); err != nil {
-			abortWithError(ctx, tokenName, 401, err.Error())
+			ctx.Set(jwtErrorKey, err)
+			ctx.Next()
 			return
 		}
 
