@@ -111,28 +111,35 @@ func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *Users) AfterSave(tx *gorm.DB) (err error) {
 
-	go func() {
-		this.Avatar = utils.Replace(this.Avatar, DomainTemp2())
-		tx.Model(this).UpdateColumn("avatar", this.Avatar)
-	}()
+	// 同步替换头像域名（原为异步 goroutine，存在事务连接复用与数据竞争风险）
+	this.Avatar = utils.Replace(this.Avatar, DomainTemp2())
+	if err := tx.Model(this).UpdateColumn("avatar", this.Avatar).Error; err != nil {
+		facade.Log.Error(map[string]any{"error": err, "id": this.Id}, "头像域名替换失败")
+	}
 
 	if !utils.Is.Empty(this.Account) {
-		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("account", this.Account).Exist()
-		if exist {
+		exist, err := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("account", this.Account).Exist()
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "账号唯一性校验失败")
+		} else if exist {
 			return errors.New("账号已存在！")
 		}
 	}
 
 	if !utils.Is.Empty(this.Email) {
-		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("email", this.Email).Exist()
-		if exist {
+		exist, err := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("email", this.Email).Exist()
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "邮箱唯一性校验失败")
+		} else if exist {
 			return errors.New("邮箱已存在！")
 		}
 	}
 
 	if !utils.Is.Empty(this.Phone) {
-		exist, _ := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("phone", this.Phone).Exist()
-		if exist {
+		exist, err := facade.DB.Model(&Users{}).WithTrashed().Where("id", "!=", this.Id).Where("phone", this.Phone).Exist()
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "手机号唯一性校验失败")
+		} else if exist {
 			return errors.New("手机号已存在！")
 		}
 	}
@@ -352,7 +359,7 @@ func (this *Users) Destroy(uid any) {
 
 	ids, _ := facade.DB.Model(&[]AuthGroup{}).WithTrashed().Like("uids", "|"+cast.ToString(uid)+"|").Column("id")
 	if !utils.Is.Empty(ids) {
-		go (&AuthGroup{}).Auth(uid, ids, true)
+		(&AuthGroup{}).Auth(uid, ids, true)
 	}
 
 	// 表名
@@ -365,8 +372,11 @@ func (this *Users) Destroy(uid any) {
 		Banner{},  // 轮播
 	}
 
+	// 同步删除并检查错误，避免异步 goroutine 脱离事务导致的失败无感知
 	for _, table := range tables {
-		go facade.DB.Model(&table).WithTrashed().Where("uid", uid).Delete()
+		if _, err := facade.DB.Model(&table).WithTrashed().Where("uid", uid).Delete(); err != nil {
+			facade.Log.Error(map[string]any{"uid": uid, "error": err}, "注销清理用户数据失败")
+		}
 	}
 }
 

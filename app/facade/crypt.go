@@ -2,6 +2,8 @@ package facade
 
 import (
 	"crypto/md5"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -36,13 +38,32 @@ func initCryptToml() {
 	// 配置文件路径
 	filePath := fmt.Sprintf("%s/%s.%s", ConfigPath, ConfigNameCrypt, ModeToml)
 
+	// 自愈：若该路径被误建为目录（如误操作、解压事故），密钥将永远无法持久化，
+	// 每次重启都会生成新密钥，表现为"重启后所有用户提示登录已过期"。此处自动清理。
+	if info, err := os.Stat(filePath); err == nil && info.IsDir() {
+		if err := os.RemoveAll(filePath); err != nil {
+			Log.Error(map[string]any{
+				"error":     err,
+				"path":      filePath,
+				"func_name": utils.Caller().FuncName,
+				"file_name": utils.Caller().FileName,
+				"file_line": utils.Caller().Line}, "crypt.toml 路径被占用为目录且无法自动清理，JWT密钥将无法持久化！")
+		}
+	}
+
 	// 读取已存在的密钥（若文件已生成过则复用，保证密钥稳定）
 	secret := readCryptKey(filePath)
 
 	// 文件不存在或密钥为空时，生成随机密钥并写入文件
 	if utils.Is.Empty(secret) {
-		key := fmt.Sprintf("%s-%v", uuid.New().String(), time.Now().Unix())
-		secret = fmt.Sprintf("INIS-%x", md5.Sum([]byte(key)))
+		secret = generateSecureKey()
+
+		// 显式告警：新密钥意味着所有旧 token 立即失效。若非首次部署，
+		// 说明 crypt.toml 丢失/不可读，需人工介入排查。
+		Log.Warn(map[string]any{
+			"key_prefix": secret[:min(8, len(secret))],
+			"file":       filePath,
+		}, "未读取到已有 jwt.key，已生成新密钥：本次重启后所有已登录用户 token 将全部失效（如非首次部署，请检查 crypt.toml 是否存在、可读且包含 [jwt] key 配置）")
 
 		// 确保文件存在（父目录已存在，这里直接写入）
 		content := utils.Replace(TempCrypt, map[string]any{
@@ -51,7 +72,7 @@ func initCryptToml() {
 			"${jwt.issuer}":  DefaultJwtIssuer,
 			"${jwt.subject}": DefaultJwtSubject,
 		})
-		if err := os.WriteFile(filePath, []byte(content), 0755); err != nil {
+		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
 			Log.Error(map[string]any{
 				"error":     err,
 				"func_name": utils.Caller().FuncName,
@@ -98,6 +119,16 @@ func readCryptKey(filePath string) (key string) {
 	return ""
 }
 
+// generateSecureKey - 使用 crypto/rand 生成高强度随机密钥（JWT 签名密钥）
+func generateSecureKey() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		// 兜底：随机源异常时退回 uuid + 时间戳 + md5，避免程序中断
+		return fmt.Sprintf("INIS-%x", md5.Sum([]byte(fmt.Sprintf("%s-%v", uuid.New().String(), time.Now().Unix()))))
+	}
+	return "INIS-" + hex.EncodeToString(buf)
+}
+
 func initCrypt() {
 	// 配置热更新时记录 jwt.key，便于排查"全员掉线"问题：
 	// 若运行时 jwt.key 发生变化，所有在线用户的 token 将立即验签失败。
@@ -105,7 +136,6 @@ func initCrypt() {
 		return
 	}
 	Log.Warn(map[string]any{
-		"jwt.key":    CryptToml.Get("jwt.key", ""),
 		"jwt.expire": CryptToml.Get("jwt.expire", ""),
 	}, "crypt 配置热更新（若 jwt.key 变化将导致所有在线 token 失效，属预期行为，请确认非误改）")
 }

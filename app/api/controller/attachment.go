@@ -191,26 +191,27 @@ func (this *Attachment) tryAcquireUploadSlot(count int) bool {
 		return true
 	}
 
+	// 优先使用 Redis 分布式计数器（支持多实例部署）
 	if facade.Redis != nil && facade.Redis.Client != nil {
 		ctx := context.Background()
 		key := "inis:attachment:upload_concurrent_counter"
 		current, err := facade.Redis.Client.IncrBy(ctx, key, int64(count)).Result()
-		if err != nil {
-			facade.Log.Error(map[string]any{"error": err, "key": key}, "Redis并发计数器操作失败，拒绝上传")
-			return false
+		if err == nil {
+			if current > int64(config.ConcurrentLimit) {
+				_ = facade.Redis.Client.DecrBy(ctx, key, int64(count)).Err()
+				return false
+			}
+			if current == int64(count) {
+				_ = facade.Redis.Client.Expire(ctx, key, 5*time.Minute).Err()
+			}
+			return true
 		}
-		if current > int64(config.ConcurrentLimit) {
-			facade.Redis.Client.DecrBy(ctx, key, int64(count))
-			return false
-		}
-		if current == int64(count) {
-			facade.Redis.Client.Expire(ctx, key, 5*time.Minute)
-		}
-		return true
+		// Redis 操作失败（未启动/连接失败），降级为本地计数器
+		facade.Log.Warn(map[string]any{"error": err}, "Redis并发计数器不可用，降级为本地计数器")
 	}
 
-	facade.Log.Error(map[string]any{}, "Redis不可用，拒绝上传")
-	return false
+	// Redis 不可用时降级为本地计数器，避免因缓存服务故障导致上传被错误拒绝
+	return this.tryAcquireUploadSlotLocal(count)
 }
 
 func (this *Attachment) tryAcquireUploadSlotLocal(count int) bool {
@@ -231,12 +232,22 @@ func (this *Attachment) tryAcquireUploadSlotLocal(count int) bool {
 }
 
 func (this *Attachment) releaseUploadSlot(count int) {
+	// 优先释放 Redis 分布式计数器
 	if facade.Redis != nil && facade.Redis.Client != nil {
 		ctx := context.Background()
 		key := "inis:attachment:upload_concurrent_counter"
-		facade.Redis.Client.DecrBy(ctx, key, int64(count))
-		return
+		if err := facade.Redis.Client.DecrBy(ctx, key, int64(count)).Err(); err == nil {
+			return
+		}
 	}
+
+	// Redis 不可用时释放本地计数器
+	uploadCounterMutex.Lock()
+	uploadConcurrentCounter -= count
+	if uploadConcurrentCounter < 0 {
+		uploadConcurrentCounter = 0
+	}
+	uploadCounterMutex.Unlock()
 }
 
 func (this *Attachment) IGET(ctx *gin.Context) {

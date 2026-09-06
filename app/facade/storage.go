@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -315,7 +316,14 @@ func (this *LocalStorageStruct) Delete(key string) error {
 	if !strings.HasPrefix(path, "public/") {
 		path = "public/" + path
 	}
-	return os.Remove(path)
+
+	// 路径规范化并校验，防止目录穿越（如 ../../）删除 public 目录之外的任意文件
+	clean := filepath.Clean(path)
+	if clean != "public" && !strings.HasPrefix(clean, "public"+string(filepath.Separator)) {
+		return errors.New("非法的文件路径！")
+	}
+
+	return os.Remove(clean)
 }
 
 // DeleteMulti - 批量删除文件

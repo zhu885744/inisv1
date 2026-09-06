@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"fmt"
-
 	// JWT "github.com/dgrijalva/jwt-go"
 	"inis/app/facade"
 	"mime/multipart"
@@ -173,10 +171,7 @@ func (this *Test) upload(ctx *gin.Context) {
 		return
 	}
 	defer func(bytes multipart.File) {
-		err := bytes.Close()
-		if err != nil {
-			fmt.Println(err.Error())
-		}
+		_ = bytes.Close()
 	}(bytes)
 
 	// 文件后缀
@@ -191,23 +186,15 @@ func (this *Test) upload(ctx *gin.Context) {
 
 	params["item"] = item
 
-	fmt.Println("url: ", item.Domain+item.Path)
-
 	this.json(ctx, params, facade.Lang(ctx, "好的！"), 200)
 }
 
 func (this *Test) returnUrl(ctx *gin.Context) {
-
-	params := this.params(ctx)
-
-	fmt.Println("==================== returnUrl：", params)
+	// 支付回调测试占位接口（原为打印调试信息，已移除）
 }
 
 func (this *Test) notifyUrl(ctx *gin.Context) {
-
-	params := this.params(ctx)
-
-	fmt.Println("==================== notifyUrl：", params)
+	// 支付回调测试占位接口（原为打印调试信息，已移除）
 }
 
 // 测试网络请求

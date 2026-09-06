@@ -312,8 +312,8 @@ func (c *CommStruct) generateSecureHeaders(body map[string]any, unix int64) map[
 	sn := cast.ToString(body["sn"])
 	mac := cast.ToString(body["mac"])
 
-	key := utils.Hash.Token(sn, 16, Token)
-	iv := utils.Hash.Token(mac, 16, Token)
+	key := utils.Hash.Token(sn, 16, GetToken())
+	iv := utils.Hash.Token(mac, 16, GetToken())
 	aes := utils.AES(key, iv)
 
 	argus := aes.Encrypt(utils.Json.Encode(body)).Text

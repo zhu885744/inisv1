@@ -39,7 +39,8 @@ func Method() gin.HandlerFunc {
 
 		jwt := facade.Jwt().Parse(token)
 		if jwt.Error != nil {
-			result["msg"] = utils.Ternary(jwt.Valid == 0, facade.Lang(ctx, "登录已过期，请重新登录！"), jwt.Error.Error())
+			logJwtFailure(ctx, token, jwt.Error)
+			result["msg"] = jwtErrorMessage(ctx, jwt.Error)
 			abortWithError(ctx, tokenName, 401, result["msg"].(string))
 			return
 		}

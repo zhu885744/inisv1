@@ -1,9 +1,13 @@
 package middleware
 
 import (
+	"crypto/subtle"
+
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
+
+	"inis/app/facade"
 )
 
 // Token常量
@@ -25,9 +29,13 @@ func Token() gin.HandlerFunc {
 			return
 		}
 
-		token := cast.ToString(defaultTokenValue)
+		// 从配置读取 token（可配置），使用恒定时间比较防止时序攻击
+		token := cast.ToString(facade.AppToml.Get("app.token", ""))
+		if token == "" {
+			token = defaultTokenValue
+		}
 
-		if auth != token {
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(token)) != 1 {
 			ctx.JSON(200, gin.H{"data": nil, "code": 403, "msg": "无权限"})
 			ctx.Abort()
 			return

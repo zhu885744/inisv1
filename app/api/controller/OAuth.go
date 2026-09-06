@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -91,8 +90,6 @@ func (this *OAuth) qq(ctx *gin.Context) {
 
 	params := this.params(ctx)
 
-	fmt.Println(ctx.Request.Method, params)
-
 	// 登录成功
 	if !utils.Is.Empty(params["code"]) {
 
@@ -151,8 +148,6 @@ func (this *OAuth) qq(ctx *gin.Context) {
 func (this *OAuth) github(ctx *gin.Context) {
 
 	params := this.params(ctx)
-
-	fmt.Println(ctx.Request.Method, params)
 
 	if !utils.Is.Empty(params["code"]) {
 

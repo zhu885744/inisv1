@@ -1,6 +1,7 @@
 package facade
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -16,6 +17,35 @@ import (
 )
 
 var MySQL *MySqlStruct
+
+// 字段名白名单正则：仅允许字母、数字、下划线，以及用于联表查询的点号
+var columnNameRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$`)
+
+// 操作符白名单：防止通过操作符拼接注入 SQL
+var allowedOperators = map[string]bool{
+	"=": true, "!=": true, "<>": true, ">": true, "<": true,
+	">=": true, "<=": true, "LIKE": true, "NOT LIKE": true,
+	"IN": true, "NOT IN": true, "IS NULL": true, "IS NOT NULL": true,
+	"IS": true, "IS NOT": true,
+}
+
+// sanitizeColumn - 校验字段名合法性，防止 SQL 注入；非法字段名返回空字符串
+func sanitizeColumn(field any) string {
+	name := cast.ToString(field)
+	if !columnNameRegex.MatchString(name) {
+		return ""
+	}
+	return name
+}
+
+// sanitizeOperator - 校验操作符合法性，非法操作符返回空字符串
+func sanitizeOperator(op any) string {
+	operator := strings.ToUpper(strings.TrimSpace(cast.ToString(op)))
+	if allowedOperators[operator] {
+		return operator
+	}
+	return ""
+}
 
 type MySqlStruct struct {
 	// DB 数据库实例
@@ -112,12 +142,21 @@ func (this *ModelStruct) Where(args ...any) *ModelStruct {
 
 	if len(args) >= 3 {
 
-		query := fmt.Sprintf("`%v` %v ?", args[0], args[1])
+		field := sanitizeColumn(args[0])
+		operator := sanitizeOperator(args[1])
+		if field == "" || operator == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` %v ?", field, operator)
 		this.model.Where(query, args[2])
 
 	} else if len(args) == 2 {
 
-		query := fmt.Sprintf("`%v` = ?", args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` = ?", field)
 		this.model.Where(query, args[1])
 
 	} else if len(args) == 1 {
@@ -139,7 +178,12 @@ func (this *ModelStruct) Where(args ...any) *ModelStruct {
 			if reflect.TypeOf(args[0]).Kind() == reflect.String {
 				str := strings.Split(cast.ToString(args[0]), " ")
 				if len(str) == 3 {
-					query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+					field := sanitizeColumn(str[0])
+					operator := sanitizeOperator(str[1])
+					if field == "" || operator == "" {
+						return this
+					}
+					query := fmt.Sprintf("`%v` %v ?", field, operator)
 					this.model.Where(query, str[2])
 				}
 			} else {
@@ -231,12 +275,21 @@ func (this *ModelStruct) WhereIn(args ...any) *ModelStruct {
 
 	if len(args) >= 3 {
 
-		query := fmt.Sprintf("`%v` %v (?)", args[0], args[1])
+		field := sanitizeColumn(args[0])
+		operator := sanitizeOperator(args[1])
+		if field == "" || operator == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` %v (?)", field, operator)
 		this.model.Where(query, args[2])
 
 	} else if len(args) == 2 {
 
-		query := fmt.Sprintf("`%v` IN (?)", args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` IN (?)", field)
 		this.model.Where(query, args[1])
 
 	} else if len(args) == 1 {
@@ -259,7 +312,12 @@ func (this *ModelStruct) WhereIn(args ...any) *ModelStruct {
 			if reflect.TypeOf(args[0]).Kind() == reflect.String {
 				str := strings.Split(cast.ToString(args[0]), " ")
 				if len(str) == 3 {
-					query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+					field := sanitizeColumn(str[0])
+					operator := sanitizeOperator(str[1])
+					if field == "" || operator == "" {
+						return this
+					}
+					query := fmt.Sprintf("`%v` %v ?", field, operator)
 					this.model.Where(query, str[2])
 				}
 			} else {
@@ -292,12 +350,21 @@ func (this *ModelStruct) WhereNotIn(args ...any) *ModelStruct {
 
 	if len(args) >= 3 {
 
-		query := fmt.Sprintf("`%v` %v NOT IN (?)", args[0], args[1])
+		field := sanitizeColumn(args[0])
+		operator := sanitizeOperator(args[1])
+		if field == "" || operator == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` %v NOT IN (?)", field, operator)
 		this.model.Where(query, args[2])
 
 	} else if len(args) == 2 {
 
-		query := fmt.Sprintf("`%v` NOT IN (?)", args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` NOT IN (?)", field)
 		this.model.Where(query, args[1])
 
 	}
@@ -310,12 +377,21 @@ func (this *ModelStruct) Not(args ...any) *ModelStruct {
 
 	if len(args) >= 3 {
 
-		query := fmt.Sprintf("`%v` %v ?", args[0], args[1])
+		field := sanitizeColumn(args[0])
+		operator := sanitizeOperator(args[1])
+		if field == "" || operator == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` %v ?", field, operator)
 		this.model.Not(query, args[2])
 
 	} else if len(args) == 2 {
 
-		query := fmt.Sprintf("`%v` = ?", args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` = ?", field)
 		this.model.Not(query, args[1])
 
 	} else if len(args) == 1 {
@@ -337,7 +413,12 @@ func (this *ModelStruct) Not(args ...any) *ModelStruct {
 			if reflect.TypeOf(args[0]).Kind() == reflect.String {
 				str := strings.Split(cast.ToString(args[0]), " ")
 				if len(str) == 3 {
-					query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+					field := sanitizeColumn(str[0])
+					operator := sanitizeOperator(str[1])
+					if field == "" || operator == "" {
+						return this
+					}
+					query := fmt.Sprintf("`%v` %v ?", field, operator)
 					this.model.Not(query, str[2])
 				}
 			}
@@ -348,7 +429,12 @@ func (this *ModelStruct) Not(args ...any) *ModelStruct {
 		if reflect.TypeOf(args[0]).Kind() == reflect.String {
 			str := strings.Split(cast.ToString(args[0]), " ")
 			if len(str) == 3 {
-				query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+				field := sanitizeColumn(str[0])
+				operator := sanitizeOperator(str[1])
+				if field == "" || operator == "" {
+					return this
+				}
+				query := fmt.Sprintf("`%v` %v ?", field, operator)
 				this.model.Not(query, str[2])
 			}
 		}
@@ -391,12 +477,21 @@ func (this *ModelStruct) Or(args ...any) *ModelStruct {
 
 	if len(args) >= 3 {
 
-		query := fmt.Sprintf("`%v` %v ?", args[0], args[1])
+		field := sanitizeColumn(args[0])
+		operator := sanitizeOperator(args[1])
+		if field == "" || operator == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` %v ?", field, operator)
 		this.model.Or(query, args[2])
 
 	} else if len(args) == 2 {
 
-		query := fmt.Sprintf("`%v` = ?", args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
+		query := fmt.Sprintf("`%v` = ?", field)
 		this.model.Or(query, args[1])
 
 	} else if len(args) == 1 {
@@ -418,7 +513,12 @@ func (this *ModelStruct) Or(args ...any) *ModelStruct {
 			if reflect.TypeOf(args[0]).Kind() == reflect.String {
 				str := strings.Split(cast.ToString(args[0]), " ")
 				if len(str) == 3 {
-					query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+					field := sanitizeColumn(str[0])
+					operator := sanitizeOperator(str[1])
+					if field == "" || operator == "" {
+						return this
+					}
+					query := fmt.Sprintf("`%v` %v ?", field, operator)
 					this.model.Or(query, str[2])
 				}
 			}
@@ -429,7 +529,12 @@ func (this *ModelStruct) Or(args ...any) *ModelStruct {
 		if reflect.TypeOf(args[0]).Kind() == reflect.String {
 			str := strings.Split(cast.ToString(args[0]), " ")
 			if len(str) == 3 {
-				query := fmt.Sprintf("`%v` %v ?", str[0], str[1])
+				field := sanitizeColumn(str[0])
+				operator := sanitizeOperator(str[1])
+				if field == "" || operator == "" {
+					return this
+				}
+				query := fmt.Sprintf("`%v` %v ?", field, operator)
 				this.model.Or(query, str[2])
 			}
 		}
@@ -471,7 +576,10 @@ func (this *ModelStruct) IOr(where any) *ModelStruct {
 func (this *ModelStruct) Like(args ...any) *ModelStruct {
 
 	if len(args) >= 2 {
-		field := cast.ToString(args[0])
+		field := sanitizeColumn(args[0])
+		if field == "" {
+			return this
+		}
 		value := cast.ToString(args[1])
 
 		// 自动添加通配符
@@ -521,6 +629,10 @@ func (this *ModelStruct) Like(args ...any) *ModelStruct {
 
 				// 如果成功解析出字段名和搜索值
 				if field != "" && value != "" {
+					// 字段名安全校验，防止 SQL 注入
+					if sanitizeColumn(field) == "" {
+						return this
+					}
 					// 自动添加通配符
 					if !strings.Contains(value, "%") {
 						value = "%" + value + "%"
@@ -560,17 +672,28 @@ func (this *ModelStruct) ILike(where any) *ModelStruct {
 
 	} else if utils.Is.MapAny(where) {
 
-		var sql string
+		var conditions []string
+		var params []any
 		for _, val := range cast.ToStringMap(where) {
 			item := cast.ToSlice(val)
+			if len(item) < 2 {
+				continue
+			}
+			field := sanitizeColumn(item[0])
+			if field == "" {
+				continue
+			}
 			value := cast.ToString(item[1])
 			// 自动添加通配符
 			if !strings.Contains(value, "%") {
 				value = "%" + value + "%"
 			}
-			sql += fmt.Sprintf("`%v` LIKE '%v' OR ", item[0], value)
+			conditions = append(conditions, fmt.Sprintf("`%v` LIKE ?", field))
+			params = append(params, value)
 		}
-		this.model.Where(strings.TrimRight(sql, "OR "))
+		if len(conditions) > 0 {
+			this.model.Where(strings.Join(conditions, " OR "), params...)
+		}
 	}
 
 	return this
@@ -587,11 +710,19 @@ func (this *ModelStruct) Null(args ...any) *ModelStruct {
 			if strings.Contains(cast.ToString(val), ",") {
 				// 逗号分割 去除空格
 				for _, v := range strings.Split(cast.ToString(val), ",") {
-					query := fmt.Sprintf("`%v` IS NULL", strings.TrimSpace(v))
+					field := sanitizeColumn(strings.TrimSpace(v))
+					if field == "" {
+						continue
+					}
+					query := fmt.Sprintf("`%v` IS NULL", field)
 					this.model.Where(query)
 				}
 			} else {
-				query := fmt.Sprintf("`%v` IS NULL", val)
+				field := sanitizeColumn(val)
+				if field == "" {
+					continue
+				}
+				query := fmt.Sprintf("`%v` IS NULL", field)
 				this.model.Where(query)
 			}
 
@@ -644,11 +775,19 @@ func (this *ModelStruct) NotNull(args ...any) *ModelStruct {
 			if strings.Contains(cast.ToString(val), ",") {
 				// 逗号分割 去除空格
 				for _, v := range strings.Split(cast.ToString(val), ",") {
-					query := fmt.Sprintf("`%v` IS NOT NULL", strings.TrimSpace(v))
+					field := sanitizeColumn(strings.TrimSpace(v))
+					if field == "" {
+						continue
+					}
+					query := fmt.Sprintf("`%v` IS NOT NULL", field)
 					this.model.Where(query)
 				}
 			} else {
-				query := fmt.Sprintf("`%v` IS NOT NULL", val)
+				field := sanitizeColumn(val)
+				if field == "" {
+					continue
+				}
+				query := fmt.Sprintf("`%v` IS NOT NULL", field)
 				this.model.Where(query)
 			}
 		} else if reflect.TypeOf(val).Kind() == reflect.Slice {
@@ -909,6 +1048,12 @@ func (this *ModelStruct) Exist(args ...any) (ok bool, err error) {
 
 	tx := this.model.First(&this.dest)
 
+	// 记录不存在是 Exist 的正常语义（返回 false, nil），不是错误；
+	// 此前直接透传 gorm 的 record not found，导致注册等场景的正常校验被误记为 Error 日志
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+
 	if tx.Error != nil {
 		return false, tx.Error
 	}
@@ -961,8 +1106,13 @@ func (this *ModelStruct) Column(args ...any) (result any, err error) {
 // Sum - 求和
 func (this *ModelStruct) Sum(field any) (result int64, err error) {
 
+	column := sanitizeColumn(field)
+	if column == "" {
+		return 0, fmt.Errorf("非法的字段名: %v", field)
+	}
+
 	var sum int64
-	tx := this.model.Select("sum(" + cast.ToString(field) + ") as sum").Scan(&sum)
+	tx := this.model.Select("sum(`" + column + "`) as sum").Scan(&sum)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -973,8 +1123,13 @@ func (this *ModelStruct) Sum(field any) (result int64, err error) {
 // Max - 最大值
 func (this *ModelStruct) Max(field any) (result int64, err error) {
 
+	column := sanitizeColumn(field)
+	if column == "" {
+		return 0, fmt.Errorf("非法的字段名: %v", field)
+	}
+
 	var sum int64
-	tx := this.model.Select("max(" + cast.ToString(field) + ") as max").Scan(&sum)
+	tx := this.model.Select("max(`" + column + "`) as max").Scan(&sum)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -985,8 +1140,13 @@ func (this *ModelStruct) Max(field any) (result int64, err error) {
 // Min - 最小值
 func (this *ModelStruct) Min(field any) (result int64, err error) {
 
+	column := sanitizeColumn(field)
+	if column == "" {
+		return 0, fmt.Errorf("非法的字段名: %v", field)
+	}
+
 	var sum int64
-	tx := this.model.Select("min(" + cast.ToString(field) + ") as min").Scan(&sum)
+	tx := this.model.Select("min(`" + column + "`) as min").Scan(&sum)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -1027,13 +1187,18 @@ func (this *ModelStruct) Update(data ...any) (tx *gorm.DB, err error) {
 // Inc - 自增
 func (this *ModelStruct) Inc(column any, step ...int) (*ModelStruct, error) {
 
+	field := sanitizeColumn(column)
+	if field == "" {
+		return nil, fmt.Errorf("非法的字段名: %v", column)
+	}
+
 	size := 1
 
 	if len(step) > 0 {
 		size = step[0]
 	}
 
-	tx := this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` + ?", size))
+	tx := this.model.UpdateColumn("`"+field+"`", gorm.Expr("`"+field+"` + ?", size))
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
@@ -1044,13 +1209,18 @@ func (this *ModelStruct) Inc(column any, step ...int) (*ModelStruct, error) {
 // Dec - 自减
 func (this *ModelStruct) Dec(column any, step ...int) (*ModelStruct, error) {
 
+	field := sanitizeColumn(column)
+	if field == "" {
+		return nil, fmt.Errorf("非法的字段名: %v", column)
+	}
+
 	size := 1
 
 	if len(step) > 0 {
 		size = step[0]
 	}
 
-	tx := this.model.UpdateColumn("`"+cast.ToString(column)+"`", gorm.Expr("`"+cast.ToString(column)+"` - ?", size))
+	tx := this.model.UpdateColumn("`"+field+"`", gorm.Expr("`"+field+"` - ?", size))
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
@@ -1060,7 +1230,11 @@ func (this *ModelStruct) Dec(column any, step ...int) (*ModelStruct, error) {
 
 // UpdateColumn - 更新单个字段
 func (this *ModelStruct) UpdateColumn(column any, value any) (tx *gorm.DB, err error) {
-	tx = this.model.UpdateColumn(cast.ToString(column), value)
+	field := sanitizeColumn(column)
+	if field == "" {
+		return nil, fmt.Errorf("非法的字段名: %v", column)
+	}
+	tx = this.model.UpdateColumn(field, value)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}

@@ -1,11 +1,16 @@
 package middleware
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
+	"strings"
 	"time"
 
+	JWTLIB "github.com/golang-jwt/jwt/v5"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -30,14 +35,70 @@ func getTokenFromHeaderOrCookie(ctx *gin.Context, tokenName string) string {
 	return token
 }
 
+// tokenFingerprint - 提取 token 指纹（签发时间/签发者/签名尾段），用于定位失败 token 的来源。
+// 通过 iat（签发时间）可判断 token 是何时被哪个实例签发的：
+// 若 iat 早于本实例密钥的启用时间，则为旧密钥/其他实例签发的残留 token。
+func tokenFingerprint(token string) map[string]any {
+	result := map[string]any{"token_length": len(token)}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		result["format"] = "malformed（非三段式，可能携带了 Bearer 前缀或脏数据）"
+		result["token_head"] = token[:min(16, len(token))]
+		return result
+	}
+
+	// 记录签名末段，同一密钥签出的 token 签名不同，但可用于跨日志比对
+	sig := parts[2]
+	result["sig_tail"] = sig[max(0, len(sig)-8):]
+
+	// 解码 payload，取签发时间与签发者
+	if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+		var claims struct {
+			Iss string `json:"iss"`
+			Sub string `json:"sub"`
+			Iat int64  `json:"iat"`
+		}
+		if err := json.Unmarshal(payload, &claims); err == nil {
+			if claims.Iat > 0 {
+				result["iat"] = time.Unix(claims.Iat, 0).Format("2006-01-02 15:04:05")
+			}
+			result["iss"] = claims.Iss
+			result["sub"] = claims.Sub
+		}
+	}
+	return result
+}
+
+// jwtErrorMessage 根据 JWT 真实错误类型生成用户提示，
+// 并将非过期原因记录日志。此前所有解析错误都被统一显示为"登录已过期"，
+// 导致签名密钥变化（signature is invalid）等关键问题被掩盖、无法定位。
+func jwtErrorMessage(ctx *gin.Context, err error) string {
+	if err == nil {
+		return facade.Lang(ctx, "禁止非法操作！")
+	}
+	if errors.Is(err, JWTLIB.ErrTokenExpired) {
+		return facade.Lang(ctx, "登录已过期，请重新登录！")
+	}
+
+	return facade.Lang(ctx, "登录状态异常，请重新登录！")
+}
+
+// logJwtFailure - 记录 JWT 校验失败的详细上下文（含 token 指纹），便于定位 token 来源
+func logJwtFailure(ctx *gin.Context, token string, err error) {
+	facade.Log.Warn(map[string]any{
+		"error":  err.Error(),
+		"token":  tokenFingerprint(token),
+		"ip":     ctx.ClientIP(),
+		"path":   ctx.Request.URL.Path,
+		"origin": ctx.Request.Header.Get("Origin"),
+		"referer": ctx.Request.Header.Get("Referer"),
+	}, "JWT 校验失败（非过期原因）：若 iat 早于本实例密钥启用时间或签名与最近签发的 token 不一致，说明该 token 由其他后端实例或旧密钥签发")
+}
+
 // handleJwtError 处理 JWT 解析错误
-func handleJwtError(ctx *gin.Context, tokenName string, jwtResult facade.JwtResponse, defaultMsg string) {
-	msg := utils.Ternary(
-		jwtResult.Valid == 0,
-		facade.Lang(ctx, "登录已过期，请重新登录！"),
-		utils.Ternary(utils.Is.Empty(jwtResult.Error), defaultMsg, jwtResult.Error.Error()),
-	)
-	abortWithError(ctx, tokenName, 401, msg)
+func handleJwtError(ctx *gin.Context, tokenName string, jwtResult facade.JwtResponse, token string) {
+	logJwtFailure(ctx, token, jwtResult.Error)
+	abortWithError(ctx, tokenName, 401, jwtErrorMessage(ctx, jwtResult.Error))
 }
 
 // getUserInfoWithCache 获取用户信息（带缓存逻辑）
@@ -128,7 +189,7 @@ func Jwt() gin.HandlerFunc {
 
 		jwtResult := facade.Jwt().Parse(token)
 		if jwtResult.Error != nil {
-			handleJwtError(ctx, tokenName, jwtResult, "禁止非法操作！")
+			handleJwtError(ctx, tokenName, jwtResult, token)
 			return
 		}
 

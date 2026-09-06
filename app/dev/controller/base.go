@@ -92,13 +92,11 @@ func (this base) error(ctx *gin.Context, msg any, code ...int) {
 
 // setToken 设置登录token到客户的cookie中
 func (this base) setToken(ctx *gin.Context, token any) {
-	host := ctx.Request.Host
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
-	}
 	expire := cast.ToInt(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", host, false, false)
+	// domain 传空（host-only 写入），与 abortWithError 的清除方式保持一致，
+	// 否则浏览器视为不同 cookie 条目，401/登出时无法清除
+	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", "", false, false)
 }
 
 // Call 方法调用 - 资源路由本体

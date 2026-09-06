@@ -739,15 +739,14 @@ func (this *Comm) logout(ctx *gin.Context) {
 // 设置登录token到客户的cookie中
 func setToken(ctx *gin.Context, token any) {
 
-	host := ctx.Request.Host
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
-	}
-
 	expire := cast.ToInt(utils.Calc(facade.CryptToml.Get("jwt.expire", facade.DefaultJwtExpire)))
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 
-	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", host, false, false)
+	// domain 传空：写入 host-only cookie（不带 Domain 属性）。
+	// 关键：必须与 abortWithError 中的清除方式保持一致——浏览器按 name+domain+path
+	// 三元组匹配 cookie，若写入带 Domain=host 而清除时不带，二者是不同条目，
+	// 将导致 401 时 cookie 永远无法被清除（旧 token 持续污染后续请求）。
+	ctx.SetCookie(tokenName, cast.ToString(token), expire, "/", "", false, false)
 }
 
 // 获取注册配置

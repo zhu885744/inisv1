@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	api "inis/app/api/route"
 	dev "inis/app/dev/route"
@@ -19,6 +22,13 @@ import (
 func main() {
 	watch()
 	run()
+
+	// 阻塞主 goroutine，等待系统信号优雅退出（替代原 app.Run 内的 select{}，
+	// 避免配置热更新回调因 select{} 永久阻塞导致 goroutine 泄漏）
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	shutdownServer()
 }
 
 // run - 运行服务
@@ -35,7 +45,6 @@ func watch() {
 	app.AppToml.Viper.WatchConfig()
 	app.AppToml.Viper.OnConfigChange(func(event fsnotify.Event) {
 		shutdownServer()
-		watch()
 		app.InitApp()
 		run()
 	})

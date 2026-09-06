@@ -928,7 +928,7 @@ func (this *Users) email(ctx *gin.Context) {
 	}
 
 	user := this.meta.user(ctx)
-	// 即便中间件已经校验过登录了，这里还进行二次校验是未了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
+	// 即便中间件已经校验过登录了，这里还进行二次校验是为了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
 	if user.Id == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
 		return
@@ -1026,7 +1026,7 @@ func (this *Users) phone(ctx *gin.Context) {
 	}
 
 	user := this.meta.user(ctx)
-	// 即便中间件已经校验过登录了，这里还进行二次校验是未了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
+	// 即便中间件已经校验过登录了，这里还进行二次校验是为了防止接口权限被改，而 uid 又是强制的，从而导致的意外情况
 	if user.Id == 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
 		return
@@ -1386,16 +1386,21 @@ func (this *Users) ban(ctx *gin.Context) {
 	}
 
 	// 删除用户全部内容（软删除移入回收站）
+	// 同步执行并检查错误，避免异步 goroutine 脱离事务导致的失败无感知
 	if deleteContent == 1 {
-		go func() {
-			defer func() { recover() }()
-			facade.DB.Model(&model.Article{}).Where("uid", uid).Delete()
-			facade.DB.Model(&model.Moments{}).Where("uid", uid).Delete()
-			facade.DB.Model(&model.Comment{}).Where("uid", uid).Delete()
-			facade.DB.Model(&model.UserLikes{}).Where("uid", uid).Delete()
-			facade.DB.Model(&model.UserCollects{}).Where("uid", uid).Delete()
-			facade.Log.Info(map[string]any{"uid": uid, "operator_id": operator.Id}, "管理员删除被封禁用户全部内容")
-		}()
+		contentTables := []any{
+			&model.Article{},
+			&model.Moments{},
+			&model.Comment{},
+			&model.UserLikes{},
+			&model.UserCollects{},
+		}
+		for _, table := range contentTables {
+			if _, err := facade.DB.Model(table).Where("uid", uid).Delete(); err != nil {
+				facade.Log.Error(map[string]any{"uid": uid, "error": err}, "删除被封禁用户内容失败")
+			}
+		}
+		facade.Log.Info(map[string]any{"uid": uid, "operator_id": operator.Id}, "管理员删除被封禁用户全部内容")
 	}
 
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))

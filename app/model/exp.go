@@ -320,14 +320,19 @@ func (this *EXP) Add(table EXP) (err error) {
 			table.Description = fmt.Sprintf("%s奖励", expConfig[table.Type]["name"])
 		}
 
-		_, err := facade.DB.Model(&EXP{}).Create(&table)
+		// 使用事务保证「流水创建 + 用户经验值自增」的原子性，避免流水已存在但经验值未增加的不一致
+		err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&table).Error; err != nil {
+				return err
+			}
+			return tx.Model(&Users{}).Where("id", table.Uid).UpdateColumn("exp", gorm.Expr("exp + ?", table.Value)).Error
+		})
 
 		if err != nil {
 			facade.Log.Error(map[string]any{"error": err, "type": table.Type, "uid": table.Uid}, "经验值记录创建失败")
 			return err
 		}
 
-		_, _ = facade.DB.Model(&Users{}).Where("id", table.Uid).Inc("exp", table.Value)
 		facade.Log.Info(map[string]any{"uid": table.Uid, "type": table.Type, "value": table.Value, "description": table.Description}, "经验值增加成功")
 	}
 

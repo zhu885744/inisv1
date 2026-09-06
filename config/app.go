@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -36,6 +38,13 @@ var (
 	// 图片文件后缀
 	ImageFiles = []any{"jpg", "jpeg", "png", "gif", "tif", "tiff", "bmp"}
 )
+
+// 图片动态处理结果缓存（进程内），避免每次请求重复读盘+解码+编码
+var imageCache = &sync.Map{}
+var imageCacheLen atomic.Int64
+
+// imageCacheMaxLen 图片缓存最大条目数，超过则整体清空，防止无限制增长
+const imageCacheMaxLen = 1024
 
 // Gin - gin引擎
 var Gin *gin.Engine
@@ -109,8 +118,6 @@ func Run(callback ...func()) {
 			fmt.Println("服务启动失败", err)
 		}
 	}()
-
-	select {}
 }
 
 // notRoute 路由不存在
@@ -125,9 +132,29 @@ func notRoute(Gin *gin.Engine) {
 		ctx.Status(SuccessCode)
 
 		path := ctx.Request.URL.Path
-		prefix := path[:strings.LastIndex(path, "/")]
-		fileName := path[strings.LastIndex(path, "/"):]
-		ext := strings.ToLower(fileName[strings.LastIndex(fileName, ".")+1:])
+
+		// 路径安全校验：拒绝目录穿越（../），防止读取 public 目录之外的任意文件
+		if strings.Contains(path, "..") {
+			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": RouteNotDefined, "data": nil})
+			return
+		}
+
+		// 使用 LastIndex 前先判断，避免 path 中无 "/" 时切片越界 panic
+		lastSlash := strings.LastIndex(path, "/")
+		var prefix, fileName string
+		if lastSlash >= 0 {
+			prefix = path[:lastSlash]
+			fileName = path[lastSlash:]
+		} else {
+			prefix = ""
+			fileName = path
+		}
+
+		ext := ""
+		lastDot := strings.LastIndex(fileName, ".")
+		if lastDot >= 0 && lastDot+1 < len(fileName) {
+			ext = strings.ToLower(fileName[lastDot+1:])
+		}
 
 		isExist := checkFileExist(ctx, "public"+path)
 		writeErrorGif := writeGifError(ctx)
@@ -213,6 +240,14 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 	height := cast.ToInt(match[2])
 	mode := ctx.DefaultQuery("mode", utils.Ternary(width == height, "fill", ""))
 
+	cacheKey := fmt.Sprintf("%s?size=%dx%d&mode=%s", path, width, height, mode)
+
+	// 命中缓存则直接返回，避免重复读盘+解码+编码
+	if cached, ok := imageCache.Load(cacheKey); ok {
+		_, _ = ctx.Writer.Write(cached.([]byte))
+		return
+	}
+
 	src, err := imaging.Open("public" + path)
 	if err != nil {
 		writeErrorGif("error.gif")
@@ -229,7 +264,22 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 		return
 	}
 
-	_, err = ctx.Writer.Write(buffer.Bytes())
+	data := buffer.Bytes()
+
+	// 写入缓存（带简单条目上限，超过则整体清空）
+	if imageCacheLen.Load() < imageCacheMaxLen {
+		imageCache.Store(cacheKey, data)
+		imageCacheLen.Add(1)
+	} else {
+		imageCache.Range(func(key, _ any) bool {
+			imageCache.Delete(key)
+			return true
+		})
+		imageCacheLen.Store(1)
+		imageCache.Store(cacheKey, data)
+	}
+
+	_, err = ctx.Writer.Write(data)
 	if err != nil {
 		writeErrorGif("error.gif")
 	}
