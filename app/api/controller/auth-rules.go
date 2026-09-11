@@ -320,6 +320,11 @@ func (this *AuthRules) create(ctx *gin.Context) {
 		}
 	}
 
+	// 名称兜底：名称为空时使用路由，避免前端规则树按名称分组时解析失败
+	if utils.Is.Empty(table.Name) {
+		table.Name = table.Route
+	}
+
 	method := strings.ToUpper(cast.ToString(table.Method))
 	table.Hash = utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, table.Route))
 
@@ -354,6 +359,11 @@ func (this *AuthRules) update(ctx *gin.Context) {
 		if utils.In.Array(key, authRulesAllowFieldsSlice) {
 			async.Set(key, this.processFieldValue(val))
 		}
+	}
+
+	// 名称兜底：显式提交了空名称时使用路由，避免前端规则树按名称分组时解析失败
+	if _, ok := params["name"]; ok && utils.Is.Empty(params["name"]) {
+		async.Set("name", async.Get("route"))
 	}
 
 	method := strings.ToUpper(cast.ToString(async.Get("method")))

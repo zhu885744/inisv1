@@ -320,8 +320,10 @@ const method = {
             const regex2 = /(.+)[^\w\u4e00-\u9fa5\s](.+)/
             for (const item of store.authRules.getFlat) {
                 if (ids.includes(parseInt(item.hash))) {
-                    let match1 = item.name.match(regex1)
-                    let match2 = item.name.match(regex2)
+                    // 名称可能为空/非字符串，先规整再匹配，避免解析报错
+                    const ruleName = String(item?.name ?? '')
+                    let match1 = ruleName.match(regex1)
+                    let match2 = ruleName.match(regex2)
                     let name = ''
                     if (match1) name = match1[1].trim()
                     else if (match2) name = match2[1].trim()
