@@ -168,6 +168,11 @@ func notRoute(Gin *gin.Engine) {
 		case strings.Contains(fileName, "."):
 			handleStaticFile(ctx, path, ext, isExist)
 		default:
+			// 主题前端路由回退：history 模式的主题（如 /goods、/user/profile）在 public 下
+			// 没有对应文件，统一回退到主题首页，由前端路由接管
+			if handleThemeRoute(ctx, path) {
+				return
+			}
 			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": RouteNotDefined, "data": nil})
 		}
 	})
@@ -216,7 +221,48 @@ func handlePageFile(ctx *gin.Context, prefix string, writeErrorGif func(string))
 		if err != nil {
 			writeErrorGif("error.gif")
 		}
+		return
 	}
+	// 该目录下没有独立页面时，回退到主题首页（兼容 history 模式主题的 /about/ 形式）
+	handleThemeRoute(ctx, prefix+"/")
+}
+
+// themeRouteIgnore - 不做主题回退的路径前缀（接口与静态资源保持原有响应，便于排查问题）
+var themeRouteIgnore = []string{"/api", "/dev", "/socket", "/assets"}
+
+// handleThemeRoute 主题前端路由回退（history 模式 SPA）
+// 语义对齐 nginx 的 try_files $uri $uri/ /index.html：
+// 1. public/<path>/index.html（部署在子目录的应用，如 public/admin/index.html）
+// 2. public/index.html（主题首页，交给前端路由接管，如 /goods、/user/profile）
+// 命中忽略前缀或主题未部署时返回 false，交回调用方处理
+func handleThemeRoute(ctx *gin.Context, path string) bool {
+	for _, prefix := range themeRouteIgnore {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return false
+		}
+	}
+
+	// 1. 目录形式：public/<path>/index.html
+	if dir := strings.Trim(path, "/"); dir != "" {
+		if target := "public/" + dir + "/index.html"; utils.File().Exist(target) {
+			return writeThemePage(ctx, target, path)
+		}
+	}
+
+	// 2. 兜底：主题首页，未部署时不回退，保持原有提示
+	if !utils.File().Exist("public/index.html") {
+		return false
+	}
+	return writeThemePage(ctx, "public/index.html", path)
+}
+
+// writeThemePage 输出主题页面
+func writeThemePage(ctx *gin.Context, file, path string) bool {
+	ctx.Header("Content-Type", "text/html; charset=utf-8")
+	if _, err := ctx.Writer.Write(utils.File().Byte(file).Byte); err != nil {
+		facade.Log.Error(map[string]any{"error": err, "path": path}, "写入主题页面失败")
+	}
+	return true
 }
 
 // handleImageFile 处理图片文件
