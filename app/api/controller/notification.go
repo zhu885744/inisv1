@@ -701,11 +701,16 @@ func (this *Notification) removeAll(ctx *gin.Context) {
 
 	params := this.params(ctx)
 	typ := cast.ToString(params["type"])
+	// is_read=1 时只清空「已读」通知（用于「清空已读消息」）
+	onlyRead := cast.ToBool(params["is_read"])
 
 	// 个人通知：软删除
 	item := facade.DB.Model(&model.Notification{}).Where("uid", uid)
 	if typ != "" {
 		item = item.Where("type", typ)
+	}
+	if onlyRead {
+		item = item.Where("is_read", 1)
 	}
 
 	columnData, _ := item.Column("id")
@@ -719,11 +724,30 @@ func (this *Notification) removeAll(ctx *gin.Context) {
 	}
 
 	// 广播通知：对该用户隐藏（不删除共享记录）
+	// 仅清空已读时，只隐藏该用户已读的广播通知（已读状态记录在 notification_read 表）
 	bcItem := facade.DB.Model(&[]model.Notification{}).Where("uid", 0)
 	if typ != "" {
 		bcItem = bcItem.Where("type", typ)
 	}
-	bcData, _ := bcItem.Column("id")
+	skipBroadcast := false
+	if onlyRead {
+		readData, _ := facade.DB.Model(&[]model.NotificationRead{}).
+			Where("uid", uid).
+			Where("is_read", 1).
+			Column("notification_id")
+		readIds := utils.Unity.Ids(readData)
+		if utils.Is.Empty(readIds) {
+			skipBroadcast = true
+		} else {
+			bcItem = bcItem.WhereIn("id", readIds)
+		}
+	}
+
+	var bcData any
+	if !skipBroadcast {
+		bcData, _ = bcItem.Column("id")
+	}
+
 	for _, nid := range utils.Unity.Ids(bcData) {
 		if err := (&model.Notification{}).HideBroadcast(cast.ToInt(nid), uid); err != nil {
 			facade.Log.Error(map[string]any{"error": err, "id": nid}, "隐藏广播通知失败")

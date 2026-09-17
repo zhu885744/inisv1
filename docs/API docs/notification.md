@@ -657,13 +657,14 @@ Content-Type: application/json
 
 - **路径**: `/api/notification/remove-all`
 - **方法**: `DELETE`
-- **描述**: 清空当前用户的通知，支持按类型批量清空
+- **描述**: 清空当前用户的通知，支持按类型批量清空、支持只清空已读
 
 **请求参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `type` | string | 否 | 通知类型：comment/like/follow/system，不传则清空全部 |
+| `is_read` | int | 否 | 传 `1` 时只清空「已读」通知（未读不受影响），不传则全部清空 |
 
 **请求示例**:
 ```json
@@ -673,6 +674,12 @@ Content-Type: application/json
 {
     "type": "comment"
 }
+```
+
+只清空已读（前端「清空已读」按钮对应场景，参数通过 query 传递）：
+
+```http
+DELETE /api/notification/remove-all?is_read=1
 ```
 
 **成功响应** (200):
@@ -879,7 +886,7 @@ function getActionLink(notif) {
 ### 6. 软删除机制
 - `remove` 方法执行软删除（设置 `delete_time`），可通过 `restore` 恢复
 - `delete` 方法执行物理删除，不可恢复
-- `remove-all` 方法执行软删除，支持按类型批量操作
+- `remove-all` 方法执行软删除，支持按类型批量操作，传 `is_read=1` 时只软删除已读通知（清空已读）
 - `clear` 方法彻底删除所有已软删除的数据
 
 ### 7. 索引优化

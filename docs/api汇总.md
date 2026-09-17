@@ -577,7 +577,7 @@ type ApiInterface interface {
 | PUT | `read-all` | `/api/notification/read-all` | 全部标记已读 |
 | PUT | `read-batch` | `/api/notification/read-batch` | 批量标记已读 |
 | DELETE | `remove` / `delete` / `clear` | `/api/notification/{method}` | 通用 |
-| DELETE | `remove-all` | `/api/notification/remove-all` | 清空全部通知 |
+| DELETE | `remove-all` | `/api/notification/remove-all` | 清空全部通知（传 `is_read=1` 只清空已读） |
 
 #### 通知类型（type 字段）
 
