@@ -169,21 +169,37 @@ func (this *Article) one(ctx *gin.Context) {
 		}
 	}
 
+	// 非管理员：判断是否为「作者本人查看」（本人可预览自己的待审核 / 未通过文章）
+	uid := this.user(ctx).Id
+	self := false
+	if !this.meta.root(ctx) && uid > 0 {
+		row, _ := facade.DB.Model(&model.Article{}).WithTrashed().Where("id", table.Id).Find()
+		self = cast.ToInt(row["uid"]) == uid
+	}
+
 	cacheName := this.cache.name(ctx)
-	if cached, ok := this.getFromCache(ctx, cacheName); ok {
-		msg[1] = "（来自缓存）"
-		data = cached
-	} else {
+	// 作者本人看到的结果可能包含未审核内容，与公共缓存不一致，因此不读也不写缓存
+	if !self {
+		if cached, ok := this.getFromCache(ctx, cacheName); ok {
+			msg[1] = "（来自缓存）"
+			data = cached
+		}
+	}
+
+	if utils.Is.Empty(data) {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
 
-		if !this.meta.root(ctx) {
+		// 非管理员只能看到已审核通过的文章，但作者本人可查看自己的全部状态
+		if !this.meta.root(ctx) && !self {
 			query = query.Where("audit", 1)
 		}
 
 		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
-		this.setCache(ctx, cacheName, data)
+		if !self {
+			this.setCache(ctx, cacheName, data)
+		}
 	}
 
 	if !utils.Is.Empty(data) {
@@ -217,7 +233,10 @@ func (this *Article) all(ctx *gin.Context) {
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
 
-	if !this.meta.root(ctx) {
+	// 非管理员默认只返回「已审核通过」的文章；
+	// 但查询条件已限定为本人文章时不过滤审核状态，
+	// 这样作者能在「我的文章」里看到自己的待审核 / 未通过内容
+	if !this.meta.root(ctx) && !this.isSelfQuery(ctx, params) {
 		query = query.Where("audit", 1)
 	}
 
@@ -392,18 +411,36 @@ func (this *Article) update(ctx *gin.Context) {
 		allowFields = append(allowFields, "top", "audit")
 	}
 
+	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
+
+	findResult, _ := item.Find()
+	if !root && cast.ToInt(findResult["uid"]) != this.user(ctx).Id {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
 	// 获取状态：0-草稿，1-发布
 	status := cast.ToInt(params["status"])
+	// 原文状态：用于判断是否「首次发布」，避免每次编辑都把审核状态重置为待审核
+	prevStatus := cast.ToInt(findResult["status"])
+	prevAudit := cast.ToInt(findResult["audit"])
 
 	if status == 0 {
 		// 草稿：跳过审核，不设置发布时间
 		async.Set("audit", 1)
 		async.Set("status", 0)
 	} else {
-		// 发布：应用审核规则
-		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-		async.Set("audit", cast.ToInt(!audit))
 		async.Set("status", 1)
+
+		// 审核规则：未开启审核 → 直接通过；
+		// 开启审核时，只有「首次发布」（原状态为草稿 / 尚未审核过）才进入待审核，
+		// 已审核过的文章再次编辑保存不会重置审核状态（审核状态可由管理员在编辑页修改）
+		auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+		if !auditSwitch {
+			async.Set("audit", 1)
+		} else if prevStatus == 0 || prevAudit == 0 {
+			async.Set("audit", 0)
+		}
 
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
 			async.Set("publish_time", cast.ToInt64(publishTime))
@@ -418,14 +455,6 @@ func (this *Article) update(ctx *gin.Context) {
 
 	async.Set("last_update", time.Now().Unix())
 
-	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
-
-	findResult, _ := item.Find()
-	if !root && cast.ToInt(findResult["uid"]) != this.user(ctx).Id {
-		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
-		return
-	}
-
 	_, err = item.Scan(&table).Update(async.Result())
 
 	if err != nil {
@@ -437,6 +466,39 @@ func (this *Article) update(ctx *gin.Context) {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
 	} else {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+	}
+}
+
+// isSelfQuery - 查询条件是否限定为「当前登录用户自己的文章」（与 moments / links 同名同义）
+// 作者在「我的文章」中需要看到自己的草稿与待审核 / 未通过内容，因此不再强制追加 audit=1。
+// 注意：这里要求 where.uid 有且只有当前用户（比 moments 的「包含即可」更严格），
+// 避免 uid 传数组时把他人未审核的文章一并带出来。
+func (this *Article) isSelfQuery(ctx *gin.Context, params map[string]any) (ok bool) {
+
+	uid := this.user(ctx).Id
+	if uid == 0 {
+		return false
+	}
+
+	// where 支持 JSON 字符串（前端）与 map 两种形式
+	where := cast.ToStringMap(params["where"])
+	if len(where) == 0 {
+		return false
+	}
+
+	value, exist := where["uid"]
+	if !exist {
+		return false
+	}
+
+	switch item := value.(type) {
+	case []any:
+		ids := cast.ToIntSlice(item)
+		return len(ids) == 1 && ids[0] == uid
+	case []int:
+		return len(item) == 1 && item[0] == uid
+	default:
+		return cast.ToInt(value) == uid
 	}
 }
 
