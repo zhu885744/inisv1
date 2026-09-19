@@ -401,7 +401,12 @@ func (this *Comm) register(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 头像等链接类字段使用 SanitizeURL，避免 URL 中的 & 被转义为 &amp;
+				if key == "avatar" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		// 防止恶意传入字段

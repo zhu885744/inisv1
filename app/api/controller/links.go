@@ -648,7 +648,12 @@ func (this *Links) create(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 链接类字段（网址 / 头像）使用 SanitizeURL，避免 & 被转义导致链接失效
+				if key == "url" || key == "avatar" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		if utils.In.Array(key, allow) {
@@ -697,7 +702,12 @@ func (this *Links) update(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 链接类字段（网址 / 头像）使用 SanitizeURL，避免 & 被转义导致链接失效
+				if key == "url" || key == "avatar" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		if utils.In.Array(key, allow) {

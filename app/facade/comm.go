@@ -211,6 +211,105 @@ func (c *CommStruct) SanitizeHTML(input string) string {
 	return strings.TrimSpace(clean)
 }
 
+// urlAmpEntityRegex - URL 中被实体化的 & 符号（&amp; / &#38; / &#x26;）
+// 用于修正历史数据：早期版本会把 URL 中的 & 转义成 &amp; 导致链接失效，重新保存时自动还原
+var urlAmpEntityRegex = regexp.MustCompile(`(?i)&(?:amp|#0*38|#x0*26);`)
+
+// trustedURLHosts - 可信外链域名白名单（按域名后缀匹配）
+// 说明：这些域名下的链接在 XSS 清洗时保持原样，避免 query 参数中的 & 被转义成 &amp;
+// 导致链接失效（如 QQ/微信 头像 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100 ）。
+var trustedURLHosts = []string{
+	"qlogo.cn",                     // QQ 头像：q1~q4.qlogo.cn / thirdqq.qlogo.cn
+	"wx.qlogo.cn",                  // 微信头像
+	"thirdwx.qlogo.cn",             // 微信开放平台头像
+	"mmbiz.qpic.cn",                // 微信公众号图片
+	"avatars.githubusercontent.com", // GitHub 头像
+	"gravatar.com",                 // Gravatar 头像
+	"secure.gravatar.com",
+}
+
+// IsTrustedURL 是否命中可信外链白名单（仅 http/https 链接参与匹配）
+func (c *CommStruct) IsTrustedURL(input string) bool {
+	value := strings.TrimSpace(input)
+	lower := strings.ToLower(value)
+
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return false
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+
+	// 包含引号/尖括号等可造成属性逃逸的字符时，不信任
+	if strings.ContainsAny(value, "<>\"'`") {
+		return false
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	for _, item := range trustedURLHosts {
+		if host == item || strings.HasSuffix(host, "."+item) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// SanitizeURL URL / 图片地址等「链接类」字段专用清洗
+//
+// 与 SanitizeHTML 的区别：bluemonday 会把纯文本中的 & 实体化为 &amp;，
+// 使 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100 这类多 query 参数的链接失效。
+// 处理规则（依次判定）：
+//  1. 命中可信域名白名单 → 原样返回
+//  2. 纯 URL（不含 < > " ' ` 与换行制表符，且协议安全）→ 原样返回（保留 & ）
+//  3. 其它情况 → 回退 SanitizeHTML，保证依旧安全
+//
+// 注意：调用方仍需先执行 DetectXSS 拦截恶意内容（如 javascript: 伪协议）。
+func (c *CommStruct) SanitizeURL(input string) string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return ""
+	}
+
+	// 0. 归一化：把历史上被实体化的 &（&amp; / &#38; / &#x26;）还原为 &，
+	//    旧数据在用户重新保存时会自动修好
+	value = urlAmpEntityRegex.ReplaceAllString(value, "&")
+
+	lower := strings.ToLower(value)
+
+	// 1. 脚本类伪协议：直接丢弃（DetectXSS 已拦截，这里兜底，避免调用方漏检时把伪协议存库）
+	if strings.Contains(lower, "javascript:") ||
+		strings.Contains(lower, "vbscript:") ||
+		strings.Contains(lower, "data:text/html") {
+		return ""
+	}
+
+	// 2. 白名单直通
+	if c.IsTrustedURL(value) {
+		return value
+	}
+
+	// 3. 纯 URL：无标签与引号，才能安全保留原始 & 符号
+	if !strings.ContainsAny(value, "<>\"'`") && !strings.ContainsAny(value, "\r\n\t") {
+		safeScheme := strings.HasPrefix(lower, "http://") ||
+			strings.HasPrefix(lower, "https://") ||
+			strings.HasPrefix(lower, "//") ||
+			strings.HasPrefix(lower, "/") ||
+			strings.HasPrefix(lower, "data:image/") ||
+			strings.HasPrefix(lower, "mailto:") ||
+			strings.HasPrefix(lower, "tel:")
+
+		if safeScheme {
+			return value
+		}
+	}
+
+	// 4. 兜底：按 HTML 清洗
+	return c.SanitizeHTML(value)
+}
+
 // DetectXSS 高精度 XSS 检测（防绕过）
 func (c *CommStruct) DetectXSS(input string) bool {
 	if input == "" {

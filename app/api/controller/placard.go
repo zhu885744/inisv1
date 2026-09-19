@@ -325,7 +325,12 @@ func (this *Placard) create(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 链接类字段使用 SanitizeURL，避免 & 被转义导致链接失效
+				if key == "url" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		if utils.In.Array(key, placardAllowFieldsSlice) {
@@ -368,7 +373,12 @@ func (this *Placard) update(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 链接类字段使用 SanitizeURL，避免 & 被转义导致链接失效
+				if key == "url" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		if utils.In.Array(key, placardAllowFieldsSlice) {

@@ -396,7 +396,14 @@ func (this *Users) create(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 头像等链接类字段使用 SanitizeURL：
+				// 避免 URL 中的 & 被 HTML 实体化为 &amp; 导致链接失效
+				// （如 QQ 头像 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100）
+				if key == "avatar" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		// 防止恶意传入字段
@@ -472,7 +479,14 @@ func (this *Users) update(ctx *gin.Context) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
 				}
-				val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				// 头像等链接类字段使用 SanitizeURL：
+				// 避免 URL 中的 & 被 HTML 实体化为 &amp; 导致链接失效
+				// （如 QQ 头像 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100）
+				if key == "avatar" {
+					val = facade.Comm.SanitizeURL(cast.ToString(val))
+				} else {
+					val = facade.Comm.SanitizeHTML(cast.ToString(val))
+				}
 			}
 		}
 		// 防止恶意传入字段

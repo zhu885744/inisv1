@@ -251,6 +251,42 @@ func (this meta) root(ctx *gin.Context) (ok bool) {
 	return false
 }
 
+// permit - 是否具备「管理员级」操作权限（与权限规则中间件 Rule 同一口径）
+//
+// 判定顺序：
+//  1. 所在分组 root=1 且规则含 all 或当前路由 → 放行（即 root() 的判定）
+//  2. 所在分组已授予当前路由的权限点（与中间件 Rule() 的判定完全一致）
+//
+// 为什么需要它：部分站点把管理员放在「非 root」分组里，只给该分组勾选了权限点。
+// 此时中间件 Rule() 会放行，但只用 root() 判断会把管理员误判为无权限
+// （表现为权限点已授予、接口却返回 403 无权限），因此管理员接口统一用本方法判定。
+func (this meta) permit(ctx *gin.Context) (ok bool) {
+
+	user := this.user(ctx)
+	if user.Id == 0 {
+		return false
+	}
+
+	// 1. root 分组
+	if this.root(ctx) {
+		return true
+	}
+
+	// 2. 与中间件一致：所在分组已授予的权限点
+	rules := this.rules(ctx)
+	if utils.Is.Empty(rules) {
+		return false
+	}
+
+	// 部分分组配置的是 hash，两条都判定一次
+	if hash := this.route(ctx).Hash; !utils.Is.Empty(hash) && utils.InArray[any](hash, rules) {
+		return true
+	}
+
+	name := fmt.Sprintf("[%v][%v]", strings.ToUpper(ctx.Request.Method), ctx.Request.URL.Path)
+	return utils.InArray[any](name, rules)
+}
+
 // 分页限制
 func (this meta) limit(ctx *gin.Context) (result int) {
 

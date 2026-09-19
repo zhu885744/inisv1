@@ -173,8 +173,8 @@ type ApiInterface interface {
 | 31 | `user-collects` | `UserCollects` | 收藏 | 收藏/取消收藏、收藏统计 |
 | 32 | `user-follows` | `UserFollows` | 关注 | 关注/取关、关注粉丝列表 |
 | 33 | `notification` | `Notification` | 通知 | 通知收发、已读管理 |
-| 34 | `integral` | `Integral` | 积分 | 积分余额、流水、任务规则、调整 |
-| 35 | `goods` | `Goods` | 商品/积分商城 | 商品、订单、兑换购买 |
+| 34 | `integral` | `Integral` | 积分 | 积分概览、流水筛选、今日任务、排行榜、调整 |
+| 35 | `goods` | `Goods` | 商品/积分商城 | 商品分类、兑换（限购/门槛/时间窗）、订单取消退款、确认收货、统计 |
 | 36 | `info` | `Info` | 系统信息（dev） | 系统/版本/设备/时间信息 |
 | 37 | `install` | `Install` | 安装（dev） | 安装锁、数据库初始化、创建管理员 |
 
@@ -612,24 +612,32 @@ type ApiInterface interface {
 
 | HTTP | method | 完整路径 | 说明 |
 | :--- | :--- | :--- | :--- |
-| GET | `status` | `/api/integral/status` | 查询当前用户积分余额（登录） |
-| GET | `all` | `/api/integral/all` | 积分流水列表（登录，仅自己的） |
-| GET | `rules` | `/api/integral/rules` | 积分任务规则（公开） |
-| POST | `give` | `/api/integral/give` | 调整用户积分（管理员） |
+| GET | `status` | `/api/integral/status` | 积分概览：余额 + 累计收支 + 今日收支（登录） |
+| GET | `all` | `/api/integral/all` | 积分流水（登录，支持 type/direction/start/end/keyword 筛选，返回区间收支合计） |
+| GET | `rules` | `/api/integral/rules` | 积分任务规则（公开，含图标） |
+| GET | `tasks` | `/api/integral/tasks` | 今日任务进度（登录，含完成次数/进度/连签天数） |
+| GET | `rank` | `/api/integral/rank` | 积分排行榜（公开，by=earned 累计获得 / balance 余额） |
+| POST | `give` | `/api/integral/give` | 调整用户积分（管理员，支持 uid 单个 / uids 批量） |
 
 ### 35. goods 商品控制器
 
 | HTTP | method | 完整路径 | 说明 |
 | :--- | :--- | :--- | :--- |
-| GET | `all` | `/api/goods/all` | 商品列表（公开，仅上架；管理员可查全部） |
-| GET | `one` | `/api/goods/one` | 商品详情（公开） |
+| GET | `all` | `/api/goods/all` | 商品列表（公开，仅上架；支持 category/keyword/order；含 can_buy 等兑换状态） |
+| GET | `one` | `/api/goods/one` | 商品详情（公开，含 can_buy/buy_reason/limit_remain） |
+| GET | `categories` | `/api/goods/categories` | 商品分类聚合（公开，用于分类筛选栏） |
 | GET | `count` | `/api/goods/count` | 商品数量 |
-| GET | `orders` | `/api/goods/orders` | 我的订单（登录，仅自己的） |
+| GET | `orders` | `/api/goods/orders` | 我的订单（登录，支持 status/goods_id 筛选） |
+| GET | `order-one` | `/api/goods/order-one` | 订单详情（登录，仅本人或管理员） |
+| GET | `my-stats` | `/api/goods/my-stats` | 我的兑换统计（登录） |
 | GET | `orders-all` | `/api/goods/orders-all` | 全部订单（管理员） |
-| POST | `buy` | `/api/goods/buy` | 购买商品（登录） |
+| GET | `stats` | `/api/goods/stats` | 商城统计：商品/订单/积分消耗（管理员） |
+| POST | `buy` | `/api/goods/buy` | 购买商品（登录，含限购/门槛/时间窗校验） |
 | POST | `save` / `create` | `/api/goods/{method}` | 商品保存/创建（管理员） |
 | PUT | `update` / `restore` | `/api/goods/{method}` | 商品更新/恢复（管理员） |
-| PUT | `order-status` | `/api/goods/order-status` | 更新订单状态（管理员） |
+| PUT | `order-status` | `/api/goods/order-status` | 更新订单状态（管理员，置 3 会自动退款回滚） |
+| PUT | `cancel-order` | `/api/goods/cancel-order` | 取消订单并退还积分（登录，仅待发货订单） |
+| PUT | `receive` | `/api/goods/receive` | 确认收货（登录，已发货 → 已完成） |
 | DELETE | `remove` / `delete` / `clear` | `/api/goods/{method}` | 商品删除（管理员） |
 
 ---

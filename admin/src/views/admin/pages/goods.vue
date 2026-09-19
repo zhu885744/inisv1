@@ -15,6 +15,60 @@
                     </div>
                 </div>
             </template>
+            <!-- 商城运营统计 -->
+            <div class="stats-bar">
+                <div class="stat-cell">
+                    <span class="stat-label">商品总数</span>
+                    <span class="stat-value">{{ state.stats.goods.total }}</span>
+                </div>
+                <div class="stat-cell">
+                    <span class="stat-label">上架中</span>
+                    <span class="stat-value">{{ state.stats.goods.on }}</span>
+                </div>
+                <div class="stat-cell">
+                    <span class="stat-label">库存预警</span>
+                    <span class="stat-value" :class="{ warn: state.stats.goods.stock_warn > 0 }">{{ state.stats.goods.stock_warn }}</span>
+                </div>
+                <div class="stat-cell">
+                    <span class="stat-label">待发货</span>
+                    <span class="stat-value" :class="{ warn: state.stats.order.pending > 0 }">{{ state.stats.order.pending }}</span>
+                </div>
+                <div class="stat-cell">
+                    <span class="stat-label">累计消耗积分</span>
+                    <span class="stat-value gold">{{ state.stats.integral.spent }}</span>
+                </div>
+                <div class="stat-cell">
+                    <span class="stat-label">累计退还积分</span>
+                    <span class="stat-value">{{ state.stats.integral.refund }}</span>
+                </div>
+            </div>
+
+            <!-- 商品筛选 -->
+            <div class="filter-bar">
+                <el-input
+                    v-model="state.filter.keyword"
+                    placeholder="搜索商品名称"
+                    clearable
+                    style="width: 200px"
+                    @keyup.enter="method.loadGoods(1)"
+                    @clear="method.loadGoods(1)"
+                />
+                <el-input
+                    v-model="state.filter.category"
+                    placeholder="商品分类"
+                    clearable
+                    style="width: 150px"
+                    @keyup.enter="method.loadGoods(1)"
+                    @clear="method.loadGoods(1)"
+                />
+                <el-select v-model="state.filter.status" placeholder="全部状态" clearable style="width: 130px" @change="method.loadGoods(1)">
+                    <el-option label="上架" :value="1" />
+                    <el-option label="下架" :value="0" />
+                </el-select>
+                <el-button type="primary" @click="method.loadGoods(1)">查询</el-button>
+                <el-button @click="method.resetFilter()">重置</el-button>
+            </div>
+
             <el-table :data="state.goodsList" border style="width: 100%;" v-loading="state.loading">
                 <el-table-column prop="id" label="ID" width="70" align="center"></el-table-column>
                 <el-table-column prop="cover" label="封面" width="80" align="center">
@@ -24,12 +78,48 @@
                     </template>
                 </el-table-column>
                 <el-table-column prop="title" label="商品名称" min-width="140"></el-table-column>
+                <el-table-column label="分类" width="110" align="center">
+                    <template #default="scope">
+                        <el-tag v-if="scope.row.category" size="small" type="info">{{ scope.row.category }}</el-tag>
+                        <span v-else style="color: var(--el-text-color-secondary)">-</span>
+                    </template>
+                </el-table-column>
                 <el-table-column prop="price" label="积分价格" width="100" align="center">
                     <template #default="scope">
                         <span style="font-weight:600;color:#d4a148">{{ scope.row.price }}</span>
                     </template>
                 </el-table-column>
-                <el-table-column prop="stock" label="库存" width="80" align="center"></el-table-column>
+                <el-table-column prop="stock" label="库存" width="80" align="center">
+                    <template #default="scope">
+                        <span :style="Number(scope.row.stock) <= 5 ? 'color: var(--el-color-danger); font-weight: 600' : ''">
+                            {{ scope.row.stock }}
+                        </span>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="sold" label="销量" width="80" align="center">
+                    <template #default="scope">
+                        <span>{{ scope.row.sold || 0 }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column label="兑换限制" min-width="150">
+                    <template #default="scope">
+                        <div style="display: flex; flex-wrap: wrap; gap: 4px">
+                            <el-tag v-if="Number(scope.row.limit_per_user) > 0" size="small" type="warning">
+                                限购 {{ scope.row.limit_per_user }}
+                            </el-tag>
+                            <el-tag v-if="Number(scope.row.min_exp) > 0" size="small" type="info">
+                                需经验 {{ scope.row.min_exp }}
+                            </el-tag>
+                            <el-tag v-if="method.timeWindowText(scope.row)" size="small" type="success">
+                                {{ method.timeWindowText(scope.row) }}
+                            </el-tag>
+                            <span
+                                v-if="!Number(scope.row.limit_per_user) && !Number(scope.row.min_exp) && !method.timeWindowText(scope.row)"
+                                style="color: var(--el-text-color-secondary)"
+                            >不限</span>
+                        </div>
+                    </template>
+                </el-table-column>
                 <el-table-column prop="type" label="类型" width="90" align="center">
                     <template #default="scope">
                         <el-tag :type="scope.row.type === 'physical' ? 'warning' : 'success'" size="small">
@@ -71,14 +161,27 @@
         <!-- 订单管理 -->
         <el-card style="margin-top: 12px">
             <template #header>
-                <div style="display: flex; align-items: center; gap: 8px">
-                    <i-svg name="level" size="18px" style="color: var(--el-color-primary)"></i-svg>
-                    <span style="font-weight: 600">订单管理</span>
-                    <el-tag size="small" type="warning">用户兑换处理</el-tag>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+                    <div style="display: flex; align-items: center; gap: 8px">
+                        <i-svg name="level" size="18px" style="color: var(--el-color-primary)"></i-svg>
+                        <span style="font-weight: 600">订单管理</span>
+                        <el-tag size="small" type="warning">用户兑换处理</el-tag>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px">
+                        <el-select v-model="state.orderFilter.status" placeholder="全部状态" clearable style="width: 130px" @change="method.loadOrders(1)">
+                            <el-option v-for="opt in method.orderStatusOptions()" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                        <el-button size="small" @click="method.loadOrders(1)">刷新订单</el-button>
+                    </div>
                 </div>
             </template>
             <el-table :data="state.orderList" border style="width: 100%;" v-loading="state.orderLoading">
                 <el-table-column prop="id" label="订单ID" width="80" align="center"></el-table-column>
+                <el-table-column prop="order_no" label="订单号" min-width="180" align="center">
+                    <template #default="scope">
+                        <span style="font-size: 12px">{{ scope.row.order_no || '-' }}</span>
+                    </template>
+                </el-table-column>
                 <el-table-column label="用户" width="150">
                     <template #default="scope">
                         <span>{{ scope.row.result?.user?.nickname || `用户#${scope.row.uid}` }}</span>
@@ -126,10 +229,16 @@
                         <span>{{ utils.time.to.date(scope.row.create_time, 'Y-m-d H:i:s') }}</span>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="160" align="center" fixed="right">
+                <el-table-column label="操作" width="190" align="center" fixed="right">
                     <template #default="scope">
                         <el-button v-if="Number(scope.row.status) === 0" size="small" type="primary" @click="method.openShip(scope.row)">发货</el-button>
                         <el-button v-if="Number(scope.row.status) === 1" size="small" type="success" @click="method.setOrderStatus(scope.row.id, 2)">完成</el-button>
+                        <el-button
+                            v-if="Number(scope.row.status) === 0"
+                            size="small"
+                            type="danger"
+                            @click="method.cancelOrder(scope.row)"
+                        >取消退款</el-button>
                     </template>
                 </el-table-column>
             </el-table>
@@ -145,44 +254,10 @@
             />
         </el-card>
 
-        <!-- 积分规则配置 -->
-        <el-card style="margin-top: 12px">
-            <template #header>
-                <div style="display: flex; align-items: center; gap: 8px">
-                    <span style="font-weight: 600">积分任务规则</span>
-                    <el-tag size="small" type="warning">用户赚取积分</el-tag>
-                </div>
-            </template>
-            <el-table :data="state.rulesList" border style="width: 100%;">
-                <el-table-column prop="name" label="任务名称" min-width="140">
-                    <template #default="scope">
-                        <el-input v-model="scope.row.name" size="small" />
-                    </template>
-                </el-table-column>
-                <el-table-column prop="value" label="积分" width="140">
-                    <template #default="scope">
-                        <el-input-number v-model="scope.row.value" :min="0" :max="9999" size="small" />
-                    </template>
-                </el-table-column>
-                <el-table-column prop="daily_limit" label="每日限制次数" width="160">
-                    <template #default="scope">
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                            <el-input-number v-model="scope.row.daily_limit" :min="0" :max="999" size="small" />
-                            <span style="font-size: 11px; color: var(--el-text-color-secondary)">（0=不限制）</span>
-                        </div>
-                    </template>
-                </el-table-column>
-                <el-table-column prop="type" label="类型" min-width="120">
-                    <template #default="scope">
-                        <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ scope.row.type }}</span>
-                    </template>
-                </el-table-column>
-            </el-table>
-            <div style="margin-top: 12px; display: flex; justify-content: flex-end">
-                <el-button @click="method.resetRules()">重置默认</el-button>
-                <el-button type="primary" @click="method.saveRules()" :loading="state.rulesSaving">保存规则</el-button>
-            </div>
-        </el-card>
+        <!-- 积分规则配置（与系统配置共用同一组件，避免两处维护） -->
+        <div style="margin-top: 12px">
+            <atom-integral-rules ref="integral-rules" />
+        </div>
 
         <!-- 商品编辑弹窗 -->
         <el-dialog v-model="state.dialog" class="custom" draggable :close-on-click-modal="false">
@@ -227,6 +302,38 @@
                             <span style="font-size: 12px; color: var(--el-text-color-secondary);">每行一个卡密，购买后随机发放一个</span>
                         </el-form-item>
                     </template>
+                    <el-form-item label="分类">
+                        <el-input v-model="state.form.category" placeholder="如 vip / coupon（用于前台分类筛选，可留空）"></el-input>
+                    </el-form-item>
+                    <el-form-item label="每人限购">
+                        <el-input-number v-model="state.form.limit_per_user" :min="0" :max="9999" style="width: 200px"></el-input-number>
+                        <span style="font-size: 12px; color: var(--el-text-color-secondary); margin-left: 8px">0 = 不限购</span>
+                    </el-form-item>
+                    <el-form-item label="经验门槛">
+                        <el-input-number v-model="state.form.min_exp" :min="0" :max="9999999" style="width: 200px"></el-input-number>
+                        <span style="font-size: 12px; color: var(--el-text-color-secondary); margin-left: 8px">0 = 不限</span>
+                    </el-form-item>
+                    <el-form-item label="兑换时间">
+                        <el-date-picker
+                            v-model="state.form.start_time"
+                            type="datetime"
+                            value-format="X"
+                            placeholder="开始时间（可留空）"
+                            style="width: 200px"
+                        />
+                        <span style="margin: 0 6px">至</span>
+                        <el-date-picker
+                            v-model="state.form.end_time"
+                            type="datetime"
+                            value-format="X"
+                            placeholder="结束时间（可留空）"
+                            style="width: 200px"
+                        />
+                    </el-form-item>
+                    <el-form-item label="排序权重">
+                        <el-input-number v-model="state.form.sort" :min="0" :max="99999" style="width: 200px"></el-input-number>
+                        <span style="font-size: 12px; color: var(--el-text-color-secondary); margin-left: 8px">越大越靠前</span>
+                    </el-form-item>
                     <el-form-item label="上架状态">
                         <el-switch v-model="state.form.status" :active-value="1" :inactive-value="0" active-text="上架" inactive-text="下架" />
                     </el-form-item>
@@ -268,16 +375,9 @@
 <script setup>
 import utils from '{src}/utils/utils'
 import axios from '{src}/utils/request'
+import AtomIntegralRules from '{src}/comps/admin/atom/integral-rules.vue'
 
 const { ctx, proxy } = getCurrentInstance()
-
-const DEFAULT_RULES = {
-    'check-in': { name: '每日签到', value: 5, daily_limit: 1 },
-    'login': { name: '每日登录', value: 2, daily_limit: 1 },
-    'article-create': { name: '发布文章', value: 10, daily_limit: 5 },
-    'comment': { name: '发表评论', value: 2, daily_limit: 10 },
-    'moments': { name: '发布动态', value: 20, daily_limit: 1 }
-}
 
 const state = reactive({
     goodsList: [],
@@ -288,12 +388,25 @@ const state = reactive({
     dialog: false,
     saving: false,
     form: {},
-    rulesList: [],
-    rulesSaving: false,
+    // 商城统计
+    stats: {
+        goods: { total: 0, on: 0, off: 0, stock_warn: 0 },
+        order: { total: 0, pending: 0, shipped: 0, completed: 0, canceled: 0 },
+        integral: { spent: 0, refund: 0, net: 0 }
+    },
+    // 商品筛选
+    filter: {
+        keyword: '',
+        category: '',
+        status: null
+    },
     orderList: [],
     orderTotal: 0,
     orderPage: 1,
     orderLoading: false,
+    orderFilter: {
+        status: null
+    },
     shipDialog: false,
     shipSaving: false,
     shipForm: {}
@@ -304,25 +417,76 @@ const method = {
         state.page = page
         state.loading = true
         try {
-            const { code, data } = await axios.get('/api/goods/all', {
+            const params = {
                 page: state.page,
                 limit: state.pageSize,
-                order: 'create_time desc'
-            })
-            if (code === 200) {
-                state.goodsList = data.data || []
-                state.total = data.count || 0
+                order: 'sort desc, id desc'
             }
+            if (!utils.is.empty(state.filter.keyword)) params.keyword = state.filter.keyword
+            if (!utils.is.empty(state.filter.category)) params.category = state.filter.category
+            if (state.filter.status !== null && state.filter.status !== '') params.status = state.filter.status
+
+            const { code, msg, data } = await axios.get('/api/goods/all', params)
+            if (code !== 200) {
+                ElMessage.error('商品列表加载失败：' + (msg || '未知错误'))
+                state.goodsList = []
+                state.total = 0
+                return
+            }
+            state.goodsList = data.data || []
+            state.total = data.count || 0
+        } catch (e) {
+            ElMessage.error('商品列表加载异常：' + (e?.message || e))
         } finally {
             state.loading = false
         }
     },
+    resetFilter() {
+        state.filter = { keyword: '', category: '', status: null }
+        method.loadGoods(1)
+    },
+    async loadStats() {
+        try {
+            const { code, msg, data } = await axios.get('/api/goods/stats')
+            // 不再静默失败：接口异常时明确提示，避免统计区一直显示 0 让人误以为没有数据
+            if (code !== 200) {
+                ElMessage.error('商城统计获取失败：' + (msg || '未知错误'))
+                return
+            }
+            state.stats = {
+                goods: data.goods || state.stats.goods,
+                order: data.order || state.stats.order,
+                integral: data.integral || state.stats.integral
+            }
+        } catch (e) {
+            ElMessage.error('商城统计请求异常：' + (e?.message || e))
+        }
+    },
+    // 兑换时间窗口展示文案
+    timeWindowText(row) {
+        const start = Number(row.start_time) || 0
+        const end = Number(row.end_time) || 0
+        if (!start && !end) return ''
+        const fmt = (ts) => utils.time.to.date(ts, 'Y-m-d H:i')
+        if (start && end) return `${fmt(start)} ~ ${fmt(end)}`
+        if (start) return `${fmt(start)} 起`
+        return `${fmt(end)} 止`
+    },
     add() {
-        state.form = { title: '', description: '', cover: '', price: 0, stock: 0, status: 1, type: 'virtual', deliver_type: 'text', deliver_content: '', cards_text: '' }
+        state.form = {
+            title: '', description: '', cover: '', price: 0, stock: 0, status: 1,
+            type: 'virtual', deliver_type: 'text', deliver_content: '', cards_text: '',
+            category: '', limit_per_user: 0, min_exp: 0, sort: 0, start_time: null, end_time: null
+        }
         state.dialog = true
     },
     edit(row) {
-        state.form = { ...row }
+        state.form = {
+            ...row,
+            // 时间戳转字符串，供 el-date-picker（value-format="X"）使用
+            start_time: row.start_time ? String(row.start_time) : null,
+            end_time: row.end_time ? String(row.end_time) : null
+        }
         // 卡密池 JSON 数组转成每行一个的文本
         let cards = []
         try { cards = JSON.parse(row.cards || '[]') } catch { cards = [] }
@@ -339,11 +503,19 @@ const method = {
         }
         state.saving = true
         try {
-            const { code, msg } = await axios.post('/api/goods/save', state.form)
+            const payload = {
+                ...state.form,
+                start_time: Number(state.form.start_time) || 0,
+                end_time: Number(state.form.end_time) || 0,
+                limit_per_user: Number(state.form.limit_per_user) || 0,
+                min_exp: Number(state.form.min_exp) || 0,
+                sort: Number(state.form.sort) || 0
+            }
+            const { code, msg } = await axios.post('/api/goods/save', payload)
             if (code !== 200) return ElMessage.error(msg)
             ElMessage.success('保存成功')
             state.dialog = false
-            await method.loadGoods()
+            await Promise.all([method.loadGoods(), method.loadStats()])
         } finally {
             state.saving = false
         }
@@ -359,56 +531,29 @@ const method = {
         ElMessage.success('删除成功')
         await method.loadGoods()
     },
-    async loadRules() {
-        const { code, data } = await axios.get('/api/config/one', { key: 'SYSTEM_INTEGRAL_RULES' })
-        if (code !== 200) return
-        const json = data?.json || {}
-        state.rulesList = Object.keys(DEFAULT_RULES).map(key => ({
-            type: key,
-            name: json[key]?.name || DEFAULT_RULES[key].name,
-            value: Number(json[key]?.value ?? DEFAULT_RULES[key].value),
-            daily_limit: Number(json[key]?.daily_limit ?? DEFAULT_RULES[key].daily_limit)
-        }))
-    },
-    resetRules() {
-        state.rulesList = Object.keys(DEFAULT_RULES).map(key => ({
-            type: key,
-            name: DEFAULT_RULES[key].name,
-            value: DEFAULT_RULES[key].value,
-            daily_limit: DEFAULT_RULES[key].daily_limit
-        }))
-        ElMessage.success('已重置为默认值')
-    },
-    async saveRules() {
-        state.rulesSaving = true
-        try {
-            const rules = {}
-            state.rulesList.forEach(item => {
-                rules[item.type] = { name: item.name, value: item.value, daily_limit: item.daily_limit }
-            })
-            const { code, msg } = await axios.post('/api/config/save', {
-                key: 'SYSTEM_INTEGRAL_RULES',
-                json: JSON.stringify(rules)
-            })
-            if (code !== 200) return ElMessage.error('保存失败：' + msg)
-            ElMessage.success('保存成功')
-        } finally {
-            state.rulesSaving = false
-        }
-    },
     async loadOrders(page = state.orderPage) {
         state.orderPage = page
         state.orderLoading = true
         try {
-            const { code, data } = await axios.get('/api/goods/orders-all', {
+            const params = {
                 page: state.orderPage,
                 limit: state.pageSize,
                 order: 'create_time desc'
-            })
-            if (code === 200) {
-                state.orderList = data.data || []
-                state.orderTotal = data.count || 0
             }
+            if (state.orderFilter.status !== null && state.orderFilter.status !== '') {
+                params.status = state.orderFilter.status
+            }
+            const { code, msg, data } = await axios.get('/api/goods/orders-all', params)
+            if (code !== 200) {
+                ElMessage.error('订单加载失败：' + (msg || '未知错误'))
+                state.orderList = []
+                state.orderTotal = 0
+                return
+            }
+            state.orderList = data.data || []
+            state.orderTotal = data.count || 0
+        } catch (e) {
+            ElMessage.error('订单加载异常：' + (e?.message || e))
         } finally {
             state.orderLoading = false
         }
@@ -439,24 +584,46 @@ const method = {
             state.shipSaving = false
         }
     },
+    // 管理员取消订单：退还用户积分并回滚库存（后端事务处理）
+    async cancelOrder(row) {
+        try {
+            await ElMessageBox.confirm(
+                `确定取消订单 ${row.order_no || row.id} 吗？将退还用户 ${row.price} 积分并回滚商品库存。`,
+                '取消订单',
+                { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '再想想' }
+            )
+        } catch {
+            return
+        }
+        const { code, msg } = await axios.put('/api/goods/order-status', { id: row.id, status: 3 })
+        if (code !== 200) return ElMessage.error(msg)
+        ElMessage.success('订单已取消，积分已退还')
+        await Promise.all([method.loadOrders(), method.loadGoods(), method.loadStats()])
+    },
+    orderStatusOptions: () => ([
+        { value: 0, label: '待发货' },
+        { value: 1, label: '已发货' },
+        { value: 2, label: '已完成' },
+        { value: 3, label: '已取消' }
+    ]),
     orderStatusText: (s) => {
-        const map = { 0: '待发货', 1: '已发货', 2: '已完成' }
+        const map = { 0: '待发货', 1: '已发货', 2: '已完成', 3: '已取消' }
         return map[s] ?? '未知'
     },
     orderStatusTag: (s) => {
-        const map = { 0: 'warning', 1: 'primary', 2: 'success' }
+        const map = { 0: 'warning', 1: 'primary', 2: 'success', 3: 'info' }
         return map[s] ?? 'info'
     },
     async refreshAll() {
-        await Promise.all([method.loadGoods(), method.loadRules(), method.loadOrders()])
+        await Promise.all([method.loadGoods(), method.loadOrders(), method.loadStats()])
         ElMessage.success('已刷新')
     }
 }
 
 onMounted(async () => {
     await method.loadGoods()
-    await method.loadRules()
     await method.loadOrders()
+    await method.loadStats()
 })
 </script>
 
@@ -465,5 +632,47 @@ onMounted(async () => {
     margin-top: 12px;
     display: flex;
     justify-content: flex-end;
+}
+
+/* 商城运营统计 */
+.stats-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.stat-cell {
+    flex: 1;
+    min-width: 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--el-fill-color-lighter);
+}
+.stat-label {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+}
+.stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+.stat-value.warn {
+    color: var(--el-color-danger);
+}
+.stat-value.gold {
+    color: #d4a148;
+}
+
+/* 商品筛选 */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
 }
 </style>

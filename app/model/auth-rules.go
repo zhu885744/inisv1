@@ -391,6 +391,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=status&type=login&name=积分余额",
 				"path=all&type=login&name=积分流水",
 				"path=rules&type=common&name=积分任务规则",
+				"path=tasks&type=login&name=今日任务进度",
+				"path=rank&type=common&name=积分排行榜",
 			},
 			"POST": {
 				"path=give&type=root&name=调整积分",
@@ -400,14 +402,20 @@ func createAuthRules() (result []AuthRules) {
 			"GET": {
 				"path=one&type=common&name=商品详情",
 				"path=all&type=common&name=商品列表",
+				"path=categories&type=common&name=商品分类",
 				"path=orders&type=login&name=我的订单",
+				"path=order-one&type=login&name=订单详情",
+				"path=my-stats&type=login&name=我的兑换统计",
 				"path=orders-all&type=root&name=全部订单",
+				"path=stats&type=root&name=商城统计",
 				"path=count&type=common&name=商品数量",
 			},
 			"PUT": {
 				"path=update&type=root&name=更新商品",
 				"path=restore&type=root&name=恢复商品",
 				"path=order-status&type=root&name=更新订单状态",
+				"path=cancel-order&type=login&name=取消订单",
+				"path=receive&type=login&name=确认收货",
 			},
 			"POST": {
 				"path=buy&type=login&name=购买商品",
