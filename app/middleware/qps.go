@@ -185,7 +185,17 @@ func qpsAutoUnban() {
 			Scan(&expiredIPs)
 
 		for _, ipBlack := range expiredIPs {
-			facade.DB.Model(&model.IpBlack{}).Where("id", ipBlack.Id).Delete(&model.IpBlack{})
+			// 按主键删除：Delete 的参数必须是 id 或 id 切片。
+			// 之前传的是 &model.IpBlack{}，会拼成 `id = <struct>` 这种非法条件导致删除失败，
+			// 行删不掉 → 每 5 分钟又会被扫出来「重复解封」一次。
+			if _, err := facade.DB.Model(&model.IpBlack{}).Delete([]int{ipBlack.Id}); err != nil {
+				facade.Log.Error(map[string]any{
+					"error": err.Error(),
+					"id":    ipBlack.Id,
+					"ip":    ipBlack.Ip,
+				}, "IP自动解封失败")
+				continue
+			}
 			facade.Log.Info(map[string]any{
 				"ip":    ipBlack.Ip,
 				"level": ipBlack.Level,

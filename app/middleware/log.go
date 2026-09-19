@@ -16,8 +16,10 @@ import (
 // GinLogger - 接收gin框架默认的日志
 func GinLogger() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+		// 在进入业务处理前取时间，日志里的 cost 才是真实请求耗时
+		start := time.Now()
 		ctx.Next()
-		go logRequest(ctx)
+		go logRequest(ctx, start)
 	}
 }
 
@@ -86,9 +88,8 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 	}
 }
 
-// logRequest - 记录请求日志
-func logRequest(ctx *gin.Context) {
-	start := time.Now()
+// logRequest - 记录请求日志（start 由中间件在 ctx.Next() 之前取得）
+func logRequest(ctx *gin.Context, start time.Time) {
 	params, _ := ctx.Get("params")
 
 	path := ctx.Request.URL.Path
