@@ -14,6 +14,15 @@ import (
 	"gorm.io/plugin/soft_delete"
 )
 
+// 通知类型常量
+const (
+	NotificationTypeComment = "comment" // 收到评论/回复
+	NotificationTypeLike    = "like"    // 被点赞
+	NotificationTypeCollect = "collect" // 被收藏
+	NotificationTypeFollow  = "follow"  // 被关注
+	NotificationTypeSystem  = "system"  // 系统消息（含管理员调整积分等积分变动通知）
+)
+
 type Notification struct {
 	Id       int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Uid      int    `gorm:"type:int(32); comment:接收用户ID 0表示广播通知(推送给全体用户);" json:"uid"`

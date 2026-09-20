@@ -47,7 +47,8 @@ export default ({ mode }) => {
         js: [
             '/vue@3/dist/vue.global.js',
             '/vuex@4.0.0/dist/vuex.global.js',
-            '/vue-router@4.1.6/dist/vue-router.global.js',
+            // vue-router 已升级到 5.x，CDN 全局构建同步使用 5.x
+            '/vue-router@5/dist/vue-router.global.js',
             '/axios/dist/axios.min.js',
             '/@vueuse/shared'
         ],

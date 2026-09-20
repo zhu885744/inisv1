@@ -253,6 +253,40 @@ ALTER TABLE pages ADD INDEX idx_pages_key (key);
 ALTER TABLE pages ADD INDEX idx_pages_uid (uid);
 ```
 
+### 13. integral_card 积分卡密表
+
+**常用查询模式**：
+- 根据 `card` 查询卡密（兑换核心路径，需唯一）
+- 根据 `status`（使用状态）筛选
+- 根据 `batch`（批次）管理
+- 根据 `uid` 查询某用户兑换的卡密
+- 根据 `expire_time` 判断是否过期
+
+```sql
+-- 主键索引（已存在）
+ALTER TABLE integral_card ADD PRIMARY KEY (id);
+
+-- 卡密唯一索引（兑换、去重）
+ALTER TABLE integral_card ADD UNIQUE INDEX uk_integral_card (card);
+
+-- 状态索引（未使用/已使用筛选）
+ALTER TABLE integral_card ADD INDEX idx_integral_card_status (status);
+
+-- 面额索引
+ALTER TABLE integral_card ADD INDEX idx_integral_card_value (value);
+
+-- 批次索引（按批次管理）
+ALTER TABLE integral_card ADD INDEX idx_integral_card_batch (batch);
+
+-- 过期时间索引
+ALTER TABLE integral_card ADD INDEX idx_integral_card_expire_time (expire_time);
+
+-- 使用者索引
+ALTER TABLE integral_card ADD INDEX idx_integral_card_uid (uid);
+```
+
+> 说明：以上索引均在模型 `IntegralCard` 中通过 GORM 结构体 tag 声明，`AutoMigrate` 会自动创建，无需手工执行。
+
 ---
 
 ## 索引创建脚本
@@ -316,6 +350,14 @@ ALTER TABLE inis_link ADD INDEX idx_link_state (state);
 -- ==================== page 表 ====================
 ALTER TABLE inis_page ADD INDEX idx_page_key (`key`);
 ALTER TABLE inis_page ADD INDEX idx_page_uid (uid);
+
+-- ==================== integral_card 表 ====================
+ALTER TABLE inis_integral_card ADD UNIQUE INDEX uk_integral_card (card);
+ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_status (status);
+ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_value (value);
+ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_batch (batch);
+ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_expire_time (expire_time);
+ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_uid (uid);
 ```
 
 ---

@@ -64,6 +64,7 @@ func InitTable() {
 		{"NotificationRead", InitNotificationRead},
 		{"Integral", InitIntegral},
 		{"Goods", InitGoods},
+		{"IntegralCard", InitIntegralCard},
 	}
 
 	for _, item := range allow {

@@ -9,7 +9,8 @@ export const replace = (mode) => {
             const name = 'inis.api'
 
             // 读取 .env 文件中的 VITE_API_URI 变量
-            const env = loadEnv(mode, __dirname)
+            // 说明：Vite 8 起 configLoader 原生模式下不再支持 CommonJS 的 __dirname，改用 ESM 的 import.meta.dirname
+            const env = loadEnv(mode, import.meta.dirname)
 
             // 定义正则表达式
             // const regex = new RegExp(`["']${env.VITE_API_TEST}["']`, 'g')

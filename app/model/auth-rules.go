@@ -384,9 +384,18 @@ func createAuthRules() (result []AuthRules) {
 				"path=rules&type=common&name=积分任务规则",
 				"path=tasks&type=login&name=今日任务进度",
 				"path=rank&type=common&name=积分排行榜",
+				"path=card-all&type=root&name=卡密列表",
+				"path=card-stats&type=root&name=卡密统计",
+				"path=card-export&type=root&name=导出未使用卡密",
 			},
 			"POST": {
 				"path=give&type=root&name=调整积分",
+				"path=card-generate&type=root&name=生成卡密",
+				"path=card-redeem&type=login&name=卡密兑换积分",
+			},
+			"DELETE": {
+				"path=card-remove&type=root&name=删除卡密",
+				"path=card-delete&type=root&name=彻底删除卡密",
 			},
 		},
 		"goods": {

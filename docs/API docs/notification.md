@@ -13,6 +13,7 @@
 | 文章/页面/动态被点赞 | `like` | 内容作者 | "xxx 赞了你的{内容类型}「{内容标题}」" |
 | 文章/页面/动态被收藏 | `collect` | 内容作者 | "xxx 收藏了你的{内容类型}「{内容标题}」" |
 | 被用户关注 | `follow` | 被关注者 | "xxx 关注了你" |
+| 管理员调整积分 | `system` | 目标用户 | "管理员为你增加了 N 积分，当前积分余额为 M。"（归入系统通知，不单独占用类型） |
 | 系统消息 | `system` | 指定用户 | 自定义 |
 
 ### 接口类型说明
@@ -48,7 +49,7 @@
 | `id` | int | 主键，自增 |
 | `uid` | int | 接收通知的用户ID |
 | `from_uid` | int | 触发通知的用户ID |
-| `type` | string | 通知类型：comment/like/follow/system |
+| `type` | string | 通知类型：comment/like/collect/follow/system（管理员调整积分触发的积分变动通知归入 `system`） |
 | `title` | string | 通知标题 |
 | `content` | string | 通知内容 |
 | `bind_id` | int | 关联实体ID（文章/评论/用户等） |

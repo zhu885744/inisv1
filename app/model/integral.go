@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"inis/app/facade"
 	"time"
 
@@ -25,6 +26,7 @@ const (
 	IntegralTypeBuy           = "buy"            // 商城兑换（消耗）
 	IntegralTypeRefund        = "refund"         // 订单取消/退款返还（获得）
 	IntegralTypeGive          = "give"           // 管理员调整
+	IntegralTypeCard          = "card"           // 卡密兑换（获得）
 )
 
 // defaultIntegralRules - 默认积分任务规则（作为配置缺失时的兜底）
@@ -447,4 +449,39 @@ func (this *Integral) Add(table Integral) (err error) {
 
 	facade.Log.Info(map[string]any{"uid": table.Uid, "type": table.Type, "value": value}, "积分变动成功")
 	return nil
+}
+
+// IntegralGiveNotify - 管理员调整积分后向用户发送消息通知
+// 说明：
+//  1. 积分变动通知「仅」在管理员发放/扣除积分（give）时触发，其它积分变动（任务奖励、商城消耗、卡密兑换等）不发送通知；
+//  2. 通知类型统一归入系统通知（system），不单独占用通知类型。
+//
+// uid: 接收用户；value: 变动值（正=增加 负=扣除）；balance: 变动后余额；description: 管理员填写的备注
+func IntegralGiveNotify(uid, value, balance int, description string) {
+	if uid <= 0 || value == 0 {
+		return
+	}
+
+	// 变动的绝对数量（展示为「增加了 N 积分」而非负数）
+	amount := value
+	if amount < 0 {
+		amount = -amount
+	}
+
+	title := "积分增加通知"
+	action := "增加"
+	if value < 0 {
+		title = "积分扣除通知"
+		action = "扣除"
+	}
+
+	content := fmt.Sprintf("管理员为你%s了 %d 积分，当前积分余额为 %d。", action, amount, balance)
+	if !utils.Is.Empty(description) {
+		content += "备注：" + description
+	}
+
+	_, err := (&Notification{}).CreateNotification(uid, 0, NotificationTypeSystem, title, content, "", 0)
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err, "uid": uid, "value": value}, "积分变动通知发送失败")
+	}
 }
