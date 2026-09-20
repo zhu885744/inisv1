@@ -62,15 +62,6 @@ func InitAuthRules() {
 func createAuthRules() (result []AuthRules) {
 
 	batch := map[string]map[string][]string{
-		"test": {
-			"GET": {
-				"path=&name=测试专用&type=common",
-				"path=request&name=测试GET请求&type=common",
-			},
-			"PUT":    {"path=request&name=测试GET请求&type=common"},
-			"POST":   {"path=request&name=测试GET请求&type=common"},
-			"DELETE": {"path=request&name=测试GET请求&type=common"},
-		},
 		"proxy": {
 			"GET":    {"path=&name=代理 GET 请求&type=login"},
 			"PUT":    {"path=&name=代理 PUT 请求&type=login"},
@@ -638,7 +629,6 @@ func createAuthRules() (result []AuthRules) {
 	// 接口名称
 	names := map[string]string{
 		"exp":           "【经验值 API】",
-		"test":          "【测试 API】",
 		"proxy":         "【代理 API】",
 		"user-follows":  "【用户关注 API】",
 		"user-likes":    "【用户点赞 API】",

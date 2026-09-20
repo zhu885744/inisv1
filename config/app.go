@@ -21,10 +21,14 @@ import (
 
 // HTTP响应常量
 const (
-	SuccessCode      = 200
-	ErrorCode        = 400
-	ServerErrorCode  = 500
-	StatusNotFound   = 404
+	// HTTPStatusOK - 统一使用 HTTP 200 作为响应状态码
+	// 业务层面的成功/失败由响应体的 code 字段表达，故不以 Success 命名，避免被误读为「业务成功」
+	HTTPStatusOK = 200
+	// CodeError - 业务错误码（写入响应体 code 字段）
+	CodeError = 400
+	// CodeServerError - 业务服务器错误码（写入响应体 code 字段）
+	CodeServerError = 500
+
 	InternalErrorMsg = "服务器内部错误！"
 	ResourceNotFound = "资源不存在！"
 	FileReadError    = "文件读取失败！"
@@ -57,6 +61,7 @@ var Server *http.Server
 
 func init() {
 	initAppToml()
+	loadThemeRouteIgnore()
 	InitApp()
 }
 
@@ -125,17 +130,17 @@ func notRoute(Gin *gin.Engine) {
 	Gin.NoRoute(func(ctx *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				ctx.JSON(SuccessCode, gin.H{"code": ServerErrorCode, "msg": InternalErrorMsg, "data": nil})
+				ctx.JSON(HTTPStatusOK, gin.H{"code": CodeServerError, "msg": InternalErrorMsg, "data": nil})
 			}
 		}()
 
-		ctx.Status(SuccessCode)
+		ctx.Status(HTTPStatusOK)
 
 		path := ctx.Request.URL.Path
 
 		// 路径安全校验：拒绝目录穿越（../），防止读取 public 目录之外的任意文件
 		if strings.Contains(path, "..") {
-			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": RouteNotDefined, "data": nil})
+			ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": RouteNotDefined, "data": nil})
 			return
 		}
 
@@ -156,13 +161,13 @@ func notRoute(Gin *gin.Engine) {
 			ext = strings.ToLower(fileName[lastDot+1:])
 		}
 
-		isExist := checkFileExist(ctx, "public"+path)
+		isExist := fileExist
 		writeErrorGif := writeGifError(ctx)
 		writeImage := writeImageFile(ctx)
 
 		switch {
 		case utils.In.Array(fileName, PageFiles):
-			handlePageFile(ctx, prefix, writeErrorGif)
+			handlePageFile(ctx, prefix)
 		case utils.In.Array(ext, ImageFiles):
 			handleImageFile(ctx, path, ext, writeImage, writeErrorGif, isExist)
 		case strings.Contains(fileName, "."):
@@ -173,31 +178,38 @@ func notRoute(Gin *gin.Engine) {
 			if handleThemeRoute(ctx, path) {
 				return
 			}
-			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": RouteNotDefined, "data": nil})
+			ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": RouteNotDefined, "data": nil})
 		}
 	})
 }
 
-// checkFileExist 检查文件是否存在
-func checkFileExist(ctx *gin.Context, path string) func(string) bool {
-	return func(checkPath string) bool {
-		if !strings.HasPrefix(checkPath, "public") {
-			checkPath = "public/" + checkPath
-		}
-		exist := utils.File().Exist(checkPath)
-		if !exist {
-			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
-		}
-		return exist
+// fileExist 检查 public 下的文件是否存在
+// 纯函数：只做判断，不产生任何响应写入，避免调用方在已写入响应体后再追加 JSON 造成响应错乱
+func fileExist(path string) bool {
+	if !strings.HasPrefix(path, "public") {
+		path = "public/" + path
 	}
+	return utils.File().Exist(path)
 }
 
-// writeGifError 写入错误GIF
+// writeGifError 写入错误占位图（如 404.gif、error.gif）
 func writeGifError(ctx *gin.Context) func(string) {
 	return func(gifName string) {
-		_, err := ctx.Writer.Write(utils.File().Byte("public/assets/images/gif/" + gifName).Byte)
-		if err != nil {
-			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
+		path := "public/assets/images/gif/" + gifName
+
+		// 占位图本身不存在：此时尚未写入图片字节，可正常返回统一 JSON 提示
+		if !utils.File().Exist(path) {
+			facade.Log.Error(map[string]any{"path": path}, "错误占位图不存在")
+			ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": ResourceNotFound, "data": nil})
+			return
+		}
+
+		// 覆盖调用方可能已设置的 Content-Type，确保与 GIF 内容一致
+		ctx.Header("Content-Type", utils.Mime.Type("gif")+"; charset=utf-8")
+
+		if _, err := ctx.Writer.Write(utils.File().Byte(path).Byte); err != nil {
+			// 响应体已开始写入，HTTP 状态码不可再修改，仅记录日志
+			facade.Log.Error(map[string]any{"error": err, "path": path}, "写入错误占位图失败")
 		}
 	}
 }
@@ -206,20 +218,20 @@ func writeGifError(ctx *gin.Context) func(string) {
 func writeImageFile(ctx *gin.Context) func(string, string) {
 	return func(path string, ext string) {
 		ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-		_, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
-		if err != nil {
-			ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": ResourceNotFound, "data": nil})
+		// 这里已经开始写响应体，HTTP 状态码无法再更改，出错只记录日志
+		if _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "path": path}, "写入图片文件失败")
 		}
 	}
 }
 
 // handlePageFile 处理页面文件
-func handlePageFile(ctx *gin.Context, prefix string, writeErrorGif func(string)) {
+func handlePageFile(ctx *gin.Context, prefix string) {
 	if check := utils.File().Exist("public/" + prefix + "/index.html"); check {
 		ctx.Header("Content-Type", "text/html; charset=utf-8")
-		_, err := ctx.Writer.Write(utils.File().Byte("public" + prefix + "/index.html").Byte)
-		if err != nil {
-			writeErrorGif("error.gif")
+		// 这里已经开始写响应体，HTTP 状态码无法再更改，出错只记录日志
+		if _, err := ctx.Writer.Write(utils.File().Byte("public" + prefix + "/index.html").Byte); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "path": prefix + "/index.html"}, "写入页面文件失败")
 		}
 		return
 	}
@@ -227,8 +239,43 @@ func handlePageFile(ctx *gin.Context, prefix string, writeErrorGif func(string))
 	handleThemeRoute(ctx, prefix+"/")
 }
 
-// themeRouteIgnore - 不做主题回退的路径前缀（接口与静态资源保持原有响应，便于排查问题）
-var themeRouteIgnore = []string{"/api", "/dev", "/socket", "/assets"}
+// themeRouteIgnoreDefault - 主题回退默认忽略的路径前缀（接口与静态资源保持原有响应，便于排查问题）
+var themeRouteIgnoreDefault = []string{"/api", "/dev", "/socket", "/assets"}
+
+// themeRouteIgnore - 主题回退忽略的路径前缀
+// 可通过 config/app.toml 的 app.theme_ignore_prefix 配置（多个用英文逗号分隔），无需改代码
+var themeRouteIgnore = themeRouteIgnoreDefault
+
+// loadThemeRouteIgnore - 从配置加载主题回退忽略前缀，未配置时回退默认值
+func loadThemeRouteIgnore() {
+	themeRouteIgnore = themeRouteIgnoreDefault
+
+	if AppToml == nil {
+		return
+	}
+
+	raw := strings.TrimSpace(cast.ToString(AppToml.Get("app.theme_ignore_prefix", "")))
+	if raw == "" {
+		return
+	}
+
+	items := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		// 统一补齐前导斜杠，避免配置写成 "api" 时匹配不到
+		if !strings.HasPrefix(item, "/") {
+			item = "/" + item
+		}
+		items = append(items, item)
+	}
+
+	if len(items) > 0 {
+		themeRouteIgnore = items
+	}
+}
 
 // handleThemeRoute 主题前端路由回退（history 模式 SPA）
 // 语义对齐 nginx 的 try_files $uri $uri/ /index.html：
@@ -325,9 +372,9 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 		imageCache.Store(cacheKey, data)
 	}
 
-	_, err = ctx.Writer.Write(data)
-	if err != nil {
-		writeErrorGif("error.gif")
+	if _, err = ctx.Writer.Write(data); err != nil {
+		// 响应体已开始写入，HTTP 状态码无法再更改，仅记录日志
+		facade.Log.Error(map[string]any{"error": err, "path": path}, "写入处理后的图片失败")
 	}
 }
 
@@ -366,19 +413,25 @@ func getImageFormat(ext string) imaging.Format {
 // handleStaticFile 处理静态文件
 func handleStaticFile(ctx *gin.Context, path, ext string, isExist func(string) bool) {
 	if !isExist("public" + path) {
+		ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": ResourceNotFound, "data": nil})
 		return
 	}
 
 	ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-	_, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte)
-	if err != nil {
-		ctx.JSON(SuccessCode, gin.H{"code": ErrorCode, "msg": FileReadError, "data": err.Error()})
+	// 这里已经开始写响应体，HTTP 状态码无法再更改，出错只记录日志
+	if _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte); err != nil {
+		facade.Log.Error(map[string]any{"error": err, "path": path}, "写入静态文件失败")
 	}
 }
 
 // console 控制台
 func console() {
-	port := AppToml.Get("app.port", 8080)
+	// AppToml.Get 返回 any，直接交给 %d 格式化会 panic 或输出 0，这里显式转成 int
+	port := 8080
+	if AppToml != nil {
+		port = cast.ToInt(AppToml.Get("app.port", 8080))
+	}
+
 	char := `
     ──────────────────────────────
       版本号: %-10s  端口: %-6d    

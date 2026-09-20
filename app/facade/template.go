@@ -11,6 +11,8 @@ port        = 8642
 debug       = false
 # 登录token名称（别乱改，别作死）
 token_name  = "INIS_LOGIN_TOKEN"
+# 主题路由回退（history 模式 SPA）时忽略的路径前缀，多个用英文逗号分隔
+theme_ignore_prefix = "/api,/dev,/socket,/assets"
 
 # rss配置
 url = "博客链接"
