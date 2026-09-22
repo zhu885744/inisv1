@@ -82,20 +82,30 @@ func (this *Toml) restoreSecretParams(params map[string]any, keys []string, curr
 }
 
 // maskSensitiveFields 递归脱敏 map/slice 中的敏感字段
-func (this *Toml) maskSensitiveFields(data any) any {
+//
+// 管理员（permit 判定，与权限中间件 Rule 同口径）**不脱敏**：
+// 后台「系统配置」页需要看到并核对真实的密钥/密码，否则表单只能回填 **** 占位串。
+// 其它调用方（非管理员）仍按 sensitiveTomlFields 脱敏。
+func (this *Toml) maskSensitiveFields(ctx *gin.Context, data any) any {
+
+	// 管理员直返原值
+	if ctx != nil && this.meta.permit(ctx) {
+		return data
+	}
+
 	switch val := data.(type) {
 	case map[string]any:
 		for key, value := range val {
 			if sensitiveTomlFields[strings.ToLower(key)] {
 				val[key] = facade.Comm.MaskSecret(cast.ToString(value))
 			} else {
-				val[key] = this.maskSensitiveFields(value)
+				val[key] = this.maskSensitiveFields(ctx, value)
 			}
 		}
 		return val
 	case []any:
 		for i, value := range val {
-			val[i] = this.maskSensitiveFields(value)
+			val[i] = this.maskSensitiveFields(ctx, value)
 		}
 		return val
 	default:
@@ -374,7 +384,7 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -387,7 +397,7 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 	result["drive"] = item.Get("drive")
 
 	// 获取指定（脱敏敏感字段）
-	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
+	this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // putSMS - 修改SMS服务配置
@@ -442,7 +452,7 @@ func (this *Toml) getCache(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -456,7 +466,7 @@ func (this *Toml) getCache(ctx *gin.Context) {
 	result["default"] = item.Get("default")
 
 	// 获取指定（脱敏敏感字段）
-	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
+	this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getCrypt - 获取加密服务配置
@@ -476,7 +486,7 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -486,7 +496,7 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 	}
 
 	// 获取指定（脱敏敏感字段，如 JWT 密钥 key）
-	this.json(ctx, this.maskSensitiveFields(item.Get(cast.ToString(params["name"]))), facade.Lang(ctx, "数据请求成功！"), 200)
+	this.json(ctx, this.maskSensitiveFields(ctx, item.Get(cast.ToString(params["name"]))), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getStorage - 获取存储服务配置
@@ -517,7 +527,7 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 
 	// 获取全部（脱敏敏感字段）
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -530,7 +540,7 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 	result["default"] = item.Get("default")
 
 	// 获取指定（脱敏敏感字段）
-	this.json(ctx, this.maskSensitiveFields(result), facade.Lang(ctx, "数据请求成功！"), 200)
+	this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // getStorage - 获取日志服务配置
@@ -550,7 +560,7 @@ func (this *Toml) getLog(ctx *gin.Context) {
 
 	// 获取全部（脱敏敏感字段）
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 

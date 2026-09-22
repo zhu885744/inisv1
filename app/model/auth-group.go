@@ -100,7 +100,13 @@ func (this *AuthGroup) users(wg *sync.WaitGroup, result *any) {
 
 	tags := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Uids, "|")))
 	columns, _ := facade.DB.Model(&[]Users{}).WhereIn("id", tags).Column("id", "nickname", "avatar", "account")
-	*result = columns
+
+	// Column() 内部走 Scan 到 []map[string]any，不会实例化 Users 结构体，
+	// 因此 Users.AfterFind 不会触发，而头像域名模板（{{cos}} 等）正是在那里还原的
+	// （存库时 AfterSave 用 DomainTemp2 把真实域名换成了模板）。
+	// 这里手动补一次替换，保证与 users/all 等走 Select() 的接口口径一致，
+	// 否则接口会把 "{{cos}}/xxx.jpg" 原样返回给前端，头像无法显示。
+	*result = ReplaceDomainColumns(columns, "avatar")
 }
 
 // Auth 应用权限

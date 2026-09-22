@@ -62,6 +62,14 @@ func (this *Pages) AfterFind(tx *gorm.DB) (err error) {
 	comment := cast.ToStringMap(cast.ToStringMap(utils.Json.Decode(this.Json))["comment"])
 	config := this.config("comment")
 
+	// 取值：0 继承、1 允许/显示、2 禁止/隐藏
+	// 模块总开关（PAGE）优先级最高：置为 2 时覆盖页面自身的设置
+	if cast.ToInt(config["allow"]) == 2 {
+		comment["allow"] = 2
+	}
+	if cast.ToInt(config["show"]) == 2 {
+		comment["show"] = 2
+	}
 	// 允许评论选项继承了父级配置
 	if cast.ToInt(comment["allow"]) == 0 {
 		comment["allow"] = config["allow"]
@@ -70,6 +78,10 @@ func (this *Pages) AfterFind(tx *gorm.DB) (err error) {
 	if cast.ToInt(comment["show"]) == 0 {
 		comment["show"] = config["show"]
 	}
+
+	// 评论数（与文章 / 动态口径一致，供前台直接展示）
+	count, _ := facade.DB.Model(&Comment{}).Where("bind_type", "page").Where("bind_id", this.Id).Count()
+	comment["count"] = count
 
 	// 标签信息
 	tags := utils.ArrayUnique(utils.ArrayEmpty(strings.Split(this.Tags, "|")))
@@ -90,8 +102,8 @@ func (this *Pages) config(key ...any) (json map[string]any) {
 
 	var config map[string]any
 
-	// 缓存名称
-	cacheName := "config[ARTICLE]"
+	// 缓存名称（独立页面读 PAGE 配置，此前误用 ARTICLE 导致继承了文章配置）
+	cacheName := "config[PAGE]"
 	// 是否开启了缓存
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
@@ -102,7 +114,7 @@ func (this *Pages) config(key ...any) (json map[string]any) {
 
 	} else {
 
-		config, _ = facade.DB.Model(&Config{}).Where("key", "ARTICLE").Find()
+		config, _ = facade.DB.Model(&Config{}).Where("key", "PAGE").Find()
 		if cacheState {
 			go facade.Cache.Set(cacheName, config)
 		}

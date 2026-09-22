@@ -170,6 +170,18 @@ func (this *Comm) login(ctx *gin.Context) {
 		[]any{"account", "=", params["account"]},
 	}).Where("source", params["source"]).Find()
 
+	// 来源未命中时回退为不限定 source 再查一次：
+	// 注册来源可能不是 default（如前台主题注册时写入 source=mellow），
+	// 若登录仍按 default 过滤，这类账号将永远无法密码登录。
+	// 账号/邮箱/手机号在保存时已有全局唯一校验，回退查询不会出现一对多歧义。
+	if utils.Is.Empty(item) {
+		item, _ = facade.DB.Model(&table).Or([]any{
+			[]any{"email", "=", params["account"]},
+			[]any{"phone", "=", params["account"]},
+			[]any{"account", "=", params["account"]},
+		}).Find()
+	}
+
 	if utils.Is.Empty(item) {
 		this.json(ctx, nil, facade.Lang(ctx, "账户不存在！"), 400)
 		return

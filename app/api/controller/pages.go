@@ -442,8 +442,18 @@ func (this *Pages) update(ctx *gin.Context) {
 		async.Set("publish_time", cast.ToInt64(pt))
 	}
 
-	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-	utils.Struct.Set(&table, "audit", cast.ToInt(!audit))
+	// 审核规则与文章 / 动态对齐：未开启审核 → 直接通过；
+	// 开启审核时，只有「首次发布」（尚未审核过）才进入待审核，
+	// 已审核过的页面再次编辑保存不会重置审核状态（此前无条件重设，会把已通过的页面打回待审核）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	if !auditSwitch {
+		async.Set("audit", 1)
+	} else {
+		prev, _ := facade.DB.Model(&model.Pages{}).WithTrashed().Where("id", params["id"]).Find()
+		if cast.ToInt(prev["audit"]) == 0 {
+			async.Set("audit", 0)
+		}
+	}
 
 	for key, val := range params {
 		if utils.In.Array(key, allow) {

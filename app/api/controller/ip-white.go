@@ -70,8 +70,9 @@ func (this *IpWhite) processFieldValue(val any) any {
 	return val
 }
 
+// maskIPData 对 IP 脱敏；管理员（permit 口径）直返原值，不做脱敏
 func (this *IpWhite) maskIPData(ctx *gin.Context, data any) any {
-	if data == nil || this.meta.root(ctx) {
+	if data == nil || this.meta.permit(ctx) {
 		return data
 	}
 	switch v := data.(type) {

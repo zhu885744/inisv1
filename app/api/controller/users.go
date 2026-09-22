@@ -149,7 +149,7 @@ func (this *Users) one(ctx *gin.Context) {
 	}
 
 	user := this.user(ctx)
-	isAdmin := this.meta.root(ctx)
+	isAdmin := this.meta.permit(ctx)
 	isOwnData := table.Id == user.Id && user.Id != 0
 
 	cacheName := this.cache.name(ctx)
@@ -240,7 +240,7 @@ func (this *Users) all(ctx *gin.Context) {
 	mold.IWhere(params["where"]).IOr(params["or"]).ILike(params["like"]).INot(params["not"]).INull(params["null"]).INotNull(params["notNull"])
 	count, _ := mold.Where(table).Count()
 
-	isAdmin := this.meta.root(ctx)
+	isAdmin := this.meta.permit(ctx)
 	cacheName := this.cache.name(ctx)
 	// 管理员不读写共享缓存，避免未脱敏数据进入缓存后被普通用户命中（越权泄露）
 	cacheEnable := this.cache.enable(ctx) && !isAdmin
@@ -533,7 +533,8 @@ func (this *Users) status(ctx *gin.Context) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
 		return
 	}
-	if utils.Is.Empty(params["status"]) {
+	// status 允许为 0（正常）：不能用 Is.Empty 判断，否则「解冻」会被误判为参数缺失
+	if raw, ok := params["status"]; !ok || raw == nil {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "status"), 400)
 		return
 	}

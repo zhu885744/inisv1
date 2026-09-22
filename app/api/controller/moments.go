@@ -256,8 +256,11 @@ func (this *Moments) all(ctx *gin.Context) {
 	query = this.buildQuery(query, params)
 
 	// 非管理员默认只能看已审核内容；但查询"自己的动态"时放开，
-	// 以便用户在「我的动态」中管理草稿与待审核内容
-	if !this.meta.root(ctx) && !this.isSelfQuery(ctx, params) {
+	// 以便用户在「我的动态」中管理草稿与待审核内容。
+	// 这里用 permit()（与权限中间件同一口径，见 meta.permit 注释）而不是 root()：
+	// 站点常把管理员放在「非 root 分组」里只勾选权限点，用 root() 会误判为普通用户
+	// 而强制追加 audit=1，导致后台「待审核」筛选（where.audit=0）永远查不到数据。
+	if !this.meta.permit(ctx) && !this.isSelfQuery(ctx, params) {
 		query = query.Where("audit", 1)
 	}
 
@@ -352,9 +355,13 @@ func (this *Moments) create(ctx *gin.Context) {
 		utils.Struct.Set(&table, "Status", 0)
 		utils.Struct.Set(&table, "PublishTime", 0)
 	} else {
-		audit := cast.ToBool(this.config(ctx)["audit"])
+		// 是否开启审核：配置存放在 config.json.audit（与文章/页面口径一致）。
+		// 此前误读顶层 config["audit"]（该列不存在，恒为 false），导致审核开关永远失效、
+		// 发布即通过审核，后台「待审核」自然没有任何数据。
+		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
 		utils.Struct.Set(&table, "Audit", cast.ToInt(!audit))
-		utils.Struct.Set(&table, "Status", cast.ToInt(!audit))
+		// 状态固定为「已发布」：待审核 ≠ 草稿（原来复用 !audit，会把待审核动态写成草稿，混进草稿筛选）
+		utils.Struct.Set(&table, "Status", 1)
 
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
 			utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
@@ -413,13 +420,22 @@ func (this *Moments) update(ctx *gin.Context) {
 
 	status := cast.ToInt(params["status"])
 
+	// 原文状态：用于判断是否「首次发布」，避免每次编辑都把审核状态重置为待审核
+	prev, _ := facade.DB.Model(&model.Moments{}).WithTrashed().Where("id", params["id"]).Find()
+
 	if status == 0 {
 		async.Set("audit", 1)
 		async.Set("status", 0)
 	} else {
-		audit := cast.ToBool(this.config(ctx)["audit"])
-		async.Set("audit", cast.ToInt(!audit))
-		async.Set("status", cast.ToInt(!audit))
+		async.Set("status", 1)
+		// 审核开关读取 config.json.audit（与文章/页面口径一致，此前误读顶层 audit 恒为 false）
+		auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+		if !auditSwitch {
+			async.Set("audit", 1)
+		} else if cast.ToInt(prev["status"]) == 0 || cast.ToInt(prev["audit"]) == 0 {
+			// 仅「首次发布」（原为草稿 / 尚未审核）进入待审核，已审核过的编辑不再打回
+			async.Set("audit", 0)
+		}
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
 			async.Set("publish_time", cast.ToInt64(publishTime))
 		}
@@ -462,7 +478,9 @@ func (this *Moments) count(ctx *gin.Context) {
 	query := this.withTrashOptions(facade.DB.Model(&model.Moments{}), params)
 	query = this.buildQuery(query, params)
 
-	if !this.meta.root(ctx) {
+	// 与 all 保持一致：管理员（含非 root 分组）可统计全部状态，
+	// 否则后台「待审核」计数会被强制 audit=1 抹平为 0
+	if !this.meta.permit(ctx) {
 		query = query.Where("audit", 1)
 	}
 

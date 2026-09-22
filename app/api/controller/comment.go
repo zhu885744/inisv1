@@ -403,7 +403,11 @@ func (this *Comment) create(ctx *gin.Context) {
 		return
 	}
 
+	// 评论开关优先级：全局 COMMENT.allow < 模块总开关（ARTICLE/MOMENTS/PAGE）< 内容自身 json.comment
+	// 内容 / 模块取值：0 继承、1 允许/显示、2 禁止/隐藏；全局 COMMENT.allow：0 关闭、1 开启
 	var comment map[string]any
+	var moduleComment map[string]any
+
 	switch params["bind_type"] {
 	case "article":
 		article, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Find()
@@ -412,6 +416,7 @@ func (this *Comment) create(ctx *gin.Context) {
 			return
 		}
 		comment = cast.ToStringMap(cast.ToStringMap(article["json"])["comment"])
+		moduleComment = this.config("article", "comment")
 	case "page":
 		page, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Find()
 		if utils.Is.Empty(page) {
@@ -419,22 +424,46 @@ func (this *Comment) create(ctx *gin.Context) {
 			return
 		}
 		comment = cast.ToStringMap(cast.ToStringMap(page["json"])["comment"])
+		moduleComment = this.config("page", "comment")
 	case "moments":
 		moments, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Find()
 		if utils.Is.Empty(moments) {
 			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
 			return
 		}
-		comment = this.config("moments", "comment")
+		comment = cast.ToStringMap(cast.ToStringMap(moments["json"])["comment"])
+		moduleComment = this.config("moments", "comment")
 	default:
 		comment = this.config("comment")
 	}
 
+	// 模块总开关为「禁止 / 隐藏」时，覆盖内容自身的设置
+	if cast.ToInt(moduleComment["allow"]) == 2 {
+		comment["allow"] = 2
+	}
+	if cast.ToInt(moduleComment["show"]) == 2 {
+		comment["show"] = 2
+	}
+
+	// 内容未设置时继承模块总开关
+	if cast.ToInt(comment["allow"]) == 0 {
+		comment["allow"] = moduleComment["allow"]
+	}
+	if cast.ToInt(comment["show"]) == 0 {
+		comment["show"] = moduleComment["show"]
+	}
+
+	// 模块总开关未配置时，回落到全局评论开关（COMMENT.allow：1 开启 / 0 关闭）
 	if cast.ToInt(comment["allow"]) == 0 {
 		comment["allow"] = this.config("comment")["allow"]
 	}
 
-	if cast.ToInt(comment["allow"]) == 0 {
+	if cast.ToInt(comment["allow"]) == 2 || cast.ToInt(comment["allow"]) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "评论功能已关闭！"), 400)
+		return
+	}
+	// 隐藏评论时整块不展示，同样不允许发表
+	if cast.ToInt(comment["show"]) == 2 {
 		this.json(ctx, nil, facade.Lang(ctx, "评论功能已关闭！"), 400)
 		return
 	}
@@ -1119,6 +1148,11 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 		isCommentConfig = true
 	} else if len(key) > 0 && cast.ToString(key[0]) == "moments" {
 		configKey = "MOMENTS"
+	} else if len(key) > 0 && cast.ToString(key[0]) == "page" {
+		// 独立页面此前会落进默认的 ARTICLE，导致继承文章配置
+		configKey = "PAGE"
+	} else if len(key) > 0 && cast.ToString(key[0]) == "article" {
+		configKey = "ARTICLE"
 	}
 
 	cacheName := "config[" + configKey + "]"

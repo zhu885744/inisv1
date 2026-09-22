@@ -48,10 +48,10 @@ func InitConfig() {
 		{Key: "ALLOW_REGISTER", Value: "1", Remark: "是否允许用户自行注册"},
 		{Key: "PAGE", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
-		}), Remark: "页面配置"},
+		}), Remark: "独立页面配置"},
 		{Key: "ARTICLE", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
-		}), Remark: "主题配置"},
+		}), Remark: "文章配置"},
 		{Key: "MOMENTS", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 		}), Remark: "动态配置"},

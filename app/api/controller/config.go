@@ -311,6 +311,14 @@ func (this *Config) update(ctx *gin.Context) {
 		return
 	}
 
+	// 配置落库后必须清掉该 key 的配置缓存：
+	// model（article / pages）与各 controller 都缓存了 config[KEY]，且写入时不带过期时间，
+	// 不清的话改完配置要等进程重启才生效。缓存名存在 "config[KEY]" 与 "[GET]config[KEY]" 两种，都要删。
+	go func(key string) {
+		facade.Cache.Del("config[" + key + "]")
+		facade.Cache.Del("[GET]config[" + key + "]")
+	}(cast.ToString(params["key"]))
+
 	go this.watch()
 
 	this.json(ctx, gin.H{

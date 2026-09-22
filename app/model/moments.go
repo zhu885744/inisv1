@@ -75,6 +75,65 @@ func (this *Moments) result() (result map[string]any) {
 	}
 
 	return map[string]any{
-		"author": author,
+		"author":  author,
+		"comment": this.comment(),
 	}
+}
+
+// comment - 评论开关与数量（与文章 / 独立页面口径一致）
+func (this *Moments) comment() map[string]any {
+
+	comment := cast.ToStringMap(cast.ToStringMap(utils.Json.Decode(this.Json))["comment"])
+	config := this.config("comment")
+
+	// 取值：0 继承、1 允许/显示、2 禁止/隐藏
+	// 模块总开关（MOMENTS）优先级最高：置为 2 时覆盖动态自身的设置
+	if cast.ToInt(config["allow"]) == 2 {
+		comment["allow"] = 2
+	}
+	if cast.ToInt(config["show"]) == 2 {
+		comment["show"] = 2
+	}
+	// 未设置时继承模块总开关
+	if cast.ToInt(comment["allow"]) == 0 {
+		comment["allow"] = config["allow"]
+	}
+	if cast.ToInt(comment["show"]) == 0 {
+		comment["show"] = config["show"]
+	}
+
+	count, _ := facade.DB.Model(&Comment{}).Where("bind_type", "moments").Where("bind_id", this.Id).Count()
+	comment["count"] = count
+
+	return comment
+}
+
+// config - 获取配置
+func (this *Moments) config(key ...any) (json map[string]any) {
+
+	var config map[string]any
+
+	// 缓存名称
+	cacheName := "config[MOMENTS]"
+	// 是否开启了缓存
+	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
+
+	// 检查缓存是否存在
+	if cacheState && facade.Cache.Has(cacheName) {
+
+		config = cast.ToStringMap(facade.Cache.Get(cacheName))
+
+	} else {
+
+		config, _ = facade.DB.Model(&Config{}).Where("key", "MOMENTS").Find()
+		if cacheState {
+			go facade.Cache.Set(cacheName, config)
+		}
+	}
+
+	if len(key) > 0 {
+		return cast.ToStringMap(cast.ToStringMap(config["json"])[cast.ToString(key[0])])
+	}
+
+	return cast.ToStringMap(config["json"])
 }

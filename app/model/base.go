@@ -183,3 +183,45 @@ func DomainTemp2() (replace map[string]any) {
 
 	return replace
 }
+
+// ReplaceDomainColumns - 替换 Column() 查询结果里的域名模板（查询时口径）
+//
+// 背景：Column() 内部走 Scan 到 []map[string]any，不会实例化模型结构体，
+// 因此模型上的 AfterFind 钩子不会被触发，而头像 / 附件地址里的 {{cos}}、{{oss}}、
+// {{kodo}}、{{localhost}} 等存储模板正是在 AfterFind 里还原成真实域名的。
+// 凡是用 Column() 取回了这类字段（如 user 的 avatar），都需要调用本函数补一次替换，
+// 否则接口会把模板原样返回给前端，导致图片无法显示。
+//
+// @param rows   Column() 的返回值（[]map[string]any）
+// @param fields 需要替换的字段名，如 "avatar"
+func ReplaceDomainColumns(rows any, fields ...string) []map[string]any {
+
+	replace := DomainTemp1()
+	if utils.Is.Empty(replace) || len(fields) == 0 {
+		return castToColumnSlice(rows)
+	}
+
+	result := make([]map[string]any, 0)
+	for _, item := range cast.ToSlice(rows) {
+		row := cast.ToStringMap(item)
+		for _, field := range fields {
+			value := cast.ToString(row[field])
+			if utils.Is.Empty(value) {
+				continue
+			}
+			row[field] = utils.Replace(value, replace)
+		}
+		result = append(result, row)
+	}
+
+	return result
+}
+
+// castToColumnSlice - 把 Column() 的返回值统一成 []map[string]any（不做替换时的兜底）
+func castToColumnSlice(rows any) []map[string]any {
+	result := make([]map[string]any, 0)
+	for _, item := range cast.ToSlice(rows) {
+		result = append(result, cast.ToStringMap(item))
+	}
+	return result
+}

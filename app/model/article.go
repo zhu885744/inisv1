@@ -212,6 +212,14 @@ func (this *Article) comment(wg *sync.WaitGroup, result *any) {
 	comment := cast.ToStringMap(cast.ToStringMap(utils.Json.Decode(this.Json))["comment"])
 	config := this.config("comment")
 
+	// 取值：0 继承、1 允许/显示、2 禁止/隐藏
+	// 模块总开关（ARTICLE）优先级最高：置为 2 时覆盖文章自身的设置
+	if cast.ToInt(config["allow"]) == 2 {
+		comment["allow"] = 2
+	}
+	if cast.ToInt(config["show"]) == 2 {
+		comment["show"] = 2
+	}
 	// 允许评论选项继承了父级配置
 	if cast.ToInt(comment["allow"]) == 0 {
 		comment["allow"] = config["allow"]
