@@ -495,8 +495,9 @@ func (this *Comm) register(ctx *gin.Context) {
 	setToken(ctx, jwt.Text)
 	// 登录增加经验
 	go this.loginExp(table.Id)
-	// 添加默认权限
-	go this.auth(table.Id)
+	// 添加默认权限（同步执行：必须在返回前落库，否则前端拿到 token 后立刻校验登录态，
+	// 可能先把「空的权限缓存」写进 Cache（该缓存无过期时间），导致默认权限长期不生效）
+	this.auth(table.Id)
 
 	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), 200)
 }
@@ -800,6 +801,8 @@ func (this *Comm) loginExp(uid any) {
 }
 
 // 添加默认权限
+// 注册后为新用户分配「默认权限组」：分组 ID 来自 ALLOW_REGISTER 配置的 text 字段
+// （形如 "|1|2|" / "1,2"，由 utils.Unity.Ids 按数字提取，空值表示不分配任何权限组）
 func (this *Comm) auth(uid any) {
 
 	// 获取注册配置
@@ -812,20 +815,30 @@ func (this *Comm) auth(uid any) {
 	// 默认权限
 	ids := utils.Unity.Ids(config["text"])
 
+	// 是否真正写入了权限组（用于判断要不要清权限缓存）
+	changed := false
+
 	for _, id := range ids {
 		// 查找权限分组数据
 		item, _ := facade.DB.Model(&model.AuthGroup{}).WithTrashed().Where("id", id).Find()
-		// 分组不存在 - 跳过
+		// 分组不存在 - 跳过（注意是 continue：某个 ID 失效不应中断后续分组）
 		if utils.Is.Empty(item) {
-			return
+			continue
 		}
 		uids := utils.Unity.Ids(item["uids"])
 		// 如果分组中没有该用户
 		if !utils.In.Array(uid, uids) {
 			uids = append(uids, uid)
-			go facade.DB.Model(&model.AuthGroup{}).Where("id", id).Update(map[string]any{
+			if _, err := facade.DB.Model(&model.AuthGroup{}).Where("id", id).Update(map[string]any{
 				"uids": fmt.Sprintf("|%v|", strings.Join(cast.ToStringSlice(utils.ArrayUnique(utils.ArrayEmpty(uids))), "|")),
-			})
+			}); err == nil {
+				changed = true
+			}
 		}
+	}
+
+	// 权限变化后清掉该用户的权限缓存（key 形如 user[uid][rule-group]，无过期时间）
+	if changed {
+		go facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
 	}
 }

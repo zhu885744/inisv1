@@ -55,7 +55,51 @@ func InitAuthRules() {
 		saveAuthRules(item)
 	}
 
+	// 纠正历史数据里非法的规则类型（见 NormalizeAuthRuleTypes 注释）
+	NormalizeAuthRuleTypes()
+
 	facade.Log.Info(map[string]any{}, "==== InitAuthRules 全部执行完毕 ====")
+}
+
+// NormalizeAuthRuleTypes - 纠正历史数据中非法的规则类型
+//
+// 早期初始化数据用过 type=root（exp/give、积分卡密、商品管理、动态置顶等），
+// 但中间件只识别 common（免登录放行）/ login（登录即放行）/ 其余（需权限点）三类
+// （见 app/api/middleware/rule.go），root 的运行时行为与 default 完全一致，
+// 属于错误的类型标注：会导致后台「默认」统计与筛选漏掉这些规则。
+// 这里统一纠正为 default，保持与种子数据（createAuthRules）口径一致。
+//
+// 调用时机：InitAuthRules（安装/迁移）与 timer.Run（每次启动的一次性维护任务），
+// 保证「播种时已修正」的规则之外，老库在启动时也能自动纠正。
+func NormalizeAuthRuleTypes() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "纠正权限规则类型时发生panic")
+		}
+	}()
+
+	table := AuthRules{}
+	// WithTrashed：回收站里的规则也一并纠正，避免恢复后类型又是旧值
+	tx, err := facade.DB.Model(&table).WithTrashed().
+		Where("type", "NOT IN", []string{"common", "login", "default"}).
+		Update(map[string]any{"type": "default"})
+
+	if err != nil {
+		facade.Log.Warn(map[string]any{"error": err.Error()}, "修正权限规则类型失败")
+		return
+	}
+
+	if tx == nil || tx.RowsAffected <= 0 {
+		return
+	}
+
+	facade.Log.Info(map[string]any{"rows": tx.RowsAffected}, "已把非标准的权限规则类型修正为 default")
+
+	// 规则缓存名为 rule[METHOD][path] 且无过期时间（见 middleware/rule.go 的 cacheRulePrefix），
+	// 标签是模糊匹配，这里顺带清掉 auth-rules 列表缓存，避免后台仍显示旧的 root 值。
+	facade.Cache.DelTags([]any{"rule"})
 }
 
 // createAuthRules - 生成规则
@@ -372,7 +416,7 @@ func createAuthRules() (result []AuthRules) {
 				"save",
 				"create",
 				"path=check-in&type=login&name=每日签到",
-				"path=give&type=root&name=发放经验值",
+				"path=give&type=default&name=发放经验值",
 				"path=share&type=login&name=分享",
 			},
 			"DELETE": {"remove", "delete", "clear"},
@@ -384,18 +428,18 @@ func createAuthRules() (result []AuthRules) {
 				"path=rules&type=common&name=积分任务规则",
 				"path=tasks&type=login&name=今日任务进度",
 				"path=rank&type=common&name=积分排行榜",
-				"path=card-all&type=root&name=卡密列表",
-				"path=card-stats&type=root&name=卡密统计",
-				"path=card-export&type=root&name=导出未使用卡密",
+				"path=card-all&type=default&name=卡密列表",
+				"path=card-stats&type=default&name=卡密统计",
+				"path=card-export&type=default&name=导出未使用卡密",
 			},
 			"POST": {
-				"path=give&type=root&name=调整积分",
-				"path=card-generate&type=root&name=生成卡密",
+				"path=give&type=default&name=调整积分",
+				"path=card-generate&type=default&name=生成卡密",
 				"path=card-redeem&type=login&name=卡密兑换积分",
 			},
 			"DELETE": {
-				"path=card-remove&type=root&name=删除卡密",
-				"path=card-delete&type=root&name=彻底删除卡密",
+				"path=card-remove&type=default&name=删除卡密",
+				"path=card-delete&type=default&name=彻底删除卡密",
 			},
 		},
 		"goods": {
@@ -406,26 +450,26 @@ func createAuthRules() (result []AuthRules) {
 				"path=orders&type=login&name=我的订单",
 				"path=order-one&type=login&name=订单详情",
 				"path=my-stats&type=login&name=我的兑换统计",
-				"path=orders-all&type=root&name=全部订单",
-				"path=stats&type=root&name=商城统计",
+				"path=orders-all&type=default&name=全部订单",
+				"path=stats&type=default&name=商城统计",
 				"path=count&type=common&name=商品数量",
 			},
 			"PUT": {
-				"path=update&type=root&name=更新商品",
-				"path=restore&type=root&name=恢复商品",
-				"path=order-status&type=root&name=更新订单状态",
+				"path=update&type=default&name=更新商品",
+				"path=restore&type=default&name=恢复商品",
+				"path=order-status&type=default&name=更新订单状态",
 				"path=cancel-order&type=login&name=取消订单",
 				"path=receive&type=login&name=确认收货",
 			},
 			"POST": {
 				"path=buy&type=login&name=购买商品",
-				"path=save&type=root&name=保存商品",
-				"path=create&type=root&name=创建商品",
+				"path=save&type=default&name=保存商品",
+				"path=create&type=default&name=创建商品",
 			},
 			"DELETE": {
-				"path=remove&type=root&name=删除商品",
-				"path=delete&type=root&name=彻底删除商品",
-				"path=clear&type=root&name=清空回收站",
+				"path=remove&type=default&name=删除商品",
+				"path=delete&type=default&name=彻底删除商品",
+				"path=clear&type=default&name=清空回收站",
 			},
 		},
 		"qps-warn": {
@@ -475,7 +519,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=comment&type=common&name=获取动态评论",
 				"path=comment_count&type=common&name=获取动态评论数量",
 			},
-			"PUT":    {"update", "restore", "path=set_top&type=root&name=设置/取消置顶动态"},
+			"PUT":    {"update", "restore", "path=set_top&type=default&name=设置/取消置顶动态"},
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},

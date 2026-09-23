@@ -1,6 +1,8 @@
 package timer
 
 import (
+	"inis/app/model"
+
 	"github.com/jasonlvhit/gocron"
 )
 
@@ -11,6 +13,9 @@ func init() {
 }
 
 func Run() {
+
+	// 启动时执行一次的维护任务：纠正权限规则历史脏数据（type=root → default）
+	go model.NormalizeAuthRuleTypes()
 
 	Log.Run()
 	Device.Run()
