@@ -60,34 +60,44 @@ func InitAuthPages() {
 	}
 
 	// 后台管理页面列表
+	// Icon 统一使用 Bootstrap Icons 类名（https://icons.getbootstrap.com/），前端 <i :class="icon"> 直接可用
 	pages := []AuthPages{
-		{Name: "撰写文章", Icon: "article", Path: "/admin/article/write", Size: "14px"},
-		{Name: "文章管理", Icon: "article", Path: "/admin/article", Size: "14px"},
-		{Name: "文章分类", Icon: "group", Path: "/admin/article/group", Size: "14px"},
-		{Name: "用户管理", Icon: "user", Path: "/admin/users", Size: "14px"},
-		{Name: "评论管理", Icon: "comment", Path: "/admin/comment", Size: "14px"},
-		{Name: "公告管理", Icon: "bell", Path: "/admin/placard", Size: "14px"},
-		{Name: "轮播管理", Icon: "banner", Path: "/admin/banner", Size: "14px"},
-		{Name: "标签管理", Icon: "tag", Path: "/admin/tags", Size: "14px"},
-		{Name: "等级管理", Icon: "level", Path: "/admin/level", Size: "14px"},
-		{Name: "经验管理", Icon: "level", Path: "/admin/exp", Size: "14px"},
-		{Name: "商品管理", Icon: "level", Path: "/admin/goods", Size: "14px"},
-		{Name: "积分管理", Icon: "level", Path: "/admin/integral", Size: "14px"},
-		{Name: "消息通知", Icon: "bell", Path: "/admin/message", Size: "14px"},
-		{Name: "友链管理", Icon: "link", Path: "/admin/links", Size: "14px"},
-		{Name: "系统配置", Icon: "system", Path: "/admin/system", Size: "14px"},
-		{Name: "独立页面", Icon: "open", Path: "/admin/pages", Size: "14px"},
-		{Name: "撰写独立页面", Icon: "article", Path: "/admin/pages/write", Size: "14px"},
-		{Name: "友链分组", Icon: "group", Path: "/admin/links/group", Size: "14px"},
-		{Name: "权限规则", Icon: "rule", Path: "/admin/auth/rules", Size: "14px"},
-		{Name: "权限分组", Icon: "group", Path: "/admin/auth/group", Size: "14px"},
-		{Name: "接口密钥", Icon: "key", Path: "/admin/api/keys", Size: "14px"},
-		{Name: "IP黑名单", Icon: "qps", Path: "/admin/ip/black", Size: "14px"},
-		{Name: "IP白名单", Icon: "white", Path: "/admin/ip/white", Size: "14px"},
-		{Name: "QPS预警", Icon: "black", Path: "/admin/qps/warn", Size: "14px"},
-		{Name: "后台页面管理", Icon: "open", Path: "/admin/auth/pages", Size: "14px"},
-		{Name: "动态管理", Icon: "article", Path: "/admin/moments", Size: "14px"},
-		{Name: "附件管理", Icon: "file", Path: "/admin/attachment", Size: "14px"},
+		{Name: "撰写文章", Icon: "bi bi-pencil-square", Path: "/admin/article/write", Size: "14px"},
+		{Name: "文章管理", Icon: "bi bi-file-earmark-text", Path: "/admin/article", Size: "14px"},
+		{Name: "文章分类", Icon: "bi bi-collection", Path: "/admin/article/group", Size: "14px"},
+		{Name: "用户管理", Icon: "bi bi-people", Path: "/admin/users", Size: "14px"},
+		{Name: "评论管理", Icon: "bi bi-chat-square-text", Path: "/admin/comment", Size: "14px"},
+		{Name: "公告管理", Icon: "bi bi-megaphone", Path: "/admin/placard", Size: "14px"},
+		{Name: "轮播管理", Icon: "bi bi-images", Path: "/admin/banner", Size: "14px"},
+		{Name: "标签管理", Icon: "bi bi-tags", Path: "/admin/tags", Size: "14px"},
+		{Name: "等级管理", Icon: "bi bi-graph-up-arrow", Path: "/admin/level", Size: "14px"},
+		{Name: "经验管理", Icon: "bi bi-star-half", Path: "/admin/exp", Size: "14px"},
+		{Name: "商品管理", Icon: "bi bi-bag", Path: "/admin/goods", Size: "14px"},
+		{Name: "积分管理", Icon: "bi bi-coin", Path: "/admin/integral", Size: "14px"},
+		{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
+		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
+		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
+		{Name: "独立页面", Icon: "bi bi-window", Path: "/admin/pages", Size: "14px"},
+		{Name: "撰写独立页面", Icon: "bi bi-file-earmark-plus", Path: "/admin/pages/write", Size: "14px"},
+		{Name: "友链分组", Icon: "bi bi-diagram-3", Path: "/admin/links/group", Size: "14px"},
+		{Name: "权限规则", Icon: "bi bi-shield-check", Path: "/admin/auth/rules", Size: "14px"},
+		{Name: "权限分组", Icon: "bi bi-shield-lock", Path: "/admin/auth/group", Size: "14px"},
+		{Name: "接口密钥", Icon: "bi bi-key", Path: "/admin/api/keys", Size: "14px"},
+		{Name: "IP黑名单", Icon: "bi bi-slash-circle", Path: "/admin/ip/black", Size: "14px"},
+		{Name: "IP白名单", Icon: "bi bi-check-circle", Path: "/admin/ip/white", Size: "14px"},
+		{Name: "QPS预警", Icon: "bi bi-speedometer2", Path: "/admin/qps/warn", Size: "14px"},
+		{Name: "后台页面管理", Icon: "bi bi-layout-text-window", Path: "/admin/auth/pages", Size: "14px"},
+		{Name: "动态管理", Icon: "bi bi-chat-square-quote", Path: "/admin/moments", Size: "14px"},
+		{Name: "附件管理", Icon: "bi bi-folder2-open", Path: "/admin/attachment", Size: "14px"},
+	}
+
+	// legacyIcons - v1 版本的短图标名，仅用于判断「是否可以把旧值升级为 Bootstrap Icons」
+	// 管理员自己在「后台页面管理」里改过的图标不会被覆盖
+	legacyIcons := map[string]bool{
+		"article": true, "group": true, "user": true, "comment": true, "bell": true,
+		"banner": true, "tag": true, "level": true, "link": true, "system": true,
+		"open": true, "rule": true, "key": true, "qps": true, "white": true,
+		"black": true, "file": true,
 	}
 
 	wg := sync.WaitGroup{}
@@ -99,8 +109,16 @@ func InitAuthPages() {
 
 			hash := utils.Hash.Sum32(item.Path)
 
-			exist, _ := facade.DB.Model(&AuthPages{}).Where("hash", hash).Exist()
-			if exist {
+			record, _ := facade.DB.Model(&AuthPages{}).Where("hash", hash).Find()
+			if !utils.Is.Empty(record) {
+				// 已存在的页面：仅在 icon 为空或仍是旧版短名时升级为 Bootstrap Icons，
+				// 管理员自定义过的图标保持不动
+				current := cast.ToString(record["icon"])
+				if current != item.Icon && (utils.Is.Empty(current) || legacyIcons[current]) {
+					if _, err := facade.DB.Model(&AuthPages{}).Where("hash", hash).Update(map[string]any{"icon": item.Icon}); err != nil {
+						facade.Log.Error(map[string]any{"error": err.Error()}, "更新页面图标失败")
+					}
+				}
 				return
 			}
 

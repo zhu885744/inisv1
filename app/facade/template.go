@@ -12,7 +12,8 @@ debug       = false
 # 登录token名称（别乱改，别作死）
 token_name  = "INIS_LOGIN_TOKEN"
 # 主题路由回退（history 模式 SPA）时忽略的路径前缀，多个用英文逗号分隔
-theme_ignore_prefix = "/api,/dev,/socket,/assets"
+# /assets 为后端静态资源（表情、随机头像等），/static 为主题构建产物的静态目录
+theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
 
 # rss配置
 url = "博客链接"

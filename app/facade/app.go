@@ -42,6 +42,10 @@ func initAppToml() {
 
 // init - 初始化函数
 func init() {
+	// 本文件是包内最早执行的 init（文件名字典序），而 log.go 的初始化排在其后；
+	// 这里在配置异常时会输出日志，故先确保日志组件就绪
+	ensureLogReady()
+
 	initAppToml()
 	initApp()
 

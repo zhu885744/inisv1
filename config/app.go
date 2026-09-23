@@ -240,40 +240,44 @@ func handlePageFile(ctx *gin.Context, prefix string) {
 }
 
 // themeRouteIgnoreDefault - 主题回退默认忽略的路径前缀（接口与静态资源保持原有响应，便于排查问题）
-var themeRouteIgnoreDefault = []string{"/api", "/dev", "/socket", "/assets"}
+// /assets 为后端自身静态资源（表情包、随机头像、上传附件等），/static 为主题构建产物的静态目录
+var themeRouteIgnoreDefault = []string{"/api", "/dev", "/socket", "/assets", "/static"}
 
 // themeRouteIgnore - 主题回退忽略的路径前缀
 // 可通过 config/app.toml 的 app.theme_ignore_prefix 配置（多个用英文逗号分隔），无需改代码
 var themeRouteIgnore = themeRouteIgnoreDefault
 
-// loadThemeRouteIgnore - 从配置加载主题回退忽略前缀，未配置时回退默认值
+// loadThemeRouteIgnore - 从配置加载主题回退忽略前缀
+// 默认前缀始终生效，配置项只做「追加」：这样老配置文件里没有 /static 的旧值
+// 也能自动获得新前缀，不会把前端产物请求回退成 index.html（那会导致 MIME 报错）
 func loadThemeRouteIgnore() {
-	themeRouteIgnore = themeRouteIgnoreDefault
+	items := make([]string, 0, len(themeRouteIgnoreDefault))
+	items = append(items, themeRouteIgnoreDefault...)
 
-	if AppToml == nil {
-		return
+	if AppToml != nil {
+		raw := strings.TrimSpace(cast.ToString(AppToml.Get("app.theme_ignore_prefix", "")))
+		for _, item := range strings.Split(raw, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			// 统一补齐前导斜杠，避免配置写成 "api" 时匹配不到
+			if !strings.HasPrefix(item, "/") {
+				item = "/" + item
+			}
+			items = append(items, item)
+		}
 	}
 
-	raw := strings.TrimSpace(cast.ToString(AppToml.Get("app.theme_ignore_prefix", "")))
-	if raw == "" {
-		return
-	}
-
-	items := make([]string, 0)
-	for _, item := range strings.Split(raw, ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
+	// 去重（默认值与配置项可能有重叠）
+	themeRouteIgnore = make([]string, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		if seen[item] {
 			continue
 		}
-		// 统一补齐前导斜杠，避免配置写成 "api" 时匹配不到
-		if !strings.HasPrefix(item, "/") {
-			item = "/" + item
-		}
-		items = append(items, item)
-	}
-
-	if len(items) > 0 {
-		themeRouteIgnore = items
+		seen[item] = true
+		themeRouteIgnore = append(themeRouteIgnore, item)
 	}
 }
 

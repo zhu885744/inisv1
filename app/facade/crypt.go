@@ -25,6 +25,11 @@ const (
 var CryptToml *utils.ViperResponse
 
 func init() {
+	// 本文件按文件名字典序排在 log.go 之前，而 crypt.toml 缺失/不可读时会输出告警日志
+	//（全新环境首次启动必然走到该分支），此时 Log 还是 nil，直接调用会 panic。
+	// 先确保日志就绪再继续。
+	ensureLogReady()
+
 	initCryptToml()
 
 	WatchConfigChange(CryptToml, initCrypt)

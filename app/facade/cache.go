@@ -77,6 +77,9 @@ type CacheStats struct {
 
 // init - 初始化
 func init() {
+	// 同 app.go：本文件初始化早于 log.go，先在配置异常路径前确保日志就绪
+	ensureLogReady()
+
 	initCacheToml()
 	initCache()
 

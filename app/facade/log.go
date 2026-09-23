@@ -39,11 +39,27 @@ func initLogToml() {
 	LogToml = &item
 }
 
+// ensureLogReady - 保证日志组件就绪（幂等）
+// Go 的 init 按文件名字典序执行：app.go / cache.go / crypt.go 都排在 log.go 之前，
+// 而它们在配置缺失时会输出告警日志，此时 Log 仍为 nil，直接调用会 panic。
+// 因此这些 init 需先调用本函数，把「日志配置 + 日志实例」提前初始化。
+func ensureLogReady() {
+	if LogToml == nil {
+		initLogToml()
+	}
+	if Log == nil {
+		InitLog()
+	}
+}
+
 func init() {
-	// 初始化配置文件
-	initLogToml()
-	// 初始化缓存
-	InitLog()
+	// 初始化配置文件与日志实例
+	ensureLogReady()
+
+	// 日志配置初始化失败时（LogToml 为空）跳过监听，避免二次 panic
+	if LogToml == nil || LogToml.Viper == nil {
+		return
+	}
 
 	// 监听配置文件变化
 	LogToml.Viper.WatchConfig()
@@ -119,6 +135,14 @@ func NewLog(mode any) *LogRequest {
 	return item
 }
 
+// logTomlValue - 安全读取日志配置（LogToml 可能因配置初始化失败而为 nil）
+func logTomlValue(key string, def any) any {
+	if LogToml == nil {
+		return def
+	}
+	return LogToml.Get(key, def)
+}
+
 // logLevel - 创建日志通道
 func logLevel(Level string) *zap.Logger {
 
@@ -126,9 +150,9 @@ func logLevel(Level string) *zap.Logger {
 
 	write := zapcore.AddSync(&lumberjack.Logger{
 		Filename:   path,
-		MaxAge:     cast.ToInt(LogToml.Get("age")),
-		MaxSize:    cast.ToInt(LogToml.Get("size")),
-		MaxBackups: cast.ToInt(LogToml.Get("backups")),
+		MaxAge:     cast.ToInt(logTomlValue("age", 7)),
+		MaxSize:    cast.ToInt(logTomlValue("size", 2)),
+		MaxBackups: cast.ToInt(logTomlValue("backups", 20)),
 	})
 
 	// 编码器
