@@ -3,6 +3,7 @@ package facade
 import (
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -544,6 +545,73 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 	response.Result = "邮件发送成功"
 	smsLog("email", true, map[string]any{"recipient": recipient, "type": "回复通知", "bind_type": commentInfo["bind_type"], "bind_id": commentInfo["bind_id"]})
 	return response
+}
+
+// SendMail - 发送自定义内容的邮件（主题 + 纯文本正文，正文换行会转成 HTML 换行）
+// 用于注册验证邮件、欢迎邮件等不属于「评论通知」模板自身的场景。
+func (this *GoMailRequest) SendMail(recipient string, subject string, content string) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if !utils.Is.Email(recipient) {
+		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "自定义邮件"})
+		return response
+	}
+
+	if this.Client == nil {
+		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "自定义邮件"})
+		return response
+	}
+
+	nickname := cast.ToString(SMSToml.Get("email.nickname"))
+	account := cast.ToString(SMSToml.Get("email.account"))
+	site := cast.ToString(SMSToml.Get("email.sign_name"))
+
+	// 换行转 <br>，其余内容做最小化转义，避免正文被当成 HTML 标签
+	body := html.EscapeString(cast.ToString(content))
+	body = strings.ReplaceAll(body, "\r\n", "<br>")
+	body = strings.ReplaceAll(body, "\n", "<br>")
+
+	template := `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>` + html.EscapeString(cast.ToString(subject)) + `</title></head>
+<body style="margin:0;padding:24px 0;background:#f8f9fa;">
+<div style="max-width:640px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.05);">
+<div style="padding:20px 30px;background:#165DFF;color:#fff;font-size:16px;font-weight:600;">` + html.EscapeString(site) + `</div>
+<div style="padding:24px 30px;line-height:1.8;color:#444;font-size:14px;">` + body + `</div>
+<div style="padding:16px 30px;color:#999;font-size:12px;">这是自动发送的邮件，如有疑问可通过站点内的联系方式找到我</div>
+</div>
+</body>
+</html>`
+
+	item := gomail.NewMessage()
+	item.SetHeader("From", nickname+"<"+account+">")
+	item.SetHeader("To", recipient)
+	item.SetHeader("Subject", cast.ToString(subject))
+	item.SetBody("text/html", template)
+
+	if err := this.Client.DialAndSend(item); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "自定义邮件"})
+		return response
+	}
+
+	response.Result = "邮件发送成功"
+	smsLog("email", true, map[string]any{"recipient": recipient, "type": "自定义邮件"})
+
+	return response
+}
+
+// SendMail - 发送自定义内容邮件（仅 email 驱动支持）
+// 短信驱动不具备「任意内容邮件」能力，同样返回错误提示，由调用方决定是否忽略
+func SendMail(recipient string, subject string, content string) (response *SMSResponse) {
+
+	if GoMail == nil {
+		return &SMSResponse{Error: errors.New("邮件服务未初始化，请检查config/sms.toml配置")}
+	}
+
+	return GoMail.SendMail(recipient, subject, content)
 }
 
 // ================================== 阿里云短信 - 实现 ==================================

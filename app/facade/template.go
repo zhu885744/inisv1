@@ -14,6 +14,9 @@ token_name  = "INIS_LOGIN_TOKEN"
 # 主题路由回退（history 模式 SPA）时忽略的路径前缀，多个用英文逗号分隔
 # /assets 为后端静态资源（表情、随机头像等），/static 为主题构建产物的静态目录
 theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
+# 站点地址（用于注册验证邮件等邮件里的链接，如 https://blog.example.com）
+# 留空则用当前请求的 Host 自动推导；前端与接口不同域时必须显式配置
+domain      = ""
 
 # rss配置
 url = "博客链接"

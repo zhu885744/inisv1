@@ -48,17 +48,46 @@ func InitAuthRules() {
 	}
 	facade.Log.Info(map[string]any{}, "AuthRules AutoMigrate执行完成")
 
+	EnsureAuthRules()
+
+	facade.Log.Info(map[string]any{}, "==== InitAuthRules 全部执行完毕 ====")
+}
+
+// EnsureAuthRules - 补齐缺失的权限规则（幂等，可重复执行）
+//
+// 为什么需要它：中间件（app/api/middleware/rule.go）对「查不到规则」的接口会走默认分支
+// （需要权限点），匿名请求会直接 401。而 saveAuthRules 只在 hash 不存在时插入，
+// 因此新增接口的规则在**已安装**的库里不会自动出现——启动时补录一次即可解决。
+//
+// 同时顺带纠正历史数据里非法的规则类型（type=root → default）。
+func EnsureAuthRules() {
+
 	list := createAuthRules()
 	facade.Log.Info(map[string]any{"count": len(list)}, "createAuthRules生成规则数量")
 
-	for _, item := range list {
-		saveAuthRules(item)
+	// 一次性取出现有 hash（含回收站，避免把已删除的规则又补回来）
+	rows, _ := facade.DB.Model(&AuthRules{}).WithTrashed().Column("hash")
+	exist := make(map[string]bool)
+	for _, hash := range cast.ToStringSlice(rows) {
+		exist[hash] = true
 	}
 
-	// 纠正历史数据里非法的规则类型（见 NormalizeAuthRuleTypes 注释）
-	NormalizeAuthRuleTypes()
+	created := 0
+	for _, item := range list {
+		method := strings.ToUpper(cast.ToString(item.Method))
+		hash := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, item.Route))
+		if exist[hash] {
+			continue
+		}
+		saveAuthRules(item)
+		created++
+	}
 
-	facade.Log.Info(map[string]any{}, "==== InitAuthRules 全部执行完毕 ====")
+	if created > 0 {
+		facade.Log.Info(map[string]any{"created": created}, "已补齐缺失的权限规则")
+	}
+
+	NormalizeAuthRuleTypes()
 }
 
 // NormalizeAuthRuleTypes - 纠正历史数据中非法的规则类型
@@ -120,6 +149,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=check-token&name=校验登录&type=common",
 				"path=reset-password&name=重置密码&type=common",
 				"path=logout&name=退出登录&type=common",
+				"path=verify-email&name=验证注册邮箱&type=common",
+				"path=send-verify-mail&name=重发注册验证邮件&type=common",
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},

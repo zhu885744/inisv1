@@ -45,7 +45,18 @@ func InitConfig() {
 			"webhook": "",
 		}), Remark: "QPS自动封禁通知（邮件/Webhook）"},
 		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
-		{Key: "ALLOW_REGISTER", Value: "1", Remark: "是否允许用户自行注册"},
+		{Key: "ALLOW_REGISTER", Value: "1", Json: utils.Json.Encode(facade.H{
+			// 邮箱域名限制：off 关闭 / whitelist 白名单 / blacklist 黑名单
+			"email_domain_mode": "off",
+			"email_whitelist":   []string{},
+			"email_blacklist":   []string{},
+			// 注册验证方式：none 直接注册 / email 邮箱验证 / manual 人工审核
+			"verify_mode": "none",
+			// 注册成功后是否发送站内欢迎消息 / 欢迎邮件
+			"welcome_message": 0,
+			"welcome_email":   0,
+			// 注：本记录的 text 字段另存「新用户默认权限组」ID 列表，见 model/register.go
+		}), Remark: "是否允许用户自行注册 + 注册扩展设置（域名限制/验证方式/欢迎消息）"},
 		{Key: "PAGE", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 		}), Remark: "独立页面配置"},

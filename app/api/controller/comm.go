@@ -40,11 +40,13 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"login":          this.login,
-		"register":       this.register,
-		"check-token":    this.checkToken,
-		"reset-password": this.resetPassword,
-		"logout":         this.logout,
+		"login":            this.login,
+		"register":         this.register,
+		"check-token":      this.checkToken,
+		"reset-password":   this.resetPassword,
+		"logout":           this.logout,
+		"verify-email":     this.verifyEmail,    // 邮箱验证（注册验证方式为 email 时使用）
+		"send-verify-mail": this.sendVerifyMail, // 重发注册验证邮件
 	}
 	err := this.call(allow, method, ctx)
 
@@ -188,9 +190,24 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	// 检查账号是否被冻结（使用 status 字段，0为正常，1为冻结）
-	if table.Status == 1 {
+	if table.Status == model.UserStatusFrozen {
 		this.json(ctx, nil, facade.Lang(ctx, "当前账号已被冻结，请联系管理员！"), 403)
 		return
+	}
+
+	// 检查账号是否处于「注册待审核」状态（开启人工审核注册的后台才会出现）
+	if table.Status == model.UserStatusAudit {
+		this.json(ctx, nil, facade.Lang(ctx, "账号正在审核中，请等待管理员审核通过后再登录！"), 403)
+		return
+	}
+
+	// 检查邮箱是否完成验证（仅对「注册时写入 email_verified=0」的账号生效，
+	// 未写入该标记的历史账号不受影响，避免开启邮箱验证后把老用户全部拦在门外）
+	if setting := model.RegisterSettings(); setting.VerifyMode == model.RegisterVerifyEmail {
+		if !table.EmailVerified() {
+			this.json(ctx, nil, facade.Lang(ctx, "请先完成邮箱验证（验证邮件已发送至您的注册邮箱）！"), 403)
+			return
+		}
 	}
 
 	// 检查账号是否处于封禁状态（限制登录）
@@ -301,6 +318,23 @@ func (this *Comm) register(ctx *gin.Context) {
 
 	if utils.Is.Empty(social) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 格式不正确！", "social"), 400)
+		return
+	}
+
+	// ===== 注册扩展设置（/admin/system?tab=register）=====
+	setting := model.RegisterSettings()
+
+	// 邮箱域名限制：放在发送验证码之前，避免白白消耗一条短信/邮件
+	if social == "email" {
+		if err := model.CheckEmailDomain(setting, cast.ToString(params["social"])); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
+			return
+		}
+	}
+
+	// 开启「Email 验证」后必须用邮箱注册（手机号没有可验证的邮箱地址）
+	if setting.VerifyMode == model.RegisterVerifyEmail && social != "email" {
+		this.json(ctx, nil, facade.Lang(ctx, "本站已开启邮箱验证，请使用邮箱注册！"), 400)
 		return
 	}
 
@@ -477,13 +511,58 @@ func (this *Comm) register(ctx *gin.Context) {
 	// 删除验证码
 	go facade.Cache.Del(cacheName)
 
+	// 默认权限组：同步执行（必须在返回前落库，否则前端拿到 token 后立刻校验登录态，
+	// 可能先把「空的权限缓存」写进 Cache（该缓存无过期时间），导致默认权限长期不生效）
+	this.auth(table.Id)
+
+	// 删除密码
+	table.Password = ""
+
+	// ===== 注册验证方式分流 =====
+	switch setting.VerifyMode {
+	case model.RegisterVerifyManual:
+		// 人工审核：账号置为「待审核」，管理员在后台通过后才能登录
+		if _, err := facade.DB.Model(&model.Users{}).Where("id", table.Id).
+			UpdateColumn("status", model.UserStatusAudit); err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error(), "uid": table.Id}, "写入待审核状态失败")
+		} else {
+			table.Status = model.UserStatusAudit
+		}
+
+		this.json(ctx, gin.H{
+			"user":       table,
+			"need_audit": true,
+		}, facade.Lang(ctx, "注册成功，请等待管理员审核通过后再登录！"), 200)
+		return
+
+	case model.RegisterVerifyEmail:
+		// 邮箱验证：标记未验证并发送验证邮件，验证通过后才能登录
+		if err := model.MarkEmailUnverified(table.Id); err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error(), "uid": table.Id}, "写入邮箱未验证标记失败")
+		}
+		if err := model.SendRegisterVerifyMail(table.Id, cast.ToString(table.Email), this.baseURL(ctx)); err != nil {
+			// 邮件发送失败不阻断注册（账号已创建），但要把原因告知前端，便于用户重发
+			this.json(ctx, gin.H{
+				"user":        table,
+				"need_verify": true,
+				"email":       table.Email,
+				"mail_error":  err.Error(),
+			}, facade.Lang(ctx, "注册成功，但验证邮件发送失败，请稍后在登录页重新发送！"), 200)
+			return
+		}
+
+		this.json(ctx, gin.H{
+			"user":        table,
+			"need_verify": true,
+			"email":       table.Email,
+		}, facade.Lang(ctx, "注册成功，请前往邮箱完成验证后登录！"), 200)
+		return
+	}
+
 	jwt := facade.Jwt().Create(facade.H{
 		"uid":  table.Id,
 		"hash": utils.Hash.Sum32(table.Password),
 	})
-
-	// 删除密码
-	table.Password = ""
 
 	result := map[string]any{
 		"user":       table,
@@ -495,11 +574,96 @@ func (this *Comm) register(ctx *gin.Context) {
 	setToken(ctx, jwt.Text)
 	// 登录增加经验
 	go this.loginExp(table.Id)
-	// 添加默认权限（同步执行：必须在返回前落库，否则前端拿到 token 后立刻校验登录态，
-	// 可能先把「空的权限缓存」写进 Cache（该缓存无过期时间），导致默认权限长期不生效）
-	this.auth(table.Id)
+	// 注册欢迎消息 / 欢迎邮件（按后台开关执行，内部异步）
+	model.SendWelcome(table.Id, table.Nickname, cast.ToString(table.Email))
 
 	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), 200)
+}
+
+// baseURL - 拼出前台站点根地址，用于邮件里的验证链接
+// 优先取 config/app.toml 的 app.domain（反向代理场景），否则回退到当前请求的 scheme + host
+func (this *Comm) baseURL(ctx *gin.Context) string {
+
+	domain := strings.TrimSpace(cast.ToString(facade.AppToml.Get("app.domain", "")))
+	if !utils.Is.Empty(domain) {
+		if !strings.HasPrefix(domain, "http://") && !strings.HasPrefix(domain, "https://") {
+			domain = "https://" + domain
+		}
+		return strings.TrimRight(domain, "/")
+	}
+
+	scheme := "http"
+	if ctx.Request.TLS != nil || strings.EqualFold(ctx.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+
+	return fmt.Sprintf("%v://%v", scheme, ctx.Request.Host)
+}
+
+// verifyEmail - 邮箱验证（注册验证方式为 email 时，用户点击邮件链接后调用）
+// 参数：token（邮件里的验证 token）
+func (this *Comm) verifyEmail(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	token := cast.ToString(params["token"])
+
+	uid := model.ConsumeMailToken(token)
+	if uid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "验证链接无效或已过期，请重新发送验证邮件！"), 400)
+		return
+	}
+
+	if err := model.MarkEmailVerified(uid); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "邮箱验证失败，请稍后重试！"), 400)
+		return
+	}
+
+	// 验证通过后补发注册欢迎消息 / 欢迎邮件
+	user, _ := facade.DB.Model(&model.Users{}).Find(uid)
+	if !utils.Is.Empty(user) {
+		model.SendWelcome(uid, cast.ToString(user["nickname"]), cast.ToString(user["email"]))
+	}
+
+	this.json(ctx, gin.H{"uid": uid}, facade.Lang(ctx, "邮箱验证成功，请登录！"), 200)
+}
+
+// sendVerifyMail - 重发注册验证邮件
+// 参数：email（注册邮箱）；仅对「已注册且邮箱未验证」的账号发送，避免被当作探测接口
+func (this *Comm) sendVerifyMail(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	email := strings.TrimSpace(cast.ToString(params["email"]))
+
+	if !utils.Is.Email(email) {
+		this.json(ctx, nil, facade.Lang(ctx, "邮箱格式不正确！"), 400)
+		return
+	}
+
+	setting := model.RegisterSettings()
+	if setting.VerifyMode != model.RegisterVerifyEmail {
+		this.json(ctx, nil, facade.Lang(ctx, "当前未开启邮箱验证！"), 400)
+		return
+	}
+
+	user, _ := facade.DB.Model(&model.Users{}).Where("email", email).Find()
+	if utils.Is.Empty(user) {
+		// 不暴露账号是否存在，统一提示「已发送」
+		this.json(ctx, nil, facade.Lang(ctx, "如果该邮箱已注册，验证邮件将发送到您的邮箱！"), 200)
+		return
+	}
+
+	uid := cast.ToInt(user["id"])
+	if model.IsEmailVerified(user["json"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已完成验证，请直接登录！"), 400)
+		return
+	}
+
+	if err := model.SendRegisterVerifyMail(uid, email, this.baseURL(ctx)); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
+		return
+	}
+
+	this.json(ctx, nil, facade.Lang(ctx, "验证邮件已发送，请注意查收！"), 200)
 }
 
 // 忘记密码

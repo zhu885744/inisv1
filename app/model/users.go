@@ -18,6 +18,15 @@ import (
 const (
 	UserStatusNormal = 0 // 正常
 	UserStatusFrozen = 1 // 冻结
+	// UserStatusAudit 待审核：注册时开启「人工审核」后写入，管理员在后台改为正常后才可登录
+	UserStatusAudit = 2
+)
+
+// 用户 json 字段里与注册验证相关的键
+const (
+	// UserJsonEmailVerified 邮箱是否已验证：0 未验证 / 1 已验证
+	// 注意：键不存在视为「已验证」，避免开启邮箱验证后把历史用户全部拦在门外
+	UserJsonEmailVerified = "email_verified"
 )
 
 type Users struct {
@@ -458,4 +467,83 @@ func GetUserPrivacy(uid any) UserPrivacySetting {
 		privacy.Likes = cast.ToInt(m["likes"])
 	}
 	return privacy
+}
+
+// IsEmailVerified - 判断 users.json 里的邮箱验证标记
+// 约定：键不存在视为已验证（兼容未开启邮箱验证时期注册的历史用户），值为 0/缺省键才表示未验证
+func IsEmailVerified(jsonValue any) bool {
+	jsonMap := cast.ToStringMap(jsonValue)
+	raw, ok := jsonMap[UserJsonEmailVerified]
+	if !ok || raw == nil {
+		return true
+	}
+	return cast.ToBool(raw)
+}
+
+// EmailVerified - 当前用户邮箱是否已验证
+func (this *Users) EmailVerified() bool {
+	return IsEmailVerified(this.Json)
+}
+
+// GetUserJson - 读取指定用户的 json 字段（已解析为 map）
+func GetUserJson(uid any) map[string]any {
+	rows, _ := facade.DB.Model(&Users{}).Where("id", uid).Column("json")
+
+	switch v := rows.(type) {
+	case []string:
+		if len(v) == 0 {
+			return map[string]any{}
+		}
+		if decoded := utils.Json.Decode(v[0]); decoded != nil {
+			if item, ok := decoded.(map[string]any); ok {
+				return item
+			}
+		}
+	case []any:
+		if len(v) == 0 {
+			return map[string]any{}
+		}
+		switch item := v[0].(type) {
+		case string:
+			if decoded := utils.Json.Decode(item); decoded != nil {
+				if m, ok := decoded.(map[string]any); ok {
+					return m
+				}
+			}
+		case map[string]any:
+			return item
+		}
+	default:
+		if decoded := utils.Json.Decode(cast.ToString(rows)); decoded != nil {
+			if m, ok := decoded.(map[string]any); ok {
+				return m
+			}
+		}
+	}
+
+	return map[string]any{}
+}
+
+// UpdateUserJson - 合并写入 users.json（保留未涉及的键），并清理该用户的缓存
+func UpdateUserJson(uid any, patch map[string]any) error {
+	if utils.Is.Empty(uid) || len(patch) == 0 {
+		return nil
+	}
+
+	jsonMap := GetUserJson(uid)
+	for key, val := range patch {
+		jsonMap[key] = val
+	}
+
+	table := Users{}
+	_, err := facade.DB.Model(&table).Where("id", uid).UpdateColumn("json", utils.Json.Encode(jsonMap))
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error(), "uid": uid}, "更新用户 json 失败")
+		return err
+	}
+
+	// 用户缓存（user[uid][...]）里带的是旧数据，必须清掉
+	facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+
+	return nil
 }

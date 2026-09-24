@@ -552,12 +552,16 @@ func (this *Users) status(ctx *gin.Context) {
 		return
 	}
 
-	// 验证状态值是否合法
+	// 验证状态值是否合法：0 正常 / 1 冻结 / 2 待审核（注册时开启人工审核后写入）
 	status := cast.ToInt(params["status"])
-	if status != 0 && status != 1 {
-		this.json(ctx, nil, facade.Lang(ctx, "状态值必须为0或1！"), 400)
+	if status != model.UserStatusNormal && status != model.UserStatusFrozen && status != model.UserStatusAudit {
+		this.json(ctx, nil, facade.Lang(ctx, "状态值必须为 0（正常）/ 1（冻结）/ 2（待审核）！"), 400)
 		return
 	}
+
+	// 记录变更前的状态：用于「待审核 → 正常」时补发欢迎消息/邮件
+	before, _ := facade.DB.Model(&model.Users{}).Where("id", userId).Find()
+	beforeStatus := cast.ToInt(cast.ToStringMap(before)["status"])
 
 	// 更新状态
 	table := model.Users{}
@@ -573,8 +577,14 @@ func (this *Users) status(ctx *gin.Context) {
 		return
 	}
 
-	// 删除缓存
-	facade.Cache.Del(fmt.Sprintf("user[%v]", userId))
+	// 删除缓存（用户相关缓存均为 user[uid][...] 形式，用标签一次清干净）
+	facade.Cache.DelTags(fmt.Sprintf("user[%v]", userId))
+
+	// 人工审核通过：补发注册欢迎消息 / 欢迎邮件
+	if beforeStatus == model.UserStatusAudit && status == model.UserStatusNormal && !utils.Is.Empty(before) {
+		user := cast.ToStringMap(before)
+		model.SendWelcome(userId, cast.ToString(user["nickname"]), cast.ToString(user["email"]))
+	}
 
 	this.json(ctx, gin.H{"id": userId, "status": status}, facade.Lang(ctx, "状态更新成功！"), 200)
 }
