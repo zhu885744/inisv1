@@ -598,10 +598,3 @@ func (hub *hub) GetChatHistory(user1, user2 string, limit int) []*privateMessage
 	return history
 }
 
-// PushNotice 推送通知消息到Hub（对外公开方法）
-func (hub *hub) PushNotice(data []byte) {
-	if hub == nil || hub.notice == nil {
-		return
-	}
-	hub.notice <- data
-}

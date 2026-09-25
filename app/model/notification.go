@@ -108,7 +108,10 @@ func (this *Notification) fromUserSync(wg *sync.WaitGroup, result *any) {
 	}
 }
 
-// CreateNotification 创建通知并推送WebSocket
+// CreateNotification 创建通知（仅落库，不做 WebSocket 推送）
+//
+// 前台通过 API 拉取（notification/list、notification/all、notification/unread-count）；
+// 通知的投递/可见性完全由查询接口决定，不需要长连接推送。
 func (this *Notification) CreateNotification(uid, fromUid int, typ, title, content, bindType string, bindId int) (*Notification, error) {
 	notif := &Notification{
 		Uid:      uid,
@@ -312,16 +315,75 @@ func (this *Notification) HideBroadcast(id, uid int) error {
 	}).Error
 }
 
+// broadcastJoin 广播通知与「用户状态表」的关联条件（占位符顺序：uid）
+const broadcastJoin = "LEFT JOIN inis_notification_read nr ON nr.notification_id = n.id AND nr.uid = ? "
+
+// broadcastAlive 广播通知本体未被软删除
+const broadcastAlive = " AND (n.delete_time IS NULL OR n.delete_time = 0)"
+
 // GetUnreadCount 获取用户未读通知数量（包含广播通知）
 func (this *Notification) GetUnreadCount(uid int) int64 {
 	var count int64
-	// 广播通知(uid=0)：未读 = 该用户没有已读(notification_reads.is_read=1)且没有隐藏(notification_reads.is_deleted=1)的状态记录
+	// 广播通知(uid=0)：未读 = 该用户没有已读(is_read=1)且没有隐藏(is_deleted=1)的状态记录
+	// 括号显式分组：AND 的优先级高于 OR，缺括号时语义易被误读（也与上层条件耦合）
 	sql := "SELECT COUNT(*) FROM inis_notification n " +
 		"LEFT JOIN inis_notification_read nr ON nr.notification_id = n.id AND nr.uid = ? " +
-		"WHERE (n.uid = ? OR n.uid = 0) AND (n.delete_time IS NULL OR n.delete_time = 0) " +
-		"AND (n.uid != 0 AND n.is_read = 0 " +
-		"OR n.uid = 0 AND (nr.id IS NULL OR (nr.is_read = 0 AND nr.is_deleted = 0)))"
+		"WHERE (n.uid = ? OR n.uid = 0)" + broadcastAlive +
+		" AND ((n.uid != 0 AND n.is_read = 0)" +
+		" OR (n.uid = 0 AND (nr.id IS NULL OR (nr.is_read = 0 AND nr.is_deleted = 0))))"
 	facade.DB.Drive().Raw(sql, uid, uid).Scan(&count)
+	return count
+}
+
+// UnreadBroadcastIds 获取「该用户未读且未隐藏」的广播通知ID
+// 用于「全部已读」：已读/已隐藏的广播无需再写状态记录，避免无谓的全量 upsert
+func (this *Notification) UnreadBroadcastIds(uid int) []int {
+	sql := "SELECT n.id FROM inis_notification n " + broadcastJoin +
+		"WHERE n.uid = 0" + broadcastAlive +
+		" AND (nr.id IS NULL OR (nr.is_read = 0 AND nr.is_deleted = 0))"
+
+	var ids []int
+	facade.DB.Drive().Raw(sql, uid).Scan(&ids)
+	return ids
+}
+
+// VisibleBroadcastIds 获取该用户「可见」的广播通知ID（可按类型过滤）
+// limit <= 0 表示不限制数量；limit 只接受调用方传入的常量，不做用户输入拼接
+func (this *Notification) VisibleBroadcastIds(uid int, typ string, limit int) []int {
+	args := []any{uid}
+	sql := "SELECT n.id FROM inis_notification n " + broadcastJoin +
+		"WHERE n.uid = 0" + broadcastAlive +
+		" AND (nr.id IS NULL OR nr.is_deleted = 0)"
+
+	if typ != "" {
+		sql += " AND n.type = ?"
+		args = append(args, typ)
+	}
+
+	sql += " ORDER BY n.id DESC"
+	if limit > 0 {
+		sql += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	var ids []int
+	facade.DB.Drive().Raw(sql, args...).Scan(&ids)
+	return ids
+}
+
+// CountVisibleBroadcasts 统计该用户可见的广播通知数量（可按类型过滤）
+func (this *Notification) CountVisibleBroadcasts(uid int, typ string) int64 {
+	args := []any{uid}
+	sql := "SELECT COUNT(*) FROM inis_notification n " + broadcastJoin +
+		"WHERE n.uid = 0" + broadcastAlive +
+		" AND (nr.id IS NULL OR nr.is_deleted = 0)"
+
+	if typ != "" {
+		sql += " AND n.type = ?"
+		args = append(args, typ)
+	}
+
+	var count int64
+	facade.DB.Drive().Raw(sql, args...).Scan(&count)
 	return count
 }
 
@@ -337,9 +399,9 @@ func (this *Notification) MarkRead(uid, id int) error {
 		return this.MarkBroadcastRead(id, uid)
 	}
 
-	// 个人通知：仅能操作自己的通知
+	// 个人通知：仅能操作自己的通知（他人的通知按「不存在」处理，避免探测他人消息是否存在）
 	if cast.ToInt(info["uid"]) != uid {
-		return nil
+		return fmt.Errorf("通知不存在或无权操作")
 	}
 
 	_, err := facade.DB.Model(&Notification{}).
@@ -351,7 +413,7 @@ func (this *Notification) MarkRead(uid, id int) error {
 
 // MarkAllRead 标记用户所有通知为已读（包含广播通知）
 func (this *Notification) MarkAllRead(uid int) error {
-	// 个人通知
+	// 个人通知：只更新未读的（已读的无需再写）
 	if _, err := facade.DB.Model(&Notification{}).
 		Where("uid", uid).
 		Where("is_read", 0).
@@ -359,20 +421,21 @@ func (this *Notification) MarkAllRead(uid int) error {
 		return err
 	}
 
-	// 广播通知：批量写入已读状态
-	ids, _ := facade.DB.Model(&[]Notification{}).Where("uid", 0).Column("id")
+	// 广播通知：只处理「该用户未读且未隐藏」的广播。
+	// 否则每条广播都会产生一次 upsert（广播多、用户多时是纯浪费），
+	// 而对已隐藏的广播写状态记录也没有意义。
+	ids := this.UnreadBroadcastIds(uid)
+	if utils.Is.Empty(ids) {
+		return nil
+	}
 
-	var records []NotificationRead
-	for _, id := range utils.Unity.Ids(ids) {
+	records := make([]NotificationRead, 0, len(ids))
+	for _, id := range ids {
 		records = append(records, NotificationRead{
-			NotificationId: cast.ToInt(id),
+			NotificationId: id,
 			Uid:            uid,
 			IsRead:         1,
 		})
-	}
-
-	if utils.Is.Empty(records) {
-		return nil
 	}
 
 	return facade.DB.Drive().Clauses(clause.OnConflict{
@@ -395,8 +458,9 @@ func (this *Notification) GetNotifications(uid int, typ string, isRead int, page
 	}
 
 	// 已读/未读过滤（广播通知的已读状态在 notification_reads 表）
+	// 显式括号分组：个人通知看本表 is_read，广播通知看状态表 is_read（缺省按未读）
 	if isRead >= 0 {
-		where += " AND (n.uid != 0 AND n.is_read = ? OR n.uid = 0 AND COALESCE(nr.is_read, 0) = ?)"
+		where += " AND ((n.uid != 0 AND n.is_read = ?) OR (n.uid = 0 AND COALESCE(nr.is_read, 0) = ?))"
 		args = append(args, isRead, isRead)
 	}
 
@@ -405,10 +469,11 @@ func (this *Notification) GetNotifications(uid int, typ string, isRead int, page
 		order = "create_time desc"
 	}
 
+	// 可见范围：自己的通知 + 广播通知；广播按 notification_reads 过滤掉「该用户已隐藏」的
 	common := "FROM inis_notification n " +
 		"LEFT JOIN inis_notification_read nr ON nr.notification_id = n.id AND nr.uid = ? " +
-		"WHERE (n.uid = ? OR n.uid = 0) AND (n.delete_time IS NULL OR n.delete_time = 0) " +
-		"AND (n.uid != 0 OR nr.id IS NULL OR nr.is_deleted = 0)"
+		"WHERE (n.uid = ? OR n.uid = 0)" + broadcastAlive +
+		" AND (n.uid != 0 OR nr.id IS NULL OR nr.is_deleted = 0)"
 
 	// 统计总数
 	var count int64

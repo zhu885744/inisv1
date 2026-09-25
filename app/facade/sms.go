@@ -275,6 +275,11 @@ func initSMS() {
 	} else {
 		SMS = GoMail // 配置加载失败时默认使用邮件
 	}
+
+	// 邮件发送队列：启动 worker 并刷新分批 / 重试参数
+	// （配置文件热更新会重新执行 initSMS，因此这里同时承担 reload 的职责）
+	mailQueue.reload()
+	mailQueue.start()
 }
 
 // ================================== GoMail邮件服务 - 实现 ==================================
@@ -297,24 +302,64 @@ func (this *GoMailRequest) init() {
 	this.Client = gomail.NewDialer(host, port, account, password)
 }
 
-// VerifyCode - 发送验证码
+// VerifyCode - 发送验证码（邮箱驱动）
+//
+// 流程：同步做参数 / 配置校验并生成验证码 -> 入队到「优先通道」（不占用批量窗口，来了就发）
+// -> 有界等待首轮发送结果（超时按「已受理」处理，不阻塞请求）。
+//
+// 说明：验证码需要立即返回给调用方缓存（5 分钟有效），因此首轮发送失败时把错误同步返回，
+// 调用方提示用户重试；任务本身仍留在队列里按重试规则异步重试。
 func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResponse) {
 	response = &SMSResponse{}
 
-	if !utils.Is.Email(phone) {
-		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
-		smsLog("email", false, map[string]any{"recipient": phone, "error": response.Error, "type": "验证码"})
-		return
-	}
-
-	if this.Client == nil {
-		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
-		smsLog("email", false, map[string]any{"recipient": phone, "error": response.Error, "type": "验证码"})
+	if err := this.check(cast.ToString(phone)); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": phone, "error": err, "type": MailKindVerify})
 		return
 	}
 
 	if len(code) == 0 {
 		code = append(code, utils.Rand.String(6, "0123456789"))
+	}
+	verify := cast.ToString(code[0])
+
+	result := mailQueue.enqueueUrgent(&MailTask{
+		Kind:      MailKindVerify,
+		Recipient: cast.ToString(phone),
+		Code:      verify,
+	})
+
+	if result != nil && result.Error != nil {
+		response.Error = result.Error
+		return response
+	}
+
+	response.VerifyCode = verify
+	return response
+}
+
+// check 入队前的基础校验（邮箱格式 / 邮件服务是否就绪）
+//
+// 这类问题属于参数或配置错误，同步返回比丢进队列反复重试更有意义，
+// 因此校验放在入队之前（真正发送时再校验一次，防止运行期配置被改坏）。
+func (this *GoMailRequest) check(recipient string) error {
+	if !utils.Is.Email(recipient) {
+		return errors.New("格式错误，请给一个正确的邮箱地址")
+	}
+	if this.Client == nil {
+		return errors.New("邮件服务未初始化，请检查config/sms.toml配置")
+	}
+	return nil
+}
+
+// sendVerifyCode 渲染并发送验证码邮件（由邮件队列 worker 调用，code 已在上游生成）
+func (this *GoMailRequest) sendVerifyCode(recipient, code string) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindVerify})
+		return
 	}
 
 	if utils.Is.Empty(this.Template) {
@@ -326,12 +371,12 @@ func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResp
 	account := cast.ToString(SMSToml.Get("email.account"))
 	item.SetHeader("From", nickname+"<"+account+">")
 	// 发送给多个用户
-	item.SetHeader("To", cast.ToString(phone))
+	item.SetHeader("To", recipient)
 	// 设置邮件主题
 	item.SetHeader("Subject", cast.ToString(SMSToml.Get("email.sign_name")))
 	// 替换验证码
 	temp := utils.Replace(this.Template, map[string]any{
-		"${code}": code[0],
+		"${code}": code,
 	})
 	// 设置邮件正文
 	item.SetBody("text/html", temp)
@@ -340,28 +385,50 @@ func (this *GoMailRequest) VerifyCode(phone any, code ...any) (response *SMSResp
 	err := this.Client.DialAndSend(item)
 	if err != nil {
 		response.Error = err
-		smsLog("email", false, map[string]any{"recipient": phone, "error": err, "type": "验证码"})
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindVerify})
 		return response
 	}
 
-	response.VerifyCode = cast.ToString(code[0])
-	smsLog("email", true, map[string]any{"recipient": phone, "type": "验证码"})
+	response.VerifyCode = code
+	response.Result = "邮件发送成功"
+	smsLog("email", true, map[string]any{"recipient": recipient, "type": MailKindVerify})
 	return response
 }
 
-// SendCommentNotify - 发送评论通知邮件
+// SendCommentNotify - 发送评论通知邮件（入队：分批限流 + 失败延迟重试，非阻塞）
+//
+// 返回 Error != nil 表示参数 / 配置有误（同步返回，不入队）；否则任务已受理，
+// 真正的发送与失败重试由邮件队列完成（见 app/facade/mail_queue.go）。
 func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
 	response = &SMSResponse{}
 
-	if !utils.Is.Email(recipient) {
-		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "评论通知"})
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindComment})
 		return
 	}
 
-	if this.Client == nil {
-		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "评论通知"})
+	if !mailQueue.enqueue(&MailTask{
+		Kind:      MailKindComment,
+		Priority:  MailNormal,
+		Recipient: recipient,
+		Data:      commentInfo,
+	}) {
+		response.Error = errors.New("邮件队列已满，请稍后再试")
+		return
+	}
+
+	response.Result = "已加入发送队列"
+	return
+}
+
+// sendCommentNotify 渲染并发送评论通知邮件（由邮件队列 worker 调用）
+func (this *GoMailRequest) sendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "评论通知"})
 		return
 	}
 
@@ -448,19 +515,37 @@ func (this *GoMailRequest) SendCommentNotify(recipient string, commentInfo map[s
 	return response
 }
 
-// SendReplyNotify - 发送评论回复通知邮件
+// SendReplyNotify - 发送评论回复通知邮件（入队：分批限流 + 失败延迟重试，非阻塞）
 func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
 	response = &SMSResponse{}
 
-	if !utils.Is.Email(recipient) {
-		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "回复通知"})
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindReply})
 		return
 	}
 
-	if this.Client == nil {
-		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "回复通知"})
+	if !mailQueue.enqueue(&MailTask{
+		Kind:      MailKindReply,
+		Priority:  MailNormal,
+		Recipient: recipient,
+		Data:      commentInfo,
+	}) {
+		response.Error = errors.New("邮件队列已满，请稍后再试")
+		return
+	}
+
+	response.Result = "已加入发送队列"
+	return
+}
+
+// sendReplyNotify 渲染并发送评论回复通知邮件（由邮件队列 worker 调用）
+func (this *GoMailRequest) sendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "回复通知"})
 		return
 	}
 
@@ -547,20 +632,196 @@ func (this *GoMailRequest) SendReplyNotify(recipient string, commentInfo map[str
 	return response
 }
 
-// SendMail - 发送自定义内容的邮件（主题 + 纯文本正文，正文换行会转成 HTML 换行）
-// 用于注册验证邮件、欢迎邮件等不属于「评论通知」模板自身的场景。
-func (this *GoMailRequest) SendMail(recipient string, subject string, content string) (response *SMSResponse) {
+// SendMessageNotify - 发送「用户消息通知」邮件
+//
+// 场景：管理员在后台「消息管理」向指定用户发送系统消息时勾选「同时发送邮件通知」。
+// 与评论通知的区别：正文只渲染消息标题与内容，不包含评论者 / 评论 IP 等评论字段，
+// 标题、正文都按纯文本处理（转义 + 换行转 <br>），避免消息内容破坏排版。
+func (this *GoMailRequest) SendMessageNotify(recipient string, messageInfo map[string]any) (response *SMSResponse) {
 	response = &SMSResponse{}
 
-	if !utils.Is.Email(recipient) {
-		response.Error = errors.New("格式错误，请给一个正确的邮箱地址")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "自定义邮件"})
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindMessage})
+		return
+	}
+
+	if !mailQueue.enqueue(&MailTask{
+		Kind:      MailKindMessage,
+		Priority:  MailNormal,
+		Recipient: recipient,
+		Data:      messageInfo,
+	}) {
+		response.Error = errors.New("邮件队列已满，请稍后再试")
+		return
+	}
+
+	response.Result = "已加入发送队列"
+	return
+}
+
+// sendMessageNotify 渲染并发送「用户消息通知」邮件（由邮件队列 worker 调用）
+func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[string]any) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "消息通知"})
+		return
+	}
+
+	title := strings.TrimSpace(cast.ToString(messageInfo["title"]))
+	content := cast.ToString(messageInfo["content"])
+	timeText := cast.ToString(messageInfo["time"])
+	if utils.Is.Empty(timeText) {
+		timeText = time.Now().Format("2006-01-02 15:04:05")
+	}
+
+	site := cast.ToString(SMSToml.Get("email.sign_name"))
+
+	// 正文按纯文本处理：先转义再换行转 <br>（顺序不能反，否则 <br> 会被一起转义）
+	body := html.EscapeString(content)
+	body = strings.ReplaceAll(body, "\r\n", "<br>")
+	body = strings.ReplaceAll(body, "\n", "<br>")
+
+	template := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta charset="UTF-8">
+	<title>用户消息通知</title>
+	<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { line-height: 1.7; color: #444; background-color: #f8f9fa; padding: 20px 0; }
+	.container { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); overflow: hidden; }
+	.mail-header { background: #165DFF; padding: 24px 30px; color: #fff; }
+	.brand { display: flex; align-items: center; gap: 12px; }
+	.brand-name { font-size: 18px; font-weight: 600; }
+	.mail-content { padding: 30px; }
+	.subtitle { color: #666; margin-bottom: 20px; font-size: 15px; }
+	.msg-title { font-size: 18px; font-weight: 600; color: #222; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #f0f0f0; }
+	.msg-card { background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #165DFF; font-size: 15px; line-height: 1.8; color: #333; word-break: break-word; }
+	.meta { font-size: 13px; color: #888; }
+	.mail-footer { padding: 20px 30px; background: #f9fafb; border-top: 1px solid #f0f0f0; font-size: 14px; color: #888; }
+	.footer-note { margin-bottom: 0; }
+	@media (max-width: 600px) {
+		.container { width: 95%; margin: 0 auto; }
+		.mail-header, .mail-content, .mail-footer { padding: 20px 15px; }
+		.msg-title { font-size: 16px; }
+	}
+	</style>
+	</head>
+	<body>
+	<div class="container">
+	<div class="mail-header">
+		<div class="brand"><div class="brand-name">用户消息通知</div></div>
+	</div>
+	<div class="mail-content">
+		<p class="subtitle">您收到一条来自「${site}」的消息</p>
+		<div class="msg-title">${title}</div>
+		<div class="msg-card">${content}</div>
+		<p class="meta"><strong>发送时间：</strong>${time}</p>
+	</div>
+	<div class="mail-footer">
+		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
+	</div>
+	</div>
+	</body>
+	</html>
+	`
+
+	item := gomail.NewMessage()
+	nickname := cast.ToString(SMSToml.Get("email.nickname"))
+	account := cast.ToString(SMSToml.Get("email.account"))
+	item.SetHeader("From", nickname+"<"+account+">")
+	item.SetHeader("To", recipient)
+	item.SetHeader("Subject", title+" - "+site)
+
+	temp := utils.Replace(template, map[string]any{
+		"${site}":    site,
+		"${title}":   html.EscapeString(title),
+		"${content}": body,
+		"${time}":    timeText,
+	})
+
+	item.SetBody("text/html", temp)
+
+	if err := this.Client.DialAndSend(item); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "消息通知"})
 		return response
 	}
 
-	if this.Client == nil {
-		response.Error = errors.New("邮件服务未初始化，请检查config/sms.toml配置")
-		smsLog("email", false, map[string]any{"recipient": recipient, "error": response.Error, "type": "自定义邮件"})
+	response.Result = "邮件发送成功"
+	smsLog("email", true, map[string]any{"recipient": recipient, "type": "消息通知"})
+	return response
+}
+
+// SendMail - 发送自定义内容的邮件（主题 + 纯文本正文，正文换行会转成 HTML 换行）
+//
+// 用于欢迎邮件等不属于「评论通知」模板自身的场景；入队发送（分批限流 + 失败延迟重试，非阻塞）。
+// 需要「调用方立刻知道发送结果」的关键邮件（如注册验证链接）请用 SendMailUrgent。
+func (this *GoMailRequest) SendMail(recipient string, subject string, content string) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindCustom})
+		return
+	}
+
+	if !mailQueue.enqueue(&MailTask{
+		Kind:      MailKindCustom,
+		Priority:  MailNormal,
+		Recipient: recipient,
+		Subject:   subject,
+		Content:   content,
+	}) {
+		response.Error = errors.New("邮件队列已满，请稍后再试")
+		return
+	}
+
+	response.Result = "已加入发送队列"
+	return
+}
+
+// SendMailUrgent - 发送自定义邮件（优先通道 + 有界等待首轮结果）
+//
+// 与 SendMail 的区别：走队列的优先通道（不占批量窗口，立即发送），
+// 并等待首轮发送结果（默认 10 秒，见 sms.toml 的 email.verify_wait；超时视为已受理）。
+// 适用于注册验证邮件这类「调用方需要给用户明确提示」的邮件。
+func (this *GoMailRequest) SendMailUrgent(recipient string, subject string, content string) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": MailKindCustom})
+		return
+	}
+
+	result := mailQueue.enqueueUrgent(&MailTask{
+		Kind:      MailKindCustom,
+		Recipient: recipient,
+		Subject:   subject,
+		Content:   content,
+	})
+
+	if result != nil && result.Error != nil {
+		response.Error = result.Error
+		return
+	}
+
+	response.Result = "已受理"
+	return
+}
+
+// sendCustomMail 渲染并发送自定义邮件（由邮件队列 worker 调用）
+func (this *GoMailRequest) sendCustomMail(recipient string, subject string, content string) (response *SMSResponse) {
+	response = &SMSResponse{}
+
+	if err := this.check(recipient); err != nil {
+		response.Error = err
+		smsLog("email", false, map[string]any{"recipient": recipient, "error": err, "type": "自定义邮件"})
 		return response
 	}
 
@@ -603,8 +864,25 @@ func (this *GoMailRequest) SendMail(recipient string, subject string, content st
 	return response
 }
 
+// sendMailTask 按任务类型分发到对应的「渲染 + 发送」实现（由邮件队列 worker 调用）
+func (this *GoMailRequest) sendMailTask(task *MailTask) *SMSResponse {
+	switch task.Kind {
+	case MailKindVerify:
+		return this.sendVerifyCode(task.Recipient, task.Code)
+	case MailKindComment:
+		return this.sendCommentNotify(task.Recipient, task.Data)
+	case MailKindReply:
+		return this.sendReplyNotify(task.Recipient, task.Data)
+	case MailKindMessage:
+		return this.sendMessageNotify(task.Recipient, task.Data)
+	default:
+		return this.sendCustomMail(task.Recipient, task.Subject, task.Content)
+	}
+}
+
 // SendMail - 发送自定义内容邮件（仅 email 驱动支持）
-// 短信驱动不具备「任意内容邮件」能力，同样返回错误提示，由调用方决定是否忽略
+// 短信驱动不具备「任意内容邮件」能力，同样返回错误提示，由调用方决定是否忽略；
+// 该入口为「入队发送」（非阻塞，失败自动延迟重试）
 func SendMail(recipient string, subject string, content string) (response *SMSResponse) {
 
 	if GoMail == nil {
@@ -612,6 +890,32 @@ func SendMail(recipient string, subject string, content string) (response *SMSRe
 	}
 
 	return GoMail.SendMail(recipient, subject, content)
+}
+
+// SendMailUrgent - 发送自定义邮件（优先通道，等待首轮结果）
+//
+// 用于注册验证邮件这类关键邮件：不占用批量窗口、立即发送，并在超时时间内返回首轮结果。
+func SendMailUrgent(recipient string, subject string, content string) (response *SMSResponse) {
+
+	if GoMail == nil {
+		return &SMSResponse{Error: errors.New("邮件服务未初始化，请检查config/sms.toml配置")}
+	}
+
+	return GoMail.SendMailUrgent(recipient, subject, content)
+}
+
+// SendMessageNotify - 发送「用户消息通知」邮件（包级入口）
+//
+// 与 SendMail 一样直接走邮箱驱动（GoMail），不受 sms.toml 的驱动模式影响：
+// 短信驱动无法发邮件，若走 facade.SMS 会在站点配置短信驱动时静默发不出去。
+// messageInfo 支持：title（标题，必填）、content（内容，必填）、time（发送时间，可省）。
+func SendMessageNotify(recipient string, messageInfo map[string]any) (response *SMSResponse) {
+
+	if GoMail == nil {
+		return &SMSResponse{Error: errors.New("邮件服务未初始化，请检查config/sms.toml配置")}
+	}
+
+	return GoMail.SendMessageNotify(recipient, messageInfo)
 }
 
 // ================================== 阿里云短信 - 实现 ==================================

@@ -267,9 +267,11 @@ func SendRegisterVerifyMail(uid int, email string, baseURL string) error {
 		site, link,
 	)
 
-	if response := facade.SendMail(email, subject, content); response != nil && response.Error != nil {
+	// 注册验证邮件属于关键邮件：走队列的优先通道（不占用批量窗口、立即发送）
+	// 并等待首轮结果，失败时如实返回错误（任务仍会在队列里异步重试）
+	if response := facade.SendMailUrgent(email, subject, content); response != nil && response.Error != nil {
 		facade.Log.Error(map[string]any{"error": response.Error.Error(), "uid": uid}, "发送注册验证邮件失败")
-		return errors.New("验证邮件发送失败，请联系管理员检查邮件服务配置！")
+		return errors.New("验证邮件发送失败，请稍后重试；若持续失败请联系管理员检查邮件服务配置！")
 	}
 
 	return nil
