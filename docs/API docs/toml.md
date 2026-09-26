@@ -17,7 +17,7 @@
 
 | 接口 | 方法 | 说明 |
 | :--- | :--- | :--- |
-| `/api/toml/storage` | PUT | 统一更新存储配置，支持同时修改 default、local、oss、cos、kodo、attachment 配置 |
+| `/api/toml/storage` | PUT | 统一更新存储配置，支持同时修改 default、local、cos、attachment 配置 |
 | `/api/toml/storage-attachment` | PUT | 更新附件管理配置 |
 | `/api/toml/sms-email-queue` | PUT | 更新邮件发件队列（分批 + 重试）参数，写入 `config/sms.toml` 的 `[email]` 段 |
 
@@ -52,7 +52,7 @@
 
 > `email` 分组（`name=email` 或整份返回里的 `data.email`）同时包含**发件队列参数**：
 > `batch_size` / `batch_interval` / `retry_delay` / `max_attempts` / `send_timeout` / `verify_wait` / `queue_size`，
-> 修改请用 `PUT /api/toml/sms-email-queue`（见 3.18）。
+> 修改请用 `PUT /api/toml/sms-email-queue`（见 3.16）。
 
 **成功响应** (200):
 ```json
@@ -133,7 +133,11 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `name` | string | 否 | 指定配置项：local、oss、cos、kodo、attachment |
+| `name` | string | 否 | 指定配置项：local、cos、attachment |
+
+> `local` / `cos` 分组里始终包含上传命名规则的生效值 `dir_rule`（目录规则）与
+> `file_rule`（文件规则）：老配置文件里没有这两项时，接口会按默认值返回
+> （见「特殊说明 → 5. 上传命名规则」）。
 
 **成功响应** (200):
 ```json
@@ -141,10 +145,13 @@
     "code": 200,
     "msg": "数据请求成功！",
     "data": {
-        "local": {},
-        "oss": {},
+        "local": {
+            "domain": "",
+            "path": "storage",
+            "dir_rule": "{Y}-{m}/{d}",
+            "file_rule": "{timestamp}{str-random-10}"
+        },
         "cos": {},
-        "kodo": {},
         "attachment": {},
         "default": "local"
     }
@@ -304,31 +311,7 @@
 }
 ```
 
-#### 2.6 测试 OSS 连接
-
-- **路径**: `/api/toml/test-oss`
-- **方法**: `POST`
-- **描述**: 测试阿里云 OSS 连接
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key_id` | string | **是** | AccessKey ID |
-| `access_key_secret` | string | **是** | AccessKey Secret |
-| `endpoint` | string | **是** | 端点地址 |
-| `bucket` | string | **是** | Bucket 名称 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "测试OSS连接成功！",
-    "data": null
-}
-```
-
-#### 2.7 测试 COS 连接
+#### 2.6 测试 COS 连接
 
 - **路径**: `/api/toml/test-cos`
 - **方法**: `POST`
@@ -349,30 +332,6 @@
 {
     "code": 200,
     "msg": "测试COS连接成功！",
-    "data": null
-}
-```
-
-#### 2.8 测试 KODO 连接
-
-- **路径**: `/api/toml/test-kodo`
-- **方法**: `POST`
-- **描述**: 测试七牛云 KODO 连接
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key` | string | **是** | Access Key |
-| `secret_key` | string | **是** | Secret Key |
-| `bucket` | string | **是** | Bucket 名称 |
-| `region` | string | **是** | 地域 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "测试KODO连接成功！",
     "data": null
 }
 ```
@@ -636,30 +595,19 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `default` | string | 否 | 默认存储类型：local、oss、cos、kodo |
+| `default` | string | 否 | 默认存储类型：local、cos |
 | `local` | object | 否 | 本地存储配置 |
-| `oss` | object | 否 | OSS存储配置 |
-| `cos` | object | 否 | COS存储配置 |
-| `kodo` | object | 否 | KODO存储配置 |
+| `cos` | object | 否 | 腾讯云 COS 存储配置 |
 | `attachment` | object | 否 | 附件配置 |
 
 **local 配置项**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
-
-**oss 配置项**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key_id` | string | 否 | AccessKey ID |
-| `access_key_secret` | string | 否 | AccessKey Secret |
-| `endpoint` | string | 否 | 端点地址 |
-| `bucket` | string | 否 | Bucket 名称 |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
+| `domain` | string | 否 | 访问域名，留空 = 相对路径（/storage/xxx），也可填 CDN 域名 |
+| `path` | string | 否 | public 下的存储子目录，留空则直接放 public 下 |
+| `dir_rule` | string | 否 | 上传目录命名规则，默认 `{Y}-{m}/{d}`；填 `/` 表示不要子目录（占位符见特殊说明 5） |
+| `file_rule` | string | 否 | 上传文件命名规则（不含扩展名），默认 `{timestamp}{str-random-10}` |
 
 **cos 配置项**:
 
@@ -667,21 +615,13 @@
 | :--- | :--- | :--- | :--- |
 | `secret_id` | string | 否 | Secret ID |
 | `secret_key` | string | 否 | Secret Key |
-| `app_id` | string | 否 | App ID |
-| `bucket` | string | 否 | Bucket 名称 |
-| `region` | string | 否 | 地域 |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
-
-**kodo 配置项**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key` | string | 否 | Access Key |
-| `secret_key` | string | 否 | Secret Key |
-| `bucket` | string | 否 | Bucket 名称 |
-| `region` | string | 否 | 地域 |
-| `domain` | string | 否 | 域名 |
+| `app_id` | string | 否 | App ID（桶名数字后缀） |
+| `bucket` | string | 否 | Bucket 名称（裸桶名自动补 -app_id，也支持控制台全名） |
+| `region` | string | 否 | 地域（留空按 ap-guangzhou） |
+| `domain` | string | 否 | 自定义访问域名（CDN），留空用默认域名 |
+| `path` | string | 否 | 对象键前缀，留空则键直接从目录命名规则开始 |
+| `dir_rule` | string | 否 | 上传目录命名规则，默认 `{Y}-{m}/{d}`；填 `/` 表示不要子目录 |
+| `file_rule` | string | 否 | 上传文件命名规则（不含扩展名），默认 `{timestamp}{str-random-10}` |
 
 **attachment 配置项**:
 
@@ -694,22 +634,26 @@
 **请求示例**:
 ```json
 {
-    "default": "oss",
+    "default": "cos",
     "local": {
-        "domain": "storage",
-        "path": "storage"
+        "domain": "",
+        "path": "storage",
+        "dir_rule": "{Y}-{m}/{d}",
+        "file_rule": "{timestamp}{str-random-10}"
     },
-    "oss": {
-        "access_key_id": "your-access-key-id",
-        "access_key_secret": "your-access-key-secret",
-        "endpoint": "oss-cn-hangzhou.aliyuncs.com",
-        "bucket": "your-bucket",
-        "domain": "https://oss.example.com",
-        "path": "uploads"
+    "cos": {
+        "secret_id": "your-secret-id",
+        "secret_key": "your-secret-key",
+        "app_id": "1250000000",
+        "bucket": "inis-cos",
+        "region": "ap-guangzhou",
+        "domain": "",
+        "path": "inis",
+        "dir_rule": "{Y}/{m}/{d}",
+        "file_rule": "{Y}{m}{d}-{str-random-10}"
     },
     "attachment": {
         "max_file_size": 10240,
-        "limit_per_day": 50,
         "concurrent_limit": 5
     }
 }
@@ -734,7 +678,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `value` | string | **是** | 默认存储类型：local、oss、cos、kodo |
+| `value` | string | **是** | 默认存储类型：local、cos |
 
 **成功响应** (200):
 ```json
@@ -751,12 +695,19 @@
 - **方法**: `PUT`
 - **描述**: 更新本地存储配置
 
-**请求参数**:
+**请求参数**（all 可选，只提交要改的字段）:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
+| `domain` | string | 否 | 访问域名（留空 = 相对路径 /storage/xxx） |
+| `path` | string | 否 | public 下的存储子目录（留空则直接放 public 下） |
+| `dir_rule` | string | 否 | 上传目录命名规则，默认 `{Y}-{m}/{d}`；填 `/` 表示不要子目录 |
+| `file_rule` | string | 否 | 上传文件命名规则（不含扩展名，扩展名自动追加），默认 `{timestamp}{str-random-10}` |
+
+> 上传落地路径 = `public` + `path` + `dir_rule` + `file_rule` + 扩展名，
+> 例如 `path=storage`、`dir_rule={Y}-{m}/{d}`、`file_rule={timestamp}{str-random-10}`
+> → `public/storage/2026-09/26/17588888881a2b3c4d5e.jpg`；
+> 占位符清单见「特殊说明 → 5. 上传命名规则」，未知占位符返回 400。
 
 **成功响应** (200):
 ```json
@@ -767,33 +718,7 @@
 }
 ```
 
-#### 3.14 更新 OSS 存储配置
-
-- **路径**: `/api/toml/storage-oss`
-- **方法**: `PUT`
-- **描述**: 更新阿里云 OSS 存储配置
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key_id` | string | **是** | AccessKey ID |
-| `access_key_secret` | string | **是** | AccessKey Secret |
-| `endpoint` | string | **是** | 端点地址 |
-| `bucket` | string | **是** | Bucket 名称 |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "修改成功！",
-    "data": null
-}
-```
-
-#### 3.15 更新 COS 存储配置
+#### 3.14 更新 COS 存储配置
 
 - **路径**: `/api/toml/storage-cos`
 - **方法**: `PUT`
@@ -805,11 +730,22 @@
 | :--- | :--- | :--- | :--- |
 | `secret_id` | string | **是** | Secret ID |
 | `secret_key` | string | **是** | Secret Key |
-| `app_id` | string | **是** | App ID |
-| `bucket` | string | **是** | Bucket 名称 |
-| `region` | string | **是** | 地域 |
-| `domain` | string | 否 | 域名 |
-| `path` | string | 否 | 存储路径 |
+| `app_id` | string | **是** | App ID（桶名的数字后缀，如 1250000000） |
+| `bucket` | string | **是** | Bucket 名称：可填 `inis-cos`，SDK 自动补成 `inis-cos-<app_id>`；也可直接填控制台复制的全名 `inis-cos-1250000000`（不会再重复拼 app_id） |
+| `region` | string | **是** | 地域（留空按 `ap-guangzhou` 处理） |
+| `domain` | string | 否 | 自定义访问域名（CDN）；留空时用默认域名 `https://<bucket>-<app_id>.cos.<region>.myqcloud.com` |
+| `path` | string | 否 | 对象键前缀（留空则键直接从目录命名规则开始，不会带前导 `/`） |
+| `dir_rule` | string | 否 | 上传目录命名规则，默认 `{Y}-{m}/{d}`；填 `/` 表示不要子目录 |
+| `file_rule` | string | 否 | 上传文件命名规则（不含扩展名，扩展名自动追加），默认 `{timestamp}{str-random-10}` |
+
+> 对象键 = `path` + `dir_rule` + `file_rule` + 扩展名，
+> 例如 `path=inis`、`dir_rule={Y}/{m}/{d}`、`file_rule={Y}{m}{d}-{str-random-10}`
+> → `inis/2026/09/26/20260926-1a2b3c4d5e.jpg`；
+> 占位符清单见「特殊说明 → 5. 上传命名规则」，未知占位符返回 400。
+>
+> 上传时会对单个对象设置 `x-cos-acl: public-read`（桶不存在时同时以「公共读私有写」创建），
+> 保证附件地址可直接访问；删除走 `DELETE Object` / `DELETE Multiple Objects`（单请求分批 500 个，
+> 对象不存在（404）视为删除成功）。详见「附件接口文档」的 4.2 / 4.3。
 
 **成功响应** (200):
 ```json
@@ -820,58 +756,31 @@
 }
 ```
 
-#### 3.16 更新 KODO 存储配置
-
-- **路径**: `/api/toml/storage-kodo`
-- **方法**: `PUT`
-- **描述**: 更新七牛云 KODO 存储配置
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `access_key` | string | **是** | Access Key |
-| `secret_key` | string | **是** | Secret Key |
-| `bucket` | string | **是** | Bucket 名称 |
-| `region` | string | **是** | 地域 |
-| `domain` | string | **是** | 域名 |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "修改成功！",
-    "data": null
-}
-```
-
-#### 3.17 更新附件配置
+#### 3.15 更新附件配置
 
 - **路径**: `/api/toml/storage-attachment`
 - **方法**: `PUT`
 - **描述**: 更新附件管理配置
 
-**请求参数**:
+**请求参数**（只提交要改的字段，未提交的保持原值）:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `allow_extensions` | string | 否 | 允许的文件扩展名，多个用逗号分隔 |
 | `max_file_size` | int | 否 | 单个文件最大大小（KB） |
-| `concurrent_limit` | int | 否 | 并发上传限制 |
-| `limit_per_minute` | int | 否 | 每分钟上传限制（0为不限制） |
-| `limit_per_hour` | int | 否 | 每小时上传限制（0为不限制） |
-| `limit_per_day` | int | 否 | 每天上传限制（0为不限制） |
-| `limit_per_week` | int | 否 | 每周上传限制（0为不限制） |
-| `limit_per_month` | int | 否 | 每月上传限制（0为不限制） |
+| `concurrent_limit` | int | 否 | 并发上传限制（同时上传的文件数上限） |
+
+> 附件上传目前只有这三项限制真正生效：扩展名白名单、单文件大小、并发数。
+> 历史上还有 5 个「每时段上传上限」（`limit_per_minute` / `limit_per_hour` / `limit_per_day` /
+> `limit_per_week` / `limit_per_month`），后端从未实现校验逻辑，已移除；
+> 老配置里若残留这些键会被忽略（保存一次附件配置即被清理）。
 
 **请求示例**:
 ```json
 {
     "allow_extensions": "jpg,png,gif,webp,pdf",
     "max_file_size": 10240,
-    "concurrent_limit": 5,
-    "limit_per_day": 50,
-    "limit_per_month": 1000
+    "concurrent_limit": 5
 }
 ```
 
@@ -884,7 +793,7 @@
 }
 ```
 
-#### 3.18 更新发件队列配置
+#### 3.16 更新发件队列配置
 
 - **路径**: `/api/toml/sms-email-queue`
 - **方法**: `PUT`
@@ -978,3 +887,58 @@
 - 更新配置（PUT）时，若密钥字段回传的是脱敏占位值（含 `****` 或全 `*`），后端将**保留原值不更新**，避免把脱敏值写坏配置
 - 测试接口（POST）需重新输入真实密钥后方可测试
 - 配置修改需要管理员权限
+
+### 5. 上传命名规则（dir_rule / file_rule）
+
+本地存储（`[local]`）与腾讯云 COS（`[cos]`）都支持自定义上传的**目录结构**与**文件名**，
+字段为 `dir_rule`（目录命名规则）与 `file_rule`（文件命名规则），实现见 `app/facade/storage-rule.go`。
+
+**最终位置 = `path` 前缀 / 目录规则 / 文件规则 + 扩展名**（扩展名按原文件自动追加，规则里不用写）。
+
+| 占位符 | 说明 |
+| :--- | :--- |
+| `{Y}` | 年份（2026） |
+| `{y}` | 两位数年份（26） |
+| `{m}` | 月份（09） |
+| `{d}` | 当月的第几号（26） |
+| `{timestamp}` | 时间戳（秒） |
+| `{uniqid}` | 唯一字符串（微秒时间戳 + 随机） |
+| `{md5}` | 32 位随机 md5 |
+| `{md5-16}` | 16 位随机 md5（32 位的中段） |
+| `{str-random-16}` | 16 位随机字符串 |
+| `{str-random-10}` | 10 位随机字符串 |
+| `{filename}` | 文件原始名称（不含扩展名） |
+| `{uid}` | 上传者用户 ID，游客为 0 |
+
+**行为说明**：
+
+- 默认值：`dir_rule = {Y}-{m}/{d}`、`file_rule = {timestamp}{str-random-10}`
+  （与历史行为一致的年月日目录，文件名带秒级时间戳 + 随机串保证唯一）；
+- 规则留空 = 用默认值；想让文件直接放在 `path` 前缀下（不要子目录），把 `dir_rule` 设为 `/`（或 `.`）；
+- 同一次上传里目录与文件名共用一组取值：`{timestamp}` / `{md5}` / `{str-random-*}` 在两处一致，
+  其中 `{md5}` 与 `{md5-16}` 同源、`{str-random-16}` 与 `{str-random-10}` 同源；
+- 规则结果会清洗后再落盘：统一斜杠、剔除 `.` / `..` 片段（防目录穿越）、
+  去掉 `<>:"|?*` 与控制字符、单段超过 100 字符截断，规则被清空时用毫秒时间戳兜底；
+- 保存时校验占位符，出现未知占位符（如 `{mm}`）返回 `400`，避免生成带 `{xx}` 的目录；
+- 只要规则里保留了 `{timestamp}` / `{uniqid}` / `{md5}` / `{str-random-*}` 之一即可保证文件名唯一；
+  若只用 `{filename}` 这类不唯一的规则，同名文件会互相覆盖（同名同内容的秒传不受影响）。
+
+**配置示例**（`PUT /api/toml/storage-local`）：
+
+```json
+{
+    "path": "storage",
+    "dir_rule": "{Y}/{m}/{d}",
+    "file_rule": "{Y}{m}{d}-{str-random-10}"
+}
+```
+→ `public/storage/2026/09/26/20260926-1a2b3c4d5e.jpg`
+
+**失败响应** (400)：
+```json
+{
+    "code": 400,
+    "msg": "本地存储 的 file_rule 里 {mm} 不是可用占位符！",
+    "data": null
+}
+```

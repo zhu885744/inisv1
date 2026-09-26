@@ -1,6 +1,7 @@
 package facade
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,10 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/fsnotify/fsnotify"
-	"github.com/qiniu/go-sdk/v7/auth/qbox"
-	"github.com/qiniu/go-sdk/v7/storage"
 	"github.com/spf13/cast"
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/unti-io/go-utils/utils"
@@ -40,32 +38,24 @@ func init() {
 const (
 	// StorageModeLocal - 本地存储
 	StorageModeLocal = "local"
-	// StorageModeOSS - OSS存储
-	StorageModeOSS = "oss"
-	// StorageModeCOS - COS存储
+	// StorageModeCOS - 腾讯云 COS 存储
 	StorageModeCOS = "cos"
-	// StorageModeKODO - KODO存储
-	StorageModeKODO = "kodo"
 )
 
 // NewStorage - 创建Storage实例
 /**
- * @param mode 驱动模式
+ * @param mode 驱动模式：local / cos（其它值回退本地存储）
  * @return StorageInterface
  * @example：
- * 1. storage := facade.NewStorage("oss")
- * 2. storage := facade.NewStorage(facade.StorageModeOSS)
+ * 1. storage := facade.NewStorage("cos")
+ * 2. storage := facade.NewStorage(facade.StorageModeCOS)
  */
 func NewStorage(mode any) StorageInterface {
 	switch strings.ToLower(cast.ToString(mode)) {
 	case StorageModeLocal:
 		Storage = LocalStorage
-	case StorageModeOSS:
-		Storage = OSS
 	case StorageModeCOS:
 		Storage = COS
-	case StorageModeKODO:
-		Storage = KODO
 	default:
 		Storage = LocalStorage
 	}
@@ -82,35 +72,25 @@ func initStorageToml() {
 		Mode: "toml",
 		Name: "storage",
 		Content: utils.Replace(TempStorage, map[string]any{
-			"${default}":                     "local",
-			"${local.domain}":                "storage",
+			"${default}": "local",
+			// 本地域名留空：full_url 存相对路径 /storage/xxx，直接由站点静态服务提供；
+			// 之前默认成 "storage" 会拼出 storage/storage/xxx 这种无效地址
+			"${local.domain}":                "",
 			"${local.path}":                  "storage",
-			"${oss.access_key_id}":           "",
-			"${oss.access_key_secret}":       "",
-			"${oss.endpoint}":                "",
-			"${oss.bucket}":                  "inis-oss",
-			"${oss.domain}":                  "",
-			"${oss.path}":                    "inis",
+			"${local.dir_rule}":              DefaultStorageDirRule,
+			"${local.file_rule}":             DefaultStorageFileRule,
 			"${cos.app_id}":                  "",
 			"${cos.secret_id}":               "",
 			"${cos.secret_key}":              "",
 			"${cos.bucket}":                  "inis-cos",
 			"${cos.region}":                  "ap-guangzhou",
-			"${cos.domain}":                  "",
-			"${cos.path}":                    "inis",
-			"${kodo.access_key}":             "",
-			"${kodo.secret_key}":             "",
-			"${kodo.bucket}":                 "inis-kodo",
-			"${kodo.region}":                 "z2",
-			"${kodo.domain}":                 "",
+			"${cos.domain}":    "",
+			"${cos.path}":      "inis",
+			"${cos.dir_rule}":  DefaultStorageDirRule,
+			"${cos.file_rule}": DefaultStorageFileRule,
 			"${attachment.allow_extensions}": "jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md",
 			"${attachment.max_file_size}":    51200,
 			"${attachment.concurrent_limit}": 5,
-			"${attachment.limit_per_minute}": 60,
-			"${attachment.limit_per_hour}":   500,
-			"${attachment.limit_per_day}":    1000,
-			"${attachment.limit_per_week}":   5000,
-			"${attachment.limit_per_month}":  20000,
 		}),
 	}).Read()
 
@@ -149,35 +129,19 @@ func ReloadStorageToml() {
 	initStorage()
 }
 
-// 初始化缓存
+// 初始化存储（仅本地存储 local 与腾讯云 COS 两种驱动）
 func initStorage() {
 
-	// OSS 对象存储
-	OSS = &OSSStruct{}
-	OSS.init()
-
-	// COS 对象存储
+	// 腾讯云 COS 对象存储
 	COS = &COSStruct{}
 	COS.init()
-	// 初始化COS Bucket
-	COS.Object()
-
-	// KODO 对象存储
-	KODO = &KODOStruct{}
-	KODO.init()
 
 	// 本地存储
 	LocalStorage = &LocalStorageStruct{}
 
 	switch cast.ToString(StorageToml.Get("default")) {
-	case "local":
-		Storage = LocalStorage
-	case "oss":
-		Storage = OSS
-	case "cos":
+	case StorageModeCOS:
 		Storage = COS
-	case "kodo":
-		Storage = KODO
 	default:
 		Storage = LocalStorage
 	}
@@ -190,26 +154,24 @@ func initStorage() {
 /**
  * @return StorageInterface
  * @example：
- * storage := facade.Storage.Upload(facade.Storage.Path() + suffix, bytes)
+ * ctx := facade.StorageRuleContext{Uid: int(uid), Filename: "photo", Ext: "jpg"}
+ * storage := facade.Storage.Upload(facade.Storage.Path(ctx), bytes) // 对象键已含扩展名
  */
 var Storage StorageInterface
 var LocalStorage *LocalStorageStruct
-var OSS *OSSStruct
 var COS *COSStruct
-var KODO *KODOStruct
 
 // =================================== 附件配置 - 开始 ===================================
 
 // AttachmentConfig - 附件配置
+//
+// 只有这三项真正参与上传校验（见 attachment.go 的 uploadSingleFile / checkUploadLimit）；
+// 历史上还留过 limit_per_minute / limit_per_hour / limit_per_day / limit_per_week /
+// limit_per_month 五个「每时段上传上限」，但从未实现校验逻辑，已移除。
 type AttachmentConfig struct {
 	AllowExtensions []string // 允许的文件扩展名
 	MaxFileSize     int64    // 单个文件最大大小（KB）
 	ConcurrentLimit int      // 并发上传限制
-	LimitPerMinute  int      // 每分钟上传限制（0为不限制）
-	LimitPerHour    int      // 每小时上传限制（0为不限制）
-	LimitPerDay     int      // 每天上传限制（0为不限制）
-	LimitPerWeek    int      // 每周上传限制（0为不限制）
-	LimitPerMonth   int      // 每月上传限制（0为不限制）
 }
 
 // AttachmentConfigInstance - 附件配置实例
@@ -221,11 +183,6 @@ func InitAttachmentConfig() {
 		AllowExtensions: parseExtensions(cast.ToString(StorageToml.Get("attachment.allow_extensions"))),
 		MaxFileSize:     cast.ToInt64(StorageToml.Get("attachment.max_file_size")),
 		ConcurrentLimit: cast.ToInt(StorageToml.Get("attachment.concurrent_limit")),
-		LimitPerMinute:  cast.ToInt(StorageToml.Get("attachment.limit_per_minute")),
-		LimitPerHour:    cast.ToInt(StorageToml.Get("attachment.limit_per_hour")),
-		LimitPerDay:     cast.ToInt(StorageToml.Get("attachment.limit_per_day")),
-		LimitPerWeek:    cast.ToInt(StorageToml.Get("attachment.limit_per_week")),
-		LimitPerMonth:   cast.ToInt(StorageToml.Get("attachment.limit_per_month")),
 	}
 }
 
@@ -270,7 +227,80 @@ type StorageInterface interface {
 	Upload(key string, reader io.Reader) *StorageResponse
 	Delete(key string) error
 	DeleteMulti(keys []string) error
-	Path() string
+	// Path 按「目录命名规则 + 文件命名规则」生成对象键（已含扩展名）
+	Path(ctx StorageRuleContext) string
+}
+
+// =================================== 存储公共工具 ===================================
+
+// storageDeleteBatch 单次批量删除的对象数上限
+// COS 的 DeleteMulti 单请求最多 1000 个对象（见官方文档），这里统一按 500 分批，留出余量
+const storageDeleteBatch = 500
+
+// NormalizeStorageKey 清理对象键：去空白、去前导斜杠
+//
+// 历史上前缀（如 cos.path）为空时会生成 "/2026-09/26/xxx" 这种键：
+// 云存储里会多出一层空目录，拼上 CDN 域名后还会出现 "//" 导致 404。
+// 上传与删除两侧统一走这里，保证键完全一致。
+func NormalizeStorageKey(key string) string {
+	return strings.TrimLeft(strings.TrimSpace(key), "/")
+}
+
+// StorageKey 生成对象键：前缀 + 目录 + 文件名（各段自动清理多余斜杠）
+//
+// 目录与文件名由命名规则生成（见 storage-rule.go），这里只做拼装。
+// 保留该名字供历史调用方使用，新代码可直接用 StorageObjectKey。
+func StorageKey(prefix, dir, name string) string {
+	return StorageObjectKey(prefix, dir, name)
+}
+
+// cosToml 读取 COS 配置项（配置文件未就绪时返回空，避免空指针）
+func cosToml(key string) string {
+	if StorageToml == nil {
+		return ""
+	}
+	return cast.ToString(StorageToml.Get(key))
+}
+
+// COSBucketNameWith 归一化「桶名 + app_id」（表单参数或配置值都走这里）
+//
+// 兼容两种写法，避免拼出 inis-cos-1250000000-1250000000.cos... 这类错误域名：
+//   - bucket = "inis-cos"、app_id = "1250000000"        → inis-cos-1250000000
+//   - bucket = "inis-cos-1250000000"（控制台复制的全名） → 原样使用
+func COSBucketNameWith(bucket, appId string) string {
+	bucket = strings.TrimSpace(bucket)
+	appId = strings.TrimSpace(appId)
+
+	if bucket == "" {
+		return ""
+	}
+	if appId == "" || strings.HasSuffix(bucket, "-"+appId) {
+		return bucket
+	}
+
+	return bucket + "-" + appId
+}
+
+// COSBucketName 归一化配置里的 COS 桶名
+func COSBucketName() string {
+	return COSBucketNameWith(cosToml("cos.bucket"), cosToml("cos.app_id"))
+}
+
+// COSRegion COS 地域（未配置时回退广州）
+func COSRegion() string {
+	region := strings.TrimSpace(cosToml("cos.region"))
+	if region == "" {
+		return "ap-guangzhou"
+	}
+	return region
+}
+
+// COSDomain COS 默认访问域名
+//
+// 未配置自定义域名时，上传（写 full_url 模板）与查询（展开 {{cos}}）都用它，
+// 两侧口径必须一致，否则附件地址会出现「存的域名和显示的域名不一样」。
+func COSDomain() string {
+	return fmt.Sprintf("https://%s.cos.%s.myqcloud.com", COSBucketName(), COSRegion())
 }
 
 // =================================== 本地存储存储 - 开始 ===================================
@@ -290,24 +320,46 @@ func (this *LocalStorageStruct) Upload(path string, reader io.Reader) (result *S
 		return
 	}
 
-	// 去除前面的 public
-	result.Path = strings.Replace(path, "public", "", 1)
-	result.Domain = cast.ToString(StorageToml.Get("local.domain"))
+	// 对外路径去掉 public/ 前缀（web 根目录是 public，由站点静态服务映射）
+	// 用 TrimPrefix 而不是 Replace：目录名里若含 "public"（如 public-files），
+	// Replace 会把中间那段一起删掉，导致 save_path 与实际文件对不上
+	result.Path = "/" + strings.Trim(strings.TrimPrefix(path, "public"), "/")
+
+	// 本地域名：留空表示用相对路径（/storage/xxx），也可以填 https://cdn.xxx.com
+	domain := strings.TrimRight(strings.TrimSpace(cast.ToString(StorageToml.Get("local.domain"))), "/")
+	localPath := strings.Trim(strings.TrimSpace(cast.ToString(StorageToml.Get("local.path"))), "/")
+
+	// 兼容历史默认值：模板里 domain 与 path 都曾是 "storage"，会拼出 storage/storage/xxx。
+	// 这种「不含点的短名 + 与 path 相同」的配置一律按未配置处理，避免附件地址失效。
+	if domain != "" && domain == localPath && !strings.Contains(domain, ".") {
+		domain = ""
+	}
+
+	result.Domain = domain
 
 	return
 }
 
-// Path - 本地存储位置 - 生成文件路径
-func (this *LocalStorageStruct) Path() string {
-	// 生成年月日目录 - 如：2006-01/02/
-	dir := time.Now().Format("2006-01/02/")
-	// 生成文件名 - 年月日+毫秒时间戳
-	name := cast.ToString(time.Now().UnixNano() / 1e6)
-	path := cast.ToString(StorageToml.Get("local.path"))
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	return "public/" + path + dir + name
+// Path - 本地存储位置 - 按命名规则生成文件路径（public 目录下的相对路径）
+//
+// 目录与文件名都来自 config/storage.toml 的 [local] 段（dir_rule / file_rule，
+// 见 storage-rule.go），local.path 是固定前缀；例如：
+//
+//	storage + {Y}-{m}/{d} + {timestamp}{str-random-10} + .jpg
+//	→ public/storage/2026-09/26/1758888888123abc7def.jpg
+func (this *LocalStorageStruct) Path(ctx StorageRuleContext) string {
+
+	values := NewStorageRuleValues(ctx)
+
+	dir := values.Apply(StorageRule("local", StorageRuleDir))
+	name := values.Apply(StorageRule("local", StorageRuleFile))
+
+	// local.path 为空时不带前导斜杠，避免拼出 "public//2026-09/…"
+	return "public/" + StorageObjectKey(
+		cast.ToString(StorageToml.Get("local.path")),
+		dir,
+		StorageNameWithExt(name, ctx.Ext),
+	)
 }
 
 // Delete - 删除文件
@@ -323,7 +375,14 @@ func (this *LocalStorageStruct) Delete(key string) error {
 		return errors.New("非法的文件路径！")
 	}
 
-	return os.Remove(clean)
+	err := os.Remove(clean)
+	// 文件本来就不存在视为删除成功（幂等）：避免「已删过的文件」在清空回收站时
+	// 被记为失败，导致对应记录一直留在回收站里
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+
+	return err
 }
 
 // DeleteMulti - 批量删除文件
@@ -339,152 +398,35 @@ func (this *LocalStorageStruct) DeleteMulti(keys []string) error {
 	return nil
 }
 
-// ================================== 阿里云对象存储 - 开始 ==================================
-
-// OSSStruct 阿里云对象存储
-type OSSStruct struct {
-	Client *oss.Client
-}
-
-// init 初始化 阿里云对象存储
-func (this *OSSStruct) init() {
-
-	accessKeyId := cast.ToString(StorageToml.Get("oss.access_key_id"))
-	accessKeySecret := cast.ToString(StorageToml.Get("oss.access_key_secret"))
-	endpoint := cast.ToString(StorageToml.Get("oss.endpoint"))
-
-	client, err := oss.New(endpoint, accessKeyId, accessKeySecret)
-
-	if err != nil {
-		Log.Error(map[string]any{
-			"error":     err.Error(),
-			"func_name": utils.Caller().FuncName,
-			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "OSS 初始化错误")
-		return
-	}
-
-	this.Client = client
-}
-
-// Bucket - 获取Bucket（存储桶）
-func (this *OSSStruct) Bucket() *oss.Bucket {
-
-	exist, err := this.Client.IsBucketExist(cast.ToString(StorageToml.Get("oss.bucket")))
-
-	if err != nil {
-		Log.Error(map[string]any{
-			"error":     err,
-			"func_name": utils.Caller().FuncName,
-			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "OSS Bucket 初始化错误")
-	}
-
-	wg := sync.WaitGroup{}
-
-	if !exist {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			defer wg.Done()
-			// 创建存储空间。
-			err = this.Client.CreateBucket(cast.ToString(StorageToml.Get("oss.bucket")))
-			if err != nil {
-				Log.Error(map[string]any{
-					"error":     err,
-					"func_name": utils.Caller().FuncName,
-					"file_name": utils.Caller().FileName,
-					"file_line": utils.Caller().Line,
-				}, "OSS Bucket 创建错误")
-			}
-		}(&wg)
-	}
-
-	wg.Wait()
-
-	bucket, err := this.Client.Bucket(cast.ToString(StorageToml.Get("oss.bucket")))
-	if err != nil {
-		Log.Error(map[string]any{
-			"error":     err,
-			"func_name": utils.Caller().FuncName,
-			"file_name": utils.Caller().FileName,
-			"file_line": utils.Caller().Line,
-		}, "OSS Bucket 获取错误")
-		return nil
-	}
-
-	return bucket
-}
-
-// Upload - 上传文件
-func (this *OSSStruct) Upload(key string, reader io.Reader) (result *StorageResponse) {
-
-	result = &StorageResponse{}
-
-	err := OSS.Bucket().PutObject(key, reader)
-	if err != nil {
-		result.Error = err
-		return
-	}
-
-	domain := cast.ToString(StorageToml.Get("oss.domain"))
-	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
-		result.Domain = domain
-	} else {
-		result.Domain = "{{oss}}"
-	}
-
-	result.Path = "/" + key
-
-	return
-}
-
-// Path - OSS存储位置 - 生成文件路径
-func (this *OSSStruct) Path() string {
-	// 生成年月日目录 - 如：2023-04/10
-	dir := time.Now().Format("2006-01/02/")
-	// 生成文件名 - 年月日+毫秒时间戳
-	name := cast.ToString(time.Now().UnixNano() / 1e6)
-	path := cast.ToString(StorageToml.Get("oss.path"))
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	return path + dir + name
-}
-
-// Delete - 删除文件
-func (this *OSSStruct) Delete(key string) error {
-	key = strings.TrimPrefix(key, "/")
-	return this.Bucket().DeleteObject(key)
-}
-
-// DeleteMulti - 批量删除文件
-func (this *OSSStruct) DeleteMulti(keys []string) error {
-	for i := range keys {
-		keys[i] = strings.TrimPrefix(keys[i], "/")
-	}
-	_, err := this.Bucket().DeleteObjects(keys)
-	return err
-}
-
 // ================================== 腾讯云对象存储 - 开始 ==================================
 
 // COSStruct 腾讯云对象存储
 type COSStruct struct {
 	Client *cos.Client
+
+	// bucketReady 是否已确认存储桶存在（确认过就不再每次上传都查一次桶）
+	bucketReady bool
+	bucketMu    sync.Mutex
 }
 
 // init 初始化 腾讯云对象存储
 func (this *COSStruct) init() {
 
-	appId := cast.ToString(StorageToml.Get("cos.app_id"))
-	secretId := cast.ToString(StorageToml.Get("cos.secret_id"))
-	secretKey := cast.ToString(StorageToml.Get("cos.secret_key"))
-	bucket := cast.ToString(StorageToml.Get("cos.bucket"))
-	region := cast.ToString(StorageToml.Get("cos.region"))
+	secretId := strings.TrimSpace(cast.ToString(StorageToml.Get("cos.secret_id")))
+	secretKey := strings.TrimSpace(cast.ToString(StorageToml.Get("cos.secret_key")))
+	bucket := COSBucketName()
 
-	cosUrl, err := url.Parse(fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com", bucket, appId, region))
+	if bucket == "" {
+		Log.Warn(map[string]any{"bucket": cast.ToString(StorageToml.Get("cos.bucket"))}, "COS Bucket 未配置，腾讯云 COS 不可用")
+		return
+	}
+	if secretId == "" || secretKey == "" {
+		Log.Warn(map[string]any{"bucket": bucket}, "COS SecretId / SecretKey 未配置，腾讯云 COS 不可用")
+	}
+
+	// 桶名统一由 COSBucketName() 归一化（自动补 -appid），
+	// 与 model.DomainTemp1 / DomainTemp2 的 {{cos}} 口径保持一致
+	cosUrl, err := url.Parse(COSDomain())
 	if err != nil {
 		Log.Error(map[string]any{
 			"error":     err.Error(),
@@ -507,45 +449,118 @@ func (this *COSStruct) init() {
 	})
 }
 
-// Object - 获取Object（对象存储）
+// Object - 获取 ObjectService
+//
+// 只返回对象服务本身：查询 / 创建存储桶是上传时才需要的动作，
+// 删除、读取等操作不应顺带做 IsExist + CreateBucket（既慢，又可能在桶名写错时误建桶）。
 func (this *COSStruct) Object() *cos.ObjectService {
 
-	// 查询存储桶
-	exist, err := this.Client.Bucket.IsExist(context.Background())
+	if this.Client == nil {
+		return nil
+	}
 
+	return this.Client.Object
+}
+
+// ensureBucket 确保存储桶存在（仅上传时调用；默认公共读私有写）
+func (this *COSStruct) ensureBucket() {
+
+	if this.Client == nil {
+		return
+	}
+
+	// 已经确认过就不再重复查询（首次上传才做一次 IsExist）
+	this.bucketMu.Lock()
+	ready := this.bucketReady
+	this.bucketMu.Unlock()
+	if ready {
+		return
+	}
+
+	exist, err := this.Client.Bucket.IsExist(context.Background())
 	if err != nil {
+		// 密钥错误 / 桶名或地域不对都会走到这里：只告警、不建桶，避免掩盖配置问题
+		Log.Error(map[string]any{
+			"error":  err,
+			"bucket": COSBucketName(),
+			"region": COSRegion(),
+		}, "COS Bucket 查询失败（请检查 SecretId / SecretKey / 桶名 / 地域）")
+		return
+	}
+	if exist {
+		this.markBucketReady()
+		return
+	}
+
+	if _, err := this.Client.Bucket.Put(context.Background(), &cos.BucketPutOptions{
+		XCosACL: "public-read",
+	}); err != nil {
 		Log.Error(map[string]any{
 			"error":     err,
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
 			"file_line": utils.Caller().Line,
-		}, "COS Bucket 查询失败")
+		}, "COS Bucket 创建失败")
+		return
 	}
 
-	wg := sync.WaitGroup{}
+	Log.Info(map[string]any{"bucket": COSBucketName(), "region": COSRegion()}, "COS Bucket 已自动创建（公共读私有写）")
+	this.markBucketReady()
+}
 
-	if !exist {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			defer wg.Done()
-			// 创建存储桶 - 默认公共读私有写
-			_, err = this.Client.Bucket.Put(context.Background(), &cos.BucketPutOptions{
-				XCosACL: "public-read",
-			})
-			if err != nil {
-				Log.Error(map[string]any{
-					"error":     err,
-					"func_name": utils.Caller().FuncName,
-					"file_name": utils.Caller().FileName,
-					"file_line": utils.Caller().Line,
-				}, "COS Bucket 创建失败")
-			}
-		}(&wg)
+// markBucketReady 标记存储桶已确认存在
+func (this *COSStruct) markBucketReady() {
+	this.bucketMu.Lock()
+	this.bucketReady = true
+	this.bucketMu.Unlock()
+}
+
+// cosUploadBody 归一化上传 body
+//
+// 返回可直接交给 SDK 的 reader、字节数（0 = 未知）与清理函数。
+// COS SDK 只在能取到长度时（*os.File / *bytes.Reader / *bytes.Buffer / *strings.Reader）
+// 使用带 Content-Length 的常规 PUT，其它包装类型（如附件上传用的 io.TeeReader）
+// 会退化成 chunked 传输，部分网络 / CDN 环境会失败，因此这里统一中转到临时文件。
+func cosUploadBody(reader io.Reader) (body io.Reader, size int64, cleanup func(), err error) {
+
+	cleanup = func() {}
+
+	switch item := reader.(type) {
+	case *os.File:
+		if info, statErr := item.Stat(); statErr == nil {
+			return item, info.Size(), cleanup, nil
+		}
+	case *bytes.Reader:
+		return item, item.Size(), cleanup, nil
+	case *bytes.Buffer:
+		return item, int64(item.Len()), cleanup, nil
+	case *strings.Reader:
+		return item, item.Size(), cleanup, nil
 	}
 
-	wg.Wait()
+	tmp, tmpErr := os.CreateTemp("", "inis-cos-upload-*")
+	if tmpErr != nil {
+		return nil, 0, cleanup, fmt.Errorf("创建临时文件失败：%v", tmpErr)
+	}
 
-	return this.Client.Object
+	cleanup = func() {
+		name := tmp.Name()
+		tmp.Close()
+		os.Remove(name)
+	}
+
+	size, err = io.Copy(tmp, reader)
+	if err != nil {
+		cleanup()
+		return nil, 0, func() {}, fmt.Errorf("读取上传内容失败：%v", err)
+	}
+
+	if _, err = tmp.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, func() {}, fmt.Errorf("重置临时文件指针失败：%v", err)
+	}
+
+	return tmp, size, cleanup, nil
 }
 
 // Upload - 上传文件
@@ -553,15 +568,44 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 
 	result = &StorageResponse{}
 
-	_, err := this.Object().Put(context.Background(), key, reader, nil)
+	object := this.Object()
+	if object == nil {
+		result.Error = errors.New("腾讯云 COS 未初始化，请检查 bucket / app_id / secret_id / secret_key / region")
+		return
+	}
+
+	key = NormalizeStorageKey(key)
+	if key == "" {
+		result.Error = errors.New("对象键不能为空！")
+		return
+	}
+
+	// 上传时才确认存储桶存在（删除等操作不建桶）
+	this.ensureBucket()
+
+	body, size, cleanup, err := cosUploadBody(reader)
+	defer cleanup()
 	if err != nil {
+		result.Error = err
+		return
+	}
+
+	// 单个对象设为公共读，配合桶的 public-read，避免私有桶导致图片 403
+	options := &cos.ObjectPutOptions{
+		ACLHeaderOptions: &cos.ACLHeaderOptions{XCosACL: "public-read"},
+	}
+	if size > 0 {
+		options.ContentLength = size
+	}
+
+	if _, err := object.Put(context.Background(), key, body, options); err != nil {
 		result.Error = err
 		return
 	}
 
 	domain := cast.ToString(StorageToml.Get("cos.domain"))
 	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
-		result.Domain = domain
+		result.Domain = strings.TrimRight(domain, "/")
 	} else {
 		result.Domain = "{{cos}}"
 	}
@@ -571,213 +615,114 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 	return
 }
 
-// Path - COS存储位置 - 生成文件路径
-func (this *COSStruct) Path() string {
-	// 生成年月日目录 - 如：2023-04/10
-	dir := time.Now().Format("2006-01/02/")
-	// 生成文件名 - 年月日+毫秒时间戳
-	name := cast.ToString(time.Now().UnixNano() / 1e6)
-	path := cast.ToString(StorageToml.Get("cos.path"))
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	return path + dir + name
-}
+// Path - COS存储位置 - 按命名规则生成对象键
+//
+// 目录与文件名都来自 config/storage.toml 的 [cos] 段（dir_rule / file_rule，
+// 见 storage-rule.go），cos.path 是固定前缀；例如：
+//
+//	inis + {Y}-{m}/{d} + {timestamp}{str-random-10} + .jpg
+//	→ inis/2026-09/26/1758888888123abc7def.jpg
+func (this *COSStruct) Path(ctx StorageRuleContext) string {
 
-// Delete - 删除文件
-func (this *COSStruct) Delete(key string) error {
-	key = strings.TrimPrefix(key, "/")
-	_, err := this.Object().Delete(context.Background(), key)
-	return err
-}
+	values := NewStorageRuleValues(ctx)
 
-// DeleteMulti - 批量删除文件
-func (this *COSStruct) DeleteMulti(keys []string) error {
-	objects := make([]cos.Object, 0, len(keys))
-	for _, key := range keys {
-		key = strings.TrimPrefix(key, "/")
-		objects = append(objects, cos.Object{Key: key})
-	}
-	_, _, err := this.Object().DeleteMulti(context.Background(), &cos.ObjectDeleteMultiOptions{
-		Quiet:   false,
-		Objects: objects,
-	})
-	return err
-}
+	dir := values.Apply(StorageRule("cos", StorageRuleDir))
+	name := values.Apply(StorageRule("cos", StorageRuleFile))
 
-// ================================== 七牛云对象存储 - 开始 ==================================
-
-// KODOStruct 七牛云对象存储
-type KODOStruct struct {
-	Client *qbox.Mac
-}
-
-// init 初始化 七牛云对象存储
-func (this *KODOStruct) init() {
-
-	this.Client = qbox.NewMac(
-		cast.ToString(StorageToml.Get("kodo.access_key")),
-		cast.ToString(StorageToml.Get("kodo.secret_key")),
+	// cos.path 为空时不带前导斜杠（避免生成 "/2026-09/…" 这种键，拼 CDN 域名会出现 //）
+	return StorageObjectKey(
+		cast.ToString(StorageToml.Get("cos.path")),
+		dir,
+		StorageNameWithExt(name, ctx.Ext),
 	)
 }
 
-// IsExist - 存储空间是否存在
-func (this *KODOStruct) IsExist() bool {
+// Delete - 删除单个对象
+//
+// DELETE Object 本身是幂等的：对象不存在时 COS 返回 204，不算失败。
+func (this *COSStruct) Delete(key string) error {
 
-	bucket := storage.NewBucketManager(this.Client, nil)
-	_, err := bucket.GetBucketInfo(cast.ToString(StorageToml.Get("kodo.bucket")))
-
-	if err != nil {
-		// 不存在则创建
-		if strings.Contains(err.Error(), "no such entry") {
-			return false
-		}
+	object := this.Object()
+	if object == nil {
+		return errors.New("腾讯云 COS 未初始化，请检查 bucket / app_id / secret_id / secret_key / region")
 	}
 
-	return true
+	key = NormalizeStorageKey(key)
+	if key == "" {
+		return errors.New("对象键不能为空！")
+	}
+
+	response, err := object.Delete(context.Background(), key)
+	// 对象不存在（404）视为删除成功，避免重复清理时报错
+	if err != nil && response != nil && response.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	return err
 }
 
-func (this *KODOStruct) CreateBucket() error {
+// DeleteMulti - 批量删除对象（单请求最多 1000 个，这里按 500 分批）
+//
+// Quiet 模式只返回失败对象；若存在失败对象则返回错误（调用方据此保留对应记录），
+// 避免「以为删掉了、其实还在」的静默失败。
+func (this *COSStruct) DeleteMulti(keys []string) error {
 
-	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
-	regionName := cast.ToString(StorageToml.Get("kodo.region"))
-
-	// 创建存储空间
-	config := storage.Config{
-		// 空间对应的机房
-		Zone: &storage.ZoneHuanan,
-		// 是否使用https域名
-		UseHTTPS: true,
-		// 上传是否使用CDN上传加速
-		UseCdnDomains: false,
+	object := this.Object()
+	if object == nil {
+		return errors.New("腾讯云 COS 未初始化，请检查 bucket / app_id / secret_id / secret_key / region")
 	}
 
-	// 创建存储空间
-	bucket := storage.NewBucketManager(this.Client, &config)
-	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
-
-		config.Region = &region
-		err := bucket.CreateBucket(bucketName, storage.RegionID(regionName))
-
-		return utils.Ternary(err == nil, nil, err)
-	}
-
-	return errors.New("存储空间创建失败")
-}
-
-func (this *KODOStruct) Bucket() *qbox.Mac {
-
-	// 如果存储空间不存在 - 则创建
-	if !this.IsExist() {
-		err := this.CreateBucket()
-		if err != nil {
-			Log.Error(map[string]any{
-				"error":     err,
-				"func_name": utils.Caller().FuncName,
-				"file_name": utils.Caller().FileName,
-				"file_line": utils.Caller().Line,
-			}, "KODO 存储空间创建失败")
-			return nil
-		}
-	}
-
-	return this.Client
-}
-
-func (this *KODOStruct) Upload(key string, reader io.Reader) (result *StorageResponse) {
-
-	result = &StorageResponse{}
-
-	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
-	regionName := cast.ToString(StorageToml.Get("kodo.region"))
-
-	policy := storage.PutPolicy{
-		Scope: bucketName,
-	}
-	token := policy.UploadToken(this.Bucket())
-
-	config := storage.Config{
-		// 空间对应的机房
-		Region: &storage.ZoneHuanan,
-		// 上传是否使用CDN上传加速
-		UseCdnDomains: false,
-		// 是否使用https域名
-		UseHTTPS: true,
-	}
-
-	// 构建表单上传的对象
-	bucket := storage.NewFormUploader(&config)
-
-	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
-		config.Region = &region
-	}
-
-	body := storage.PutRet{}
-	err := bucket.Put(context.Background(), &body, token, key, reader, -1, &storage.PutExtra{})
-	if err != nil {
-		result.Error = err
-		return
-	}
-
-	result.Path = "/" + key
-
-	domain := cast.ToString(StorageToml.Get("kodo.domain"))
-	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
-		result.Domain = domain
-	} else {
-		result.Domain = "{{kodo}}"
-	}
-
-	return
-}
-
-// Path - OSS存储位置 - 生成文件路径
-func (this *KODOStruct) Path() string {
-	// 生成年月日目录 - 如：2023-04/10
-	dir := time.Now().Format("2006-01/02/")
-	// 生成文件名 - 年月日+毫秒时间戳
-	name := cast.ToString(time.Now().UnixNano() / 1e6)
-	return "storage/" + dir + name
-}
-
-// Delete - 删除文件
-func (this *KODOStruct) Delete(key string) error {
-	key = strings.TrimPrefix(key, "/")
-	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
-	regionName := cast.ToString(StorageToml.Get("kodo.region"))
-
-	config := storage.Config{
-		UseHTTPS: true,
-	}
-	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
-		config.Region = &region
-	}
-
-	bucket := storage.NewBucketManager(this.Client, &config)
-	return bucket.Delete(bucketName, key)
-}
-
-// DeleteMulti - 批量删除文件
-func (this *KODOStruct) DeleteMulti(keys []string) error {
-	bucketName := cast.ToString(StorageToml.Get("kodo.bucket"))
-	regionName := cast.ToString(StorageToml.Get("kodo.region"))
-
-	config := storage.Config{
-		UseHTTPS: true,
-	}
-	if region, ok := storage.GetRegionByID(storage.RegionID(regionName)); ok {
-		config.Region = &region
-	}
-
-	bucket := storage.NewBucketManager(this.Client, &config)
+	list := make([]string, 0, len(keys))
 	for _, key := range keys {
-		key = strings.TrimPrefix(key, "/")
-		if err := bucket.Delete(bucketName, key); err != nil {
-			Log.Error(map[string]any{
-				"error": err,
-				"key":   key,
-			}, "KODO批量删除文件失败")
+		if key = NormalizeStorageKey(key); key != "" {
+			list = append(list, key)
 		}
 	}
+	if len(list) == 0 {
+		return nil
+	}
+
+	var failed []string
+
+	for start := 0; start < len(list); start += storageDeleteBatch {
+		end := start + storageDeleteBatch
+		if end > len(list) {
+			end = len(list)
+		}
+		batch := list[start:end]
+
+		objects := make([]cos.Object, 0, len(batch))
+		for _, key := range batch {
+			objects = append(objects, cos.Object{Key: key})
+		}
+
+		result, _, err := object.DeleteMulti(context.Background(), &cos.ObjectDeleteMultiOptions{
+			Quiet:   true,
+			Objects: objects,
+		})
+
+		if err != nil {
+			failed = append(failed, batch...)
+			Log.Error(map[string]any{"error": err.Error(), "count": len(batch), "first": batch[0]}, "COS 批量删除对象失败")
+			continue
+		}
+
+		// Quiet 模式下 Errors 只包含失败的 Key
+		if result != nil {
+			for _, item := range result.Errors {
+				failed = append(failed, item.Key)
+				Log.Error(map[string]any{
+					"key":     item.Key,
+					"code":    item.Code,
+					"message": item.Message,
+				}, "COS 删除对象失败")
+			}
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("COS 有 %d/%d 个对象删除失败（首个：%s）", len(failed), len(list), failed[0])
+	}
+
 	return nil
 }

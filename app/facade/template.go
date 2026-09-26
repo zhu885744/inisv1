@@ -243,26 +243,16 @@ default    = "${default}"
 
 # 本地存储配置
 [local]
-# 本地存储域名
+# 本地存储域名 - 留空表示用相对路径访问（/storage/xxx），需要 CDN 时填 https://cdn.example.com
 domain     = "${local.domain}"
-# 本地存储目录
+# 本地存储目录 - public 下的子目录，留空则直接放在 public 下
 path       = "${local.path}"
-
-
-# 阿里OSS配置
-[oss]
-# 阿里云AccessKey ID
-access_key_id 	  = "${oss.access_key_id}"
-# 阿里云AccessKey Secret
-access_key_secret = "${oss.access_key_secret}"
-# OSS 外网 Endpoint
-endpoint		  = "${oss.endpoint}"
-# OSS Bucket - 存储桶名称
-bucket			  = "${oss.bucket}"
-# OSS 外网域名 - 用于访问 - 不填写则使用默认域名
-domain			  = "${oss.domain}"
-# OSS 存储目录
-path			  = "${oss.path}"
+# 上传目录命名规则（可用占位符见 docs/API docs/toml.md 或后台「存储」页提示）
+# 例：{Y}-{m}/{d} → 2026-09/26；设为 / 表示不要子目录（直接放在 path 下）
+dir_rule   = "${local.dir_rule}"
+# 上传文件命名规则（不含扩展名，扩展名自动追加）
+# 例：{timestamp}{str-random-10} → 1758888888123abc7def
+file_rule  = "${local.file_rule}"
 
 
 # 腾讯云COS配置
@@ -281,20 +271,10 @@ region            = "${cos.region}"
 domain            = "${cos.domain}"
 # COS 存储目录
 path              = "${cos.path}"
-
-
-# 七牛云KODO配置
-[kodo]
-# 七牛云AccessKey
-access_key        = "${kodo.access_key}"
-# 七牛云SecretKey
-secret_key        = "${kodo.secret_key}"
-# KODO Bucket - 存储桶名称
-bucket            = "${kodo.bucket}"
-# KODO 所在地区，如这里的华南（广东） z0=华东 z1=华北河北 z2=华南广东 cn-east-2=华东浙江 na0=北美 as0=新加坡 ap-northeast-1=亚太-首尔机房
-region            = "${kodo.region}"
-# KODO 外网域名 - 用于访问 - 这里必须填写
-domain            = "${kodo.domain}"
+# 上传目录命名规则（同本地存储，可用占位符一致）
+dir_rule          = "${cos.dir_rule}"
+# 上传文件命名规则（不含扩展名，扩展名自动追加）
+file_rule         = "${cos.file_rule}"
 
 
 # ======== 附件管理配置 ========

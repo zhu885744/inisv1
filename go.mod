@@ -7,7 +7,6 @@ require (
 	github.com/alibabacloud-go/openapi-util v0.1.2
 	github.com/alibabacloud-go/tea v1.5.3
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.9
-	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imaging v1.6.2
@@ -19,7 +18,6 @@ require (
 	github.com/jasonlvhit/gocron v0.0.1
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/natefinch/lumberjack v2.0.0+incompatible
-	github.com/qiniu/go-sdk/v7 v7.26.18
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/spf13/cast v1.10.0
@@ -39,7 +37,6 @@ require (
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
-	github.com/alex-ant/gomath v0.0.0-20160516115720-89013a210a82 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
 	github.com/aliyun/credentials-go v1.4.12 // indirect
@@ -61,7 +58,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
@@ -96,12 +92,10 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-	modernc.org/fileutil v1.4.0 // indirect
 )

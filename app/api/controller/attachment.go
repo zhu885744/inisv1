@@ -361,6 +361,87 @@ func (this *Attachment) one(ctx *gin.Context) {
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
+// uploaderRows - 把列表结果统一成 []map[string]any
+//
+// 同一份数据可能来自数据库查询（[]map[string]any），也可能来自缓存：
+// file / redis 驱动会 JSON 往返，取回来是 []any，所以这里统一转换一次。
+func (this *Attachment) uploaderRows(data any) []map[string]any {
+	rows := make([]map[string]any, 0)
+
+	for _, item := range cast.ToSlice(data) {
+		if row := cast.ToStringMap(item); len(row) > 0 {
+			rows = append(rows, row)
+		}
+	}
+
+	return rows
+}
+
+// appendUploaderName - 为附件列表补充上传者的账号 / 昵称（一次性批量查询，避免 N+1）
+//
+// 附件表只存 uploader_id，列表里直接显示数字没有意义，这里按 uploader_id 批量取用户，
+// 给每行加两个字段：
+//   - uploader_account：账号（可能为空）
+//   - uploader_name：昵称；昵称为空时回退账号，两者都取不到时用「用户 #id」占位
+//
+// 非管理员（只能看到自己的附件）也会带上自己的昵称，展示更友好。
+func (this *Attachment) appendUploaderName(items []map[string]any) []map[string]any {
+	ids := make([]any, 0)
+	seen := make(map[int]struct{})
+
+	for _, item := range items {
+		uid := cast.ToInt(item["uploader_id"])
+		if uid <= 0 {
+			item["uploader_account"] = ""
+			item["uploader_name"] = ""
+			continue
+		}
+		if _, exist := seen[uid]; exist {
+			continue
+		}
+		seen[uid] = struct{}{}
+		ids = append(ids, uid)
+	}
+
+	if len(ids) == 0 {
+		return items
+	}
+
+	users, err := facade.DB.Model(&[]model.Users{}).WhereIn("id", ids).Field("id", "account", "nickname").Select()
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error()}, "附件上传者信息查询失败")
+		return items
+	}
+
+	accounts := make(map[int]string, len(users))
+	nicknames := make(map[int]string, len(users))
+	for _, user := range users {
+		uid := cast.ToInt(user["id"])
+		accounts[uid] = strings.TrimSpace(cast.ToString(user["account"]))
+		nicknames[uid] = strings.TrimSpace(cast.ToString(user["nickname"]))
+	}
+
+	for _, item := range items {
+		uid := cast.ToInt(item["uploader_id"])
+		if uid <= 0 {
+			continue
+		}
+
+		account, nickname := accounts[uid], nicknames[uid]
+		if utils.Is.Empty(nickname) {
+			nickname = account
+		}
+		if utils.Is.Empty(nickname) {
+			nickname = fmt.Sprintf("用户 #%v", uid)
+		}
+
+		item["uploader_account"] = account
+		item["uploader_name"] = nickname
+	}
+
+	return items
+}
+
 func (this *Attachment) all(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
@@ -396,6 +477,15 @@ func (this *Attachment) all(ctx *gin.Context) {
 		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
+	}
+
+	// 补上传者账号 / 昵称（uploader_account / uploader_name）：缓存存的是原始行，
+	// 这里每次响应时补，用户改了昵称立即生效；field 裁剪过字段时只在调用方显式
+	// 要了 uploader_* 才补，避免污染裁剪结果
+	if utils.Is.Empty(params["field"]) || strings.Contains(cast.ToString(params["field"]), "uploader") {
+		if rows := this.uploaderRows(data); len(rows) > 0 {
+			data = this.appendUploaderName(rows)
+		}
 	}
 
 	if !utils.Is.Empty(data) {
@@ -723,14 +813,24 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		uploadReader = file
 	}
 
-	saveName := fmt.Sprintf("%d_%d%s", time.Now().UnixNano()/1e6, utils.Rand.Int(1000, 9999), suffix)
+	// 上传命名规则：目录结构（dir_rule）与文件名（file_rule）都能在
+	// 「系统设置 → 存储」里自定义，见 facade/storage-rule.go；
+	// {filename} 用不含扩展名的原始名称，扩展名由驱动自动追加
+	ruleCtx := facade.StorageRuleContext{
+		Uid:      int(userId),
+		Filename: strings.TrimSuffix(fileName, suffix),
+		Ext:      fileExt,
+	}
+	key := facade.Storage.Path(ruleCtx)
 	hash := sha256.New()
 	hashReader := io.TeeReader(uploadReader, hash)
-	item := facade.Storage.Upload(facade.Storage.Path()+suffix, hashReader)
+	item := facade.Storage.Upload(key, hashReader)
 	if item.Error != nil {
 		result.Error = fmt.Errorf("上传文件失败")
 		return result
 	}
+	// 存储文件名（与对象键一致）：命名规则生成的名字 + 扩展名
+	saveName := path.Base(key)
 	fileHash := fmt.Sprintf("%x", hash.Sum(nil))
 
 	existing := (&model.Attachment{}).GetByHash(fileHash)
@@ -975,17 +1075,84 @@ func (this *Attachment) update(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": item["id"], "uuid": item["uuid"]}, facade.Lang(ctx, "更新成功！"), 200)
 }
 
+// getStorageDriver 按附件记录里的 storage_driver 选择驱动
+//
+// 仅保留两种驱动：local（本地存储）与 cos（腾讯云 COS）；
+// 历史数据里若残留 oss / kodo（旧版本上传的附件），这里回退到本地存储 ——
+// 对应文件已无法通过本程序删除，需要自行在对象存储控制台清理。
 func getStorageDriver(driver string) facade.StorageInterface {
-	switch driver {
-	case "oss":
-		return facade.OSS
-	case "cos":
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case facade.StorageModeCOS:
 		return facade.COS
-	case "kodo":
-		return facade.KODO
 	default:
 		return facade.LocalStorage
 	}
+}
+
+/**
+ * purgeFiles 删除存储里的物理文件
+ *
+ * 入参：驱动 → 相对路径（save_path）列表，返回成功删除的路径集合与失败的路径列表。
+ * - 本地存储（local）：逐个删除，计数精确（Delete 已做幂等处理，文件不存在也算成功）；
+ * - 腾讯云 COS：按 500 个一批调用批量接口，某批失败则该批整体记为失败，
+ *   调用方据此保留对应记录，避免「记录删了、文件还在」产生孤儿文件。
+ */
+func (this *Attachment) purgeFiles(filesByDriver map[string][]string) (deleted map[string]bool, failed []string) {
+
+	const batchSize = 500
+
+	deleted = make(map[string]bool)
+
+	for driver, paths := range filesByDriver {
+		if len(paths) == 0 {
+			continue
+		}
+
+		storage := getStorageDriver(driver)
+		if storage == nil {
+			failed = append(failed, paths...)
+			facade.Log.Error(map[string]any{"driver": driver, "count": len(paths)}, "存储驱动不可用，文件未删除")
+			continue
+		}
+
+		// 本地文件逐个删，能精确统计每个文件的成败；云存储走批量接口（减少请求数）
+		if driver == facade.StorageModeLocal || utils.Is.Empty(driver) {
+			for _, path := range paths {
+				if err := storage.Delete(path); err != nil {
+					failed = append(failed, path)
+					facade.Log.Error(map[string]any{"driver": driver, "path": path, "error": err.Error()}, "删除本地存储文件失败")
+					continue
+				}
+				deleted[path] = true
+			}
+			continue
+		}
+
+		for start := 0; start < len(paths); start += batchSize {
+			end := start + batchSize
+			if end > len(paths) {
+				end = len(paths)
+			}
+			batch := paths[start:end]
+
+			if err := storage.DeleteMulti(batch); err != nil {
+				failed = append(failed, batch...)
+				facade.Log.Error(map[string]any{
+					"driver": driver,
+					"count":  len(batch),
+					"first":  batch[0],
+					"error":  err.Error(),
+				}, "删除存储文件失败")
+				continue
+			}
+
+			for _, path := range batch {
+				deleted[path] = true
+			}
+		}
+	}
+
+	return
 }
 
 func (this *Attachment) remove(ctx *gin.Context) {
@@ -1056,72 +1223,116 @@ func (this *Attachment) delete(ctx *gin.Context) {
 		return
 	}
 
-	items, _ := facade.DB.Model(&model.Attachment{}).WithTrashed().WhereIn("id", ids).Select()
+	// 注意：必须用「切片模型」&[]model.Attachment{} 查询。
+	// 传单模型（&model.Attachment{}）时 Select() 只会得到单条对象，经 JSON 转换后
+	// cast.ToSlice 结果为空 —— save_path 一个都取不到，文件自然不会被删除，
+	// 表现为「只删了数据库记录、存储桶里的文件还在」。
+	items, _ := facade.DB.Model(&[]model.Attachment{}).WithTrashed().WhereIn("id", ids).Select()
 
-	validIdSet := make(map[any]bool)
+	// 记录是否存在、每个记录对应的存储文件（Select 出来的 id 是 float64，统一转 int 比对）
+	exists := make(map[int]bool)
+	recordPaths := make(map[int][]string)
+	filesByDriver := make(map[string][]string)
+
 	for _, item := range items {
-		validIdSet[item["id"]] = true
+		id := cast.ToInt(item["id"])
+		exists[id] = true
+
+		savePath := cast.ToString(item["save_path"])
+		if utils.Is.Empty(savePath) {
+			continue
+		}
+
+		// 老数据可能没记录驱动：按当前默认驱动删，避免删到错误的存储
+		driver := cast.ToString(item["storage_driver"])
+		if utils.Is.Empty(driver) {
+			driver = cast.ToString(facade.StorageToml.Get("default"))
+		}
+
+		filesByDriver[driver] = append(filesByDriver[driver], savePath)
+		recordPaths[id] = append(recordPaths[id], savePath)
 	}
+
+	// 先删物理文件：文件没删成功的记录保留（否则记录没了、文件变孤儿，只能靠日志排查）
+	deleted, failedFiles := this.purgeFiles(filesByDriver)
 
 	var successIds []any
 	var failedIds []any
-	var errors = make(map[string]string)
+	errors := make(map[string]string)
 
 	for _, id := range ids {
-		if validIdSet[id] {
-			successIds = append(successIds, id)
-		} else {
+		uid := cast.ToInt(id)
+
+		if !exists[uid] {
 			failedIds = append(failedIds, id)
 			errors[cast.ToString(id)] = "附件不存在"
+			continue
 		}
+
+		if !pathsAllDeleted(recordPaths[uid], deleted) {
+			failedIds = append(failedIds, id)
+			errors[cast.ToString(id)] = "存储文件删除失败，记录已保留（详见运行日志）"
+			continue
+		}
+
+		successIds = append(successIds, id)
 	}
 
 	if len(successIds) == 0 {
-		this.json(ctx, gin.H{"success_ids": []any{}, "failed_ids": failedIds, "errors": errors}, facade.Lang(ctx, "删除失败！"), 400)
+		this.json(ctx, gin.H{
+			"success_ids":  []any{},
+			"failed_ids":   failedIds,
+			"errors":       errors,
+			"file_deleted": len(deleted),
+			"file_failed":  len(failedFiles),
+		}, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
-
-	filesByDriver := make(map[string][]string)
-	for _, item := range items {
-		savePath := cast.ToString(item["save_path"])
-		storageDriver := cast.ToString(item["storage_driver"])
-		if savePath != "" {
-			filesByDriver[storageDriver] = append(filesByDriver[storageDriver], savePath)
-		}
-	}
-
-	go func(files map[string][]string) {
-		defer func() {
-			if r := recover(); r != nil {
-				facade.Log.Error(map[string]any{"error": r}, "物理删除存储文件异常")
-			}
-		}()
-		for driver, paths := range files {
-			storage := getStorageDriver(driver)
-			if storage == nil {
-				facade.Log.Error(map[string]any{"driver": driver, "count": len(paths)}, "存储驱动未初始化")
-				continue
-			}
-			if err := storage.DeleteMulti(paths); err != nil {
-				facade.Log.Error(map[string]any{"error": err, "driver": driver, "count": len(paths)}, "批量删除存储文件失败")
-			}
-		}
-	}(filesByDriver)
 
 	_, err := facade.DB.Model(&model.Attachment{}).WithTrashed().Force().Delete(successIds)
 
 	if err != nil {
+		// 文件已删但记录还在：属异常情况，单独记日志便于人工核对
+		facade.Log.Error(map[string]any{"error": err.Error(), "ids": successIds}, "物理文件已删除但附件记录删除失败")
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
-	facade.Log.Info(map[string]any{"user_id": this.meta.user(ctx).Id, "ids": successIds}, "物理删除附件")
+	facade.Log.Info(map[string]any{
+		"user_id":      this.meta.user(ctx).Id,
+		"ids":          successIds,
+		"file_deleted": len(deleted),
+		"file_failed":  len(failedFiles),
+	}, "物理删除附件")
 
 	if len(failedIds) == 0 {
-		this.json(ctx, gin.H{"success_ids": successIds, "failed_ids": []any{}, "errors": map[string]string{}}, facade.Lang(ctx, "删除成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"success_ids": successIds, "failed_ids": failedIds, "errors": errors}, facade.Lang(ctx, "部分删除成功！"), 207)
+		this.json(ctx, gin.H{
+			"success_ids":  successIds,
+			"failed_ids":   []any{},
+			"errors":       map[string]string{},
+			"file_deleted": len(deleted),
+			"file_failed":  0,
+		}, facade.Lang(ctx, "删除成功！"), 200)
+		return
 	}
+
+	this.json(ctx, gin.H{
+		"success_ids":  successIds,
+		"failed_ids":   failedIds,
+		"errors":       errors,
+		"file_deleted": len(deleted),
+		"file_failed":  len(failedFiles),
+	}, facade.Lang(ctx, "部分删除成功！"), 207)
+}
+
+// pathsAllDeleted 判断某个记录的文件是否都已从存储删除（没有文件时视为成功）
+func pathsAllDeleted(paths []string, deleted map[string]bool) bool {
+	for _, path := range paths {
+		if !deleted[path] {
+			return false
+		}
+	}
+	return true
 }
 
 func (this *Attachment) clear(ctx *gin.Context) {
@@ -1130,8 +1341,7 @@ func (this *Attachment) clear(ctx *gin.Context) {
 		return
 	}
 
-	item := facade.DB.Model(&model.Attachment{}).OnlyTrashed()
-	columnData, _ := item.Column("id")
+	columnData, _ := facade.DB.Model(&model.Attachment{}).OnlyTrashed().Column("id")
 	ids := utils.Unity.Ids(columnData)
 
 	if utils.Is.Empty(ids) {
@@ -1139,44 +1349,90 @@ func (this *Attachment) clear(ctx *gin.Context) {
 		return
 	}
 
-	items, _ := facade.DB.Model(&model.Attachment{}).OnlyTrashed().WhereIn("id", ids).Select()
+	// 必须用切片模型查询：单模型的 Select 拿不到多条记录，save_path 会全部丢失，
+	// 结果就是「清空回收站只删了数据库记录、存储桶里的文件一个没动」
+	items, _ := facade.DB.Model(&[]model.Attachment{}).OnlyTrashed().WhereIn("id", ids).Select()
 
+	recordPaths := make(map[int][]string)
 	filesByDriver := make(map[string][]string)
+
 	for _, item := range items {
+		id := cast.ToInt(item["id"])
 		savePath := cast.ToString(item["save_path"])
-		storageDriver := cast.ToString(item["storage_driver"])
-		if savePath != "" {
-			filesByDriver[storageDriver] = append(filesByDriver[storageDriver], savePath)
+		if utils.Is.Empty(savePath) {
+			continue
 		}
+
+		driver := cast.ToString(item["storage_driver"])
+		if utils.Is.Empty(driver) {
+			driver = cast.ToString(facade.StorageToml.Get("default"))
+		}
+
+		filesByDriver[driver] = append(filesByDriver[driver], savePath)
+		recordPaths[id] = append(recordPaths[id], savePath)
 	}
 
-	go func(files map[string][]string) {
-		defer func() {
-			if r := recover(); r != nil {
-				facade.Log.Error(map[string]any{"error": r}, "清空回收站存储文件异常")
-			}
-		}()
-		for driver, paths := range files {
-			storage := getStorageDriver(driver)
-			if storage == nil {
-				facade.Log.Error(map[string]any{"driver": driver, "count": len(paths)}, "存储驱动未初始化")
-				continue
-			}
-			if err := storage.DeleteMulti(paths); err != nil {
-				facade.Log.Error(map[string]any{"error": err, "driver": driver, "count": len(paths)}, "批量清空回收站存储文件失败")
-			}
-		}
-	}(filesByDriver)
+	// 先删物理文件：文件没删成功的记录保留在回收站（可修复存储配置后重试，不产生孤儿文件）
+	deleted, failedFiles := this.purgeFiles(filesByDriver)
 
-	_, err := item.Force().Delete()
+	var okIds []any
+	var keptIds []any
+	fileErrors := make(map[string]string)
+
+	for _, item := range items {
+		id := cast.ToInt(item["id"])
+		if pathsAllDeleted(recordPaths[id], deleted) {
+			okIds = append(okIds, id)
+			continue
+		}
+		keptIds = append(keptIds, id)
+		fileErrors[cast.ToString(id)] = "存储文件删除失败，记录已保留（详见运行日志）"
+	}
+
+	if utils.Is.Empty(okIds) {
+		facade.Log.Error(map[string]any{
+			"user_id":     this.meta.user(ctx).Id,
+			"file_failed": len(failedFiles),
+		}, "清空回收站失败：所有文件都未能从存储删除")
+		this.json(ctx, gin.H{
+			"ids":          []any{},
+			"kept_ids":     keptIds,
+			"errors":       fileErrors,
+			"file_deleted": len(deleted),
+			"file_failed":  len(failedFiles),
+		}, facade.Lang(ctx, "清空失败：存储文件删除失败，记录已保留！"), 400)
+		return
+	}
+
+	_, err := facade.DB.Model(&model.Attachment{}).OnlyTrashed().WhereIn("id", okIds).Force().Delete()
 
 	if err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error(), "ids": okIds}, "物理文件已删除但清空附件记录失败")
 		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
 		return
 	}
 
-	facade.Log.Info(map[string]any{"user_id": this.meta.user(ctx).Id, "ids": ids}, "清空回收站附件")
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
+	facade.Log.Info(map[string]any{
+		"user_id":      this.meta.user(ctx).Id,
+		"ids":          okIds,
+		"file_deleted": len(deleted),
+		"file_failed":  len(failedFiles),
+	}, "清空回收站附件")
+
+	data := gin.H{
+		"ids":          okIds,
+		"kept_ids":     keptIds,
+		"errors":       fileErrors,
+		"file_deleted": len(deleted),
+		"file_failed":  len(failedFiles),
+	}
+
+	if len(keptIds) > 0 {
+		this.json(ctx, data, facade.Lang(ctx, "部分清空成功：部分记录的文件删除失败，已保留！"), 207)
+		return
+	}
+
+	this.json(ctx, data, facade.Lang(ctx, "清空成功！"), 200)
 }
 
 func (this *Attachment) restore(ctx *gin.Context) {

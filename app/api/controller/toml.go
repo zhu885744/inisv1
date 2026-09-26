@@ -14,10 +14,7 @@ import (
 	AliYunUtil "github.com/alibabacloud-go/openapi-util/service"
 	AliYunUtilV2 "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/tea"
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/gin-gonic/gin"
-	"github.com/qiniu/go-sdk/v7/auth/qbox"
-	"github.com/qiniu/go-sdk/v7/storage"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cast"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
@@ -150,27 +147,10 @@ func (this *Toml) storageConfigToReplaceMap() map[string]any {
 			result["${local.path}"] = v
 		}
 	}
-
-	if oss, ok := data["oss"].(map[string]any); ok {
-		if v, ok := oss["access_key_id"]; ok {
-			result["${oss.access_key_id}"] = v
-		}
-		if v, ok := oss["access_key_secret"]; ok {
-			result["${oss.access_key_secret}"] = v
-		}
-		if v, ok := oss["endpoint"]; ok {
-			result["${oss.endpoint}"] = v
-		}
-		if v, ok := oss["bucket"]; ok {
-			result["${oss.bucket}"] = v
-		}
-		if v, ok := oss["domain"]; ok {
-			result["${oss.domain}"] = v
-		}
-		if v, ok := oss["path"]; ok {
-			result["${oss.path}"] = v
-		}
-	}
+	// 命名规则：配置里缺项（老配置文件没有这两个键）时用默认值补上，
+	// 否则整份重建模板会把它们写成空串
+	result["${local.dir_rule}"] = facade.StorageRule("local", facade.StorageRuleDir)
+	result["${local.file_rule}"] = facade.StorageRule("local", facade.StorageRuleFile)
 
 	if cos, ok := data["cos"].(map[string]any); ok {
 		if v, ok := cos["secret_id"]; ok {
@@ -195,24 +175,8 @@ func (this *Toml) storageConfigToReplaceMap() map[string]any {
 			result["${cos.path}"] = v
 		}
 	}
-
-	if kodo, ok := data["kodo"].(map[string]any); ok {
-		if v, ok := kodo["access_key"]; ok {
-			result["${kodo.access_key}"] = v
-		}
-		if v, ok := kodo["secret_key"]; ok {
-			result["${kodo.secret_key}"] = v
-		}
-		if v, ok := kodo["bucket"]; ok {
-			result["${kodo.bucket}"] = v
-		}
-		if v, ok := kodo["region"]; ok {
-			result["${kodo.region}"] = v
-		}
-		if v, ok := kodo["domain"]; ok {
-			result["${kodo.domain}"] = v
-		}
-	}
+	result["${cos.dir_rule}"] = facade.StorageRule("cos", facade.StorageRuleDir)
+	result["${cos.file_rule}"] = facade.StorageRule("cos", facade.StorageRuleFile)
 
 	if attachment, ok := data["attachment"].(map[string]any); ok {
 		if v, ok := attachment["allow_extensions"]; ok {
@@ -224,24 +188,35 @@ func (this *Toml) storageConfigToReplaceMap() map[string]any {
 		if v, ok := attachment["concurrent_limit"]; ok {
 			result["${attachment.concurrent_limit}"] = v
 		}
-		if v, ok := attachment["limit_per_minute"]; ok {
-			result["${attachment.limit_per_minute}"] = v
-		}
-		if v, ok := attachment["limit_per_hour"]; ok {
-			result["${attachment.limit_per_hour}"] = v
-		}
-		if v, ok := attachment["limit_per_day"]; ok {
-			result["${attachment.limit_per_day}"] = v
-		}
-		if v, ok := attachment["limit_per_week"]; ok {
-			result["${attachment.limit_per_week}"] = v
-		}
-		if v, ok := attachment["limit_per_month"]; ok {
-			result["${attachment.limit_per_month}"] = v
-		}
 	}
 
 	return result
+}
+
+// validateStorageRules - 校验上传命名规则（dir_rule / file_rule）
+//
+// 只允许 facade.StorageRulePlaceholders 里列出的占位符。未知占位符直接报 400：
+// 一旦写进配置，上传会生成带 "{xx}" 的目录，用户很难自己发现是配置写错了。
+//
+// label 用于提示语（如「本地存储」「腾讯云 COS」），rules 可以是扁平参数
+// （storage-local / storage-cos）或统一保存里的局部 map（storage 的 local / cos）。
+func (this *Toml) validateStorageRules(ctx *gin.Context, label string, rules map[string]any) bool {
+
+	for _, kind := range []string{facade.StorageRuleDir, facade.StorageRuleFile} {
+
+		rule := cast.ToString(rules[kind])
+		if utils.Is.Empty(rule) {
+			// 留空表示用默认规则（见 facade.StorageRule）
+			continue
+		}
+
+		if unknown := facade.UnknownStorageRulePlaceholders(rule); len(unknown) > 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "%s 的 %s 里 %s 不是可用占位符！", label, kind, strings.Join(unknown, "、")), 400)
+			return false
+		}
+	}
+
+	return true
 }
 
 // saveTomlConfig 保存配置文件
@@ -296,9 +271,7 @@ func (this *Toml) IPOST(ctx *gin.Context) {
 		"test-sms-aliyun-number-verify": this.testSMSAliYunNumberVerify,
 		"test-sms-tencent":              this.testSMSTencent,
 		"test-redis":                    this.testRedis,
-		"test-oss":                      this.testOSS,
 		"test-cos":                      this.testCOS,
-		"test-kodo":                     this.testKODO,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -331,9 +304,7 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"storage":                  this.putStorage,
 		"storage-default":          this.putStorageDefault,
 		"storage-local":            this.putStorageLocal,
-		"storage-oss":              this.putStorageOSS,
 		"storage-cos":              this.putStorageCOS,
-		"storage-kodo":             this.putStorageKODO,
 		"storage-attachment":       this.putStorageAttachment,
 		"notification":             this.putNotification,
 	}
@@ -502,14 +473,45 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 	this.json(ctx, this.maskSensitiveFields(ctx, item.Get(cast.ToString(params["name"]))), facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
+// applyStorageRules - 给存储配置补上命名规则的生效值（dir_rule / file_rule）
+//
+// 老配置文件里没有这两个键，GET 时按默认值补上，接口返回的就是实际生效的规则
+// （见 facade.StorageRule），前端表单和调用方都不用各自猜默认值。
+// driver 为空表示整份配置（local / cos 都补），否则只补指定分组。
+func (this *Toml) applyStorageRules(data map[string]any, driver string) map[string]any {
+
+	result := make(map[string]any, len(data))
+	for key, val := range data {
+		result[key] = val
+	}
+
+	drivers := []string{"local", "cos"}
+	if driver != "" {
+		drivers = []string{driver}
+	}
+
+	for _, name := range drivers {
+		section := cast.ToStringMap(result[name])
+		copied := make(map[string]any, len(section)+2)
+		for key, val := range section {
+			copied[key] = val
+		}
+		copied[facade.StorageRuleDir] = facade.StorageRule(name, facade.StorageRuleDir)
+		copied[facade.StorageRuleFile] = facade.StorageRule(name, facade.StorageRuleFile)
+		result[name] = copied
+	}
+
+	return result
+}
+
 // getStorage - 获取存储服务配置
 func (this *Toml) getStorage(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
 
-	// 允许的查询范围
-	field := []any{"local", "oss", "cos", "kodo", "attachment"}
+	// 允许的查询范围（仅保留本地存储 local 与腾讯云 COS）
+	field := []any{"local", "cos", "attachment"}
 
 	item := facade.StorageToml
 	if item.Error != nil {
@@ -519,7 +521,7 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, item.Result, facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.applyStorageRules(item.Result, ""), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -530,7 +532,7 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 
 	// 获取全部（脱敏敏感字段）
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, this.maskSensitiveFields(ctx, this.applyStorageRules(item.Result, "")), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -539,8 +541,14 @@ func (this *Toml) getStorage(ctx *gin.Context) {
 		return
 	}
 
-	result := cast.ToStringMap(item.Get(cast.ToString(params["name"])))
+	name := cast.ToString(params["name"])
+	result := cast.ToStringMap(item.Get(name))
 	result["default"] = item.Get("default")
+
+	// 单个驱动（local / cos）时补上命名规则的生效值；attachment 分组不涉及
+	if name == "local" || name == "cos" {
+		result = this.applyStorageRules(result, name)
+	}
 
 	// 获取指定（脱敏敏感字段）
 	this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
@@ -1398,10 +1406,10 @@ func (this *Toml) putStorageDefault(ctx *gin.Context) {
 		return
 	}
 
-	allow := []any{"local", "oss", "cos", "kodo"}
+	allow := []any{"local", "cos"}
 
 	if !utils.In.Array(params["value"], allow) {
-		this.json(ctx, nil, facade.Lang(ctx, "value 只允许是 local、oss、cos、kodo 其中一个！"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "value 只允许是 local、cos 其中一个！"), 400)
 		return
 	}
 
@@ -1430,97 +1438,14 @@ func (this *Toml) putStorageLocal(ctx *gin.Context) {
 		replaceMap["${local.path}"] = v
 	}
 
-	temp := facade.TempStorage
-	temp = utils.Replace(temp, replaceMap)
-
-	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
-}
-
-// testOSS - 测试OSS连接
-func (this *Toml) testOSS(ctx *gin.Context) {
-
-	// 请求参数
-	params := this.params(ctx)
-
-	if utils.Is.Empty(params["access_key_id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
+	// 上传命名规则（目录结构 / 文件名）：未知占位符直接拒绝
+	if !this.validateStorageRules(ctx, "本地存储", params) {
 		return
 	}
-
-	if utils.Is.Empty(params["access_key_secret"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_secret"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["endpoint"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "endpoint"), 400)
-		return
-	}
-
-	id := cast.ToString(params["access_key_id"])
-	secret := cast.ToString(params["access_key_secret"])
-	endpoint := cast.ToString(params["endpoint"])
-
-	client, err := oss.New(endpoint, id, secret)
-
-	if err != nil {
-		this.json(ctx, err.Error(), facade.Lang(ctx, "测试OSS连接失败！"), 400)
-		return
-	}
-
-	exist, err := client.IsBucketExist(cast.ToString(params["bucket"]))
-	if err != nil {
-		this.json(ctx, err.Error(), facade.Lang(ctx, "测试OSS连接失败！"), 400)
-		return
-	}
-
-	if !exist {
-		this.json(ctx, nil, facade.Lang(ctx, "Bucket 不存在！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "测试OSS连接成功！"), 200)
-}
-
-// putStorageOSS - 修改OSS存储配置
-func (this *Toml) putStorageOSS(ctx *gin.Context) {
-
-	// 请求参数
-	params := this.params(ctx)
-
-	// 还原脱敏占位值（避免把脱敏密钥写回配置）
-	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.StorageToml.Get("oss")))
-
-	if utils.Is.Empty(params["access_key_id"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["access_key_secret"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_secret"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["endpoint"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "endpoint"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["bucket"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bucket"), 400)
-		return
-	}
-
-	replaceMap := this.storageConfigToReplaceMap()
-	replaceMap["${oss.access_key_id}"] = cast.ToString(params["access_key_id"])
-	replaceMap["${oss.access_key_secret}"] = cast.ToString(params["access_key_secret"])
-	replaceMap["${oss.endpoint}"] = cast.ToString(params["endpoint"])
-	replaceMap["${oss.bucket}"] = cast.ToString(params["bucket"])
-	if v, ok := params["domain"]; ok {
-		replaceMap["${oss.domain}"] = cast.ToString(v)
-	}
-	if v, ok := params["path"]; ok {
-		replaceMap["${oss.path}"] = cast.ToString(v)
+	for _, kind := range []string{facade.StorageRuleDir, facade.StorageRuleFile} {
+		if v, ok := params[kind]; ok {
+			replaceMap["${local."+kind+"}"] = v
+		}
 	}
 
 	temp := facade.TempStorage
@@ -1528,6 +1453,7 @@ func (this *Toml) putStorageOSS(ctx *gin.Context) {
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
+
 
 // testCOS - 测试COS连接
 func (this *Toml) testCOS(ctx *gin.Context) {
@@ -1566,7 +1492,11 @@ func (this *Toml) testCOS(ctx *gin.Context) {
 	bucket := cast.ToString(params["bucket"])
 	region := cast.ToString(params["region"])
 
-	BucketURL, err := url.Parse(fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com", bucket, appId, region))
+	// 桶名归一化：bucket 可填裸桶名（自动补 -app_id），也可填控制台复制的全名
+	BucketURL, err := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com",
+		facade.COSBucketNameWith(bucket, appId),
+		region,
+	))
 	if err != nil {
 		this.json(ctx, err.Error(), facade.Lang(ctx, "测试COS连接失败！"), 400)
 		return
@@ -1646,113 +1576,33 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 		replaceMap["${cos.path}"] = cast.ToString(v)
 	}
 
+	// 上传命名规则（目录结构 / 文件名）：未知占位符直接拒绝
+	if !this.validateStorageRules(ctx, "腾讯云 COS", params) {
+		return
+	}
+	for _, kind := range []string{facade.StorageRuleDir, facade.StorageRuleFile} {
+		if v, ok := params[kind]; ok {
+			replaceMap["${cos."+kind+"}"] = v
+		}
+	}
+
 	temp := facade.TempStorage
 	temp = utils.Replace(temp, replaceMap)
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
-// testKODO - 测试KODO连接
-func (this *Toml) testKODO(ctx *gin.Context) {
-
-	// 请求参数
-	params := this.params(ctx)
-
-	if utils.Is.Empty(params["access_key"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["secret_key"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "secret_key"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["bucket"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bucket"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["region"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "region"), 400)
-		return
-	}
-
-	// KODO 对象存储
-	client := qbox.NewMac(cast.ToString(params["access_key"]), cast.ToString(params["secret_key"]))
-
-	bucket := storage.NewBucketManager(client, nil)
-	_, err := bucket.GetBucketInfo(cast.ToString(params["bucket"]))
-
-	if err != nil {
-		this.json(ctx, err.Error(), facade.Lang(ctx, "测试KODO连接失败！"), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "测试KODO连接成功！"), 200)
-}
-
-// putStorageKODO - 修改KODO存储配置
-func (this *Toml) putStorageKODO(ctx *gin.Context) {
-
-	// 请求参数
-	params := this.params(ctx)
-
-	// 还原脱敏占位值（避免把脱敏密钥写回配置）
-	this.restoreSecretParams(params, []string{"access_key", "secret_key"}, cast.ToStringMap(facade.StorageToml.Get("kodo")))
-
-	if utils.Is.Empty(params["access_key"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["secret_key"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "secret_key"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["bucket"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bucket"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["region"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "region"), 400)
-		return
-	}
-
-	if utils.Is.Empty(params["domain"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "domain"), 400)
-		return
-	}
-
-	replaceMap := this.storageConfigToReplaceMap()
-	replaceMap["${kodo.access_key}"] = cast.ToString(params["access_key"])
-	replaceMap["${kodo.secret_key}"] = cast.ToString(params["secret_key"])
-	replaceMap["${kodo.bucket}"] = cast.ToString(params["bucket"])
-	replaceMap["${kodo.region}"] = cast.ToString(params["region"])
-	replaceMap["${kodo.domain}"] = cast.ToString(params["domain"])
-
-	temp := facade.TempStorage
-	temp = utils.Replace(temp, replaceMap)
-
-	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
-}
 
 // putStorageAttachment - 修改附件配置
 func (this *Toml) putStorageAttachment(ctx *gin.Context) {
 
 	params := this.params(ctx)
 
+	// 只有这三项真正生效（原先的 limit_per_minute 等 5 个「每时段上限」后端从未校验，已移除）
 	allowFields := map[string]string{
 		"allow_extensions": "${attachment.allow_extensions}",
 		"max_file_size":    "${attachment.max_file_size}",
 		"concurrent_limit": "${attachment.concurrent_limit}",
-		"limit_per_minute": "${attachment.limit_per_minute}",
-		"limit_per_hour":   "${attachment.limit_per_hour}",
-		"limit_per_day":    "${attachment.limit_per_day}",
-		"limit_per_week":   "${attachment.limit_per_week}",
-		"limit_per_month":  "${attachment.limit_per_month}",
 	}
 
 	replaceMap := this.storageConfigToReplaceMap()
@@ -1786,9 +1636,9 @@ func (this *Toml) putStorage(ctx *gin.Context) {
 	replaceMap := this.storageConfigToReplaceMap()
 
 	if val, ok := params["default"]; ok {
-		allow := []any{"local", "oss", "cos", "kodo"}
+		allow := []any{"local", "cos"}
 		if !utils.In.Array(val, allow) {
-			this.json(ctx, nil, facade.Lang(ctx, "default 只允许是 local、oss、cos、kodo 其中一个！"), 400)
+			this.json(ctx, nil, facade.Lang(ctx, "default 只允许是 local、cos 其中一个！"), 400)
 			return
 		}
 		replaceMap["${default}"] = val
@@ -1801,26 +1651,14 @@ func (this *Toml) putStorage(ctx *gin.Context) {
 		if v, ok := local["path"]; ok {
 			replaceMap["${local.path}"] = v
 		}
-	}
-
-	if oss, ok := params["oss"].(map[string]any); ok {
-		if v, ok := oss["access_key_id"]; ok {
-			replaceMap["${oss.access_key_id}"] = v
+		// 上传命名规则（目录结构 / 文件名）：未知占位符直接拒绝
+		if !this.validateStorageRules(ctx, "本地存储", local) {
+			return
 		}
-		if v, ok := oss["access_key_secret"]; ok {
-			replaceMap["${oss.access_key_secret}"] = v
-		}
-		if v, ok := oss["endpoint"]; ok {
-			replaceMap["${oss.endpoint}"] = v
-		}
-		if v, ok := oss["bucket"]; ok {
-			replaceMap["${oss.bucket}"] = v
-		}
-		if v, ok := oss["domain"]; ok {
-			replaceMap["${oss.domain}"] = v
-		}
-		if v, ok := oss["path"]; ok {
-			replaceMap["${oss.path}"] = v
+		for _, kind := range []string{facade.StorageRuleDir, facade.StorageRuleFile} {
+			if v, ok := local[kind]; ok {
+				replaceMap["${local."+kind+"}"] = v
+			}
 		}
 	}
 
@@ -1846,23 +1684,14 @@ func (this *Toml) putStorage(ctx *gin.Context) {
 		if v, ok := cos["path"]; ok {
 			replaceMap["${cos.path}"] = v
 		}
-	}
-
-	if kodo, ok := params["kodo"].(map[string]any); ok {
-		if v, ok := kodo["access_key"]; ok {
-			replaceMap["${kodo.access_key}"] = v
+		// 上传命名规则（目录结构 / 文件名）：未知占位符直接拒绝
+		if !this.validateStorageRules(ctx, "腾讯云 COS", cos) {
+			return
 		}
-		if v, ok := kodo["secret_key"]; ok {
-			replaceMap["${kodo.secret_key}"] = v
-		}
-		if v, ok := kodo["bucket"]; ok {
-			replaceMap["${kodo.bucket}"] = v
-		}
-		if v, ok := kodo["region"]; ok {
-			replaceMap["${kodo.region}"] = v
-		}
-		if v, ok := kodo["domain"]; ok {
-			replaceMap["${kodo.domain}"] = v
+		for _, kind := range []string{facade.StorageRuleDir, facade.StorageRuleFile} {
+			if v, ok := cos[kind]; ok {
+				replaceMap["${cos."+kind+"}"] = v
+			}
 		}
 	}
 
@@ -1875,21 +1704,6 @@ func (this *Toml) putStorage(ctx *gin.Context) {
 		}
 		if v, ok := attachment["concurrent_limit"]; ok {
 			replaceMap["${attachment.concurrent_limit}"] = v
-		}
-		if v, ok := attachment["limit_per_minute"]; ok {
-			replaceMap["${attachment.limit_per_minute}"] = v
-		}
-		if v, ok := attachment["limit_per_hour"]; ok {
-			replaceMap["${attachment.limit_per_hour}"] = v
-		}
-		if v, ok := attachment["limit_per_day"]; ok {
-			replaceMap["${attachment.limit_per_day}"] = v
-		}
-		if v, ok := attachment["limit_per_week"]; ok {
-			replaceMap["${attachment.limit_per_week}"] = v
-		}
-		if v, ok := attachment["limit_per_month"]; ok {
-			replaceMap["${attachment.limit_per_month}"] = v
 		}
 	}
 

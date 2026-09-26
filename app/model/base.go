@@ -110,32 +110,18 @@ func init() {
 }
 
 // DomainTemp1 - 域名模板替换（查询时）
+//
+// 存储相关模板只有两种：{{cos}}（腾讯云 COS）与 {{localhost}}（当前站点域名）。
 func DomainTemp1() (replace map[string]any) {
 	toml := facade.NewToml(facade.TomlStorage)
 	replace = make(map[string]any)
-	storage := []string{"oss", "cos", "kodo"}
 
-	for _, val := range storage {
-		domain := cast.ToString(toml.Get(val + ".domain"))
-		if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
-			replace["{{"+val+"}}"] = domain
-			continue
-		}
-		if utils.In.Array(val, []any{"oss", "cos"}) {
-			if val == "oss" {
-				replace["{{"+val+"}}"] = fmt.Sprintf("https://%s.%s",
-					cast.ToString(toml.Get("oss.bucket")),
-					cast.ToString(toml.Get("oss.endpoint")),
-				)
-			}
-			if val == "cos" {
-				replace["{{"+val+"}}"] = fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com",
-					cast.ToString(toml.Get("cos.bucket")),
-					cast.ToString(toml.Get("cos.app_id")),
-					cast.ToString(toml.Get("cos.region")),
-				)
-			}
-		}
+	// COS：配置了自定义域名（CDN）就用它，否则用默认域名 https://<bucket>-<appid>.cos.<region>.myqcloud.com
+	domain := cast.ToString(toml.Get("cos.domain"))
+	if !utils.Is.Empty(domain) && !strings.Contains(domain, "{{") {
+		replace["{{cos}}"] = domain
+	} else {
+		replace["{{cos}}"] = facade.COSDomain()
 	}
 
 	localhost := facade.Var.Get("domain")
@@ -153,12 +139,9 @@ func DomainTemp1() (replace map[string]any) {
 func DomainTemp2() (replace map[string]any) {
 	toml := facade.NewToml(facade.TomlStorage)
 	replace = make(map[string]any)
-	storage := []string{"oss", "cos", "kodo"}
 
-	for _, val := range storage {
-		if !utils.Is.Empty(toml.Get(val + ".domain")) {
-			replace[cast.ToString(toml.Get(val+".domain"))] = "{{" + val + "}}"
-		}
+	if !utils.Is.Empty(toml.Get("cos.domain")) {
+		replace[cast.ToString(toml.Get("cos.domain"))] = "{{cos}}"
 	}
 
 	localhost := facade.Var.Get("domain")
@@ -169,17 +152,8 @@ func DomainTemp2() (replace map[string]any) {
 		replace[cast.ToString(facade.Cache.Get("domain"))] = "{{localhost}}"
 	}
 
-	oss := fmt.Sprintf("https://%s.%s",
-		cast.ToString(toml.Get("oss.bucket")),
-		cast.ToString(toml.Get("oss.endpoint")),
-	)
-	cos := fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com",
-		cast.ToString(toml.Get("cos.bucket")),
-		cast.ToString(toml.Get("cos.app_id")),
-		cast.ToString(toml.Get("cos.region")),
-	)
-	replace[oss] = "{{oss}}"
-	replace[cos] = "{{cos}}"
+	// COS 默认域名同样走 facade.COSDomain()（桶名归一化 + 地域回退）
+	replace[facade.COSDomain()] = "{{cos}}"
 
 	return replace
 }
@@ -187,8 +161,8 @@ func DomainTemp2() (replace map[string]any) {
 // ReplaceDomainColumns - 替换 Column() 查询结果里的域名模板（查询时口径）
 //
 // 背景：Column() 内部走 Scan 到 []map[string]any，不会实例化模型结构体，
-// 因此模型上的 AfterFind 钩子不会被触发，而头像 / 附件地址里的 {{cos}}、{{oss}}、
-// {{kodo}}、{{localhost}} 等存储模板正是在 AfterFind 里还原成真实域名的。
+// 因此模型上的 AfterFind 钩子不会被触发，而头像 / 附件地址里的 {{cos}}、
+// {{localhost}} 等存储模板正是在 AfterFind 里还原成真实域名的。
 // 凡是用 Column() 取回了这类字段（如 user 的 avatar），都需要调用本函数补一次替换，
 // 否则接口会把模板原样返回给前端，导致图片无法显示。
 //
