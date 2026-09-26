@@ -80,6 +80,7 @@ func (this *Users) IPUT(ctx *gin.Context) {
 		"status":        this.status,
 		"ban":           this.ban,
 		"unban":         this.unban,
+		"clear-ban":     this.clearBan,
 		"appeal-handle": this.appealHandle,
 	}
 	err := this.call(allow, method, ctx)
@@ -1594,6 +1595,92 @@ func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
 	)
 
 	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "解封成功！"), 200)
+}
+
+// clearBan 管理员清空用户封禁信息
+//
+// 与「解封」（unban）的区别：
+//   - 解封只是把当前这条记录标记为已撤销、账号恢复可用，历史记录与累计封禁次数都保留；
+//   - 清空是把该用户的**全部**封禁记录物理删除，并把 users 表的封禁字段
+//     （ban_count / current_ban_id / last_ban_at / restrictions）一起归零，
+//     相当于这名用户从未被封禁过 —— 常用于误封纠正、测试账号重置。
+//
+// 参数：uid（必填）、unfreeze（可选，1 = 账号当前处于「冻结」状态时同时恢复为正常）
+// 注意：封禁记录是物理删除，不可恢复；本操作不发解封邮件（属于数据清理，不是解封流程）。
+func (this *Users) clearBan(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	// 权限检查 - 仅管理员
+	if !this.meta.root(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	uid := cast.ToInt(params["uid"])
+	if uid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid"), 400)
+		return
+	}
+
+	if uid == 1 {
+		this.json(ctx, nil, facade.Lang(ctx, "禁止操作系统管理员！"), 403)
+		return
+	}
+
+	// 检查目标用户是否存在
+	targetUser, _ := facade.DB.Model(&model.Users{}).Find(uid)
+	if utils.Is.Empty(targetUser) {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
+		return
+	}
+	targetMap := cast.ToStringMap(targetUser)
+
+	// 待清除的记录条数（含回收站里的，与下面的物理删除范围一致）
+	total, _ := facade.DB.Model(&model.UserBanRecords{}).Force().Where("uid", uid).Count()
+
+	// 用户侧封禁字段归零
+	userUpdate := map[string]any{
+		"ban_count":      0,
+		"current_ban_id": 0,
+		"last_ban_at":    0,
+		"restrictions":   0,
+	}
+
+	// 账号当前是「冻结」状态时可选一并恢复：封禁时勾过「同时冻结」的账号，
+	// 只清记录不解冻会变成「没有封禁记录却登录不了」，需要显式传 unfreeze=1
+	if cast.ToBool(params["unfreeze"]) && cast.ToInt(targetMap["status"]) == model.UserStatusFrozen {
+		userUpdate["status"] = model.UserStatusNormal
+	}
+
+	// 事务：物理删除全部封禁记录 + 重置用户封禁字段
+	err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("uid = ?", uid).Delete(&model.UserBanRecords{}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Users{}).Where("id = ?", uid).Updates(userUpdate).Error
+	})
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	// 清除用户缓存（登录态里的 result.ban 随之刷新）
+	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
+	go this.delCache()
+
+	// 审计日志
+	operator := this.user(ctx)
+	facade.Log.Info(map[string]any{
+		"uid":         uid,
+		"records":     total,
+		"unfreeze":    cast.ToBool(params["unfreeze"]),
+		"operator_id": operator.Id,
+		"operator_ip": ctx.ClientIP(),
+		"operator_ua": ctx.Request.UserAgent(),
+	}, "管理员清空用户封禁信息")
+
+	this.json(ctx, gin.H{"uid": uid, "records": total}, facade.Lang(ctx, "已清空该用户的封禁信息！"), 200)
 }
 
 // blackroom 小黑屋公示 - 公开接口

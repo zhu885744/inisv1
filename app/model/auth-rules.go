@@ -226,6 +226,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=status&type=login&name=修改用户状态",
 				"path=ban&name=封禁用户",
 				"path=unban&name=解封用户",
+				"path=clear-ban&name=清空用户封禁信息",
 				"path=appeal-handle&name=处理申诉",
 			},
 			"POST": {
