@@ -292,7 +292,10 @@ func SiteTitle() string {
 
 // SendWelcome - 注册成功（或审核通过 / 邮箱验证通过）后发送欢迎消息与欢迎邮件
 // 两个开关都关闭时不产生任何请求
-func SendWelcome(uid int, nickname string, email string) {
+//
+// account / nickname 会写进正文：涉及用户的邮件统一带上「账号 / 昵称」，
+// 方便用户确认这封邮件属于哪个账号。
+func SendWelcome(uid int, account string, nickname string, email string) {
 
 	setting := RegisterSettings()
 	if !setting.WelcomeMessage && !setting.WelcomeEmail {
@@ -303,9 +306,12 @@ func SendWelcome(uid int, nickname string, email string) {
 	if utils.Is.Empty(nickname) {
 		nickname = "朋友"
 	}
+	if utils.Is.Empty(account) {
+		account = "—"
+	}
 
 	title := fmt.Sprintf("欢迎加入 %v", site)
-	content := fmt.Sprintf("%v，您好：\n\n感谢您注册 %v，祝您使用愉快！如有疑问可通过站内联系方式联系我们。", nickname, site)
+	content := fmt.Sprintf("%v，您好：\n\n您的账号：%v\n\n感谢您注册 %v，祝您使用愉快！如有疑问可通过站内联系方式联系我们。", nickname, account, site)
 
 	if setting.WelcomeMessage {
 		go func() {

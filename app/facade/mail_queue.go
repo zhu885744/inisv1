@@ -61,6 +61,36 @@ const (
 	defaultMailIdleWait = time.Minute
 )
 
+// MailQueueDefaultValues 发件队列参数的默认值（config/sms.toml 的 [email] 段）
+//
+// 后台「系统设置 → 邮件通知 → 发件队列」读写的就是这组参数
+// （PUT /api/toml/sms-email-queue，字段与 reload 读取的 key 一一对应）。
+func MailQueueDefaultValues() map[string]any {
+	return map[string]any{
+		"batch_size":     defaultMailBatchSize,
+		"batch_interval": int(defaultMailBatchInterval.Seconds()),
+		"retry_delay":    int(defaultMailRetryDelay.Seconds()),
+		"max_attempts":   defaultMailMaxAttempts,
+		"send_timeout":   int(defaultMailSendTimeout.Seconds()),
+		"verify_wait":    int(defaultMailVerifyWait.Seconds()),
+		"queue_size":     defaultMailQueueSize,
+	}
+}
+
+// MailQueueLimits 发件队列参数的取值范围（min / max），与 reload 的边界保护一致
+// 注意：verify_wait 允许 0（表示验证码也不等待首轮结果，纯异步）
+func MailQueueLimits() map[string][2]int {
+	return map[string][2]int{
+		"batch_size":     {1, 1000},
+		"batch_interval": {1, 86400},
+		"retry_delay":    {1, 86400},
+		"max_attempts":   {1, 10},
+		"send_timeout":   {5, 600},
+		"verify_wait":    {0, 60},
+		"queue_size":     {10, 1000000},
+	}
+}
+
 // MailTask 一封待发送的邮件
 type MailTask struct {
 	Kind      string         // 任务类型（MailKind*）

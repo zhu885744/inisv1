@@ -336,6 +336,35 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		return nil
 	})
 
+	if err != nil {
+		return order, err
+	}
+
+	// 支付成功（积分已扣除）：通知管理员（开关见「系统设置 → 邮件通知」的 order.paid）
+	// 实物商品需要管理员去发货，虚拟商品已自动发货，正文里写明状态便于区分
+	// 放在事务提交之后：只有订单真正落库了才发通知
+	go func() {
+		statusText := "待发货"
+		if order.Status == OrderStatusCompleted {
+			statusText = "已自动发货（虚拟商品）"
+		}
+
+		lines := []string{
+			"商品：" + order.GoodsTitle,
+			"订单号：" + order.OrderNo,
+			"消耗积分：" + cast.ToString(order.Price),
+			"状态：" + statusText,
+			"时间：" + MailNotifyTime(),
+		}
+		// 带上买家的账号 / 昵称，管理员要发货时便于核对
+		lines = append(MailNotifyUserInfo(uid), lines...)
+		if !utils.Is.Empty(order.Address) {
+			lines = append(lines, "收货信息："+order.Address)
+		}
+
+		MailNotifyAdmin("order.paid", "有新的商品兑换订单", lines...)
+	}()
+
 	return order, err
 }
 

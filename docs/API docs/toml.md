@@ -19,6 +19,7 @@
 | :--- | :--- | :--- |
 | `/api/toml/storage` | PUT | 统一更新存储配置，支持同时修改 default、local、oss、cos、kodo、attachment 配置 |
 | `/api/toml/storage-attachment` | PUT | 更新附件管理配置 |
+| `/api/toml/sms-email-queue` | PUT | 更新邮件发件队列（分批 + 重试）参数，写入 `config/sms.toml` 的 `[email]` 段 |
 
 ---
 
@@ -48,6 +49,10 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `name` | string | 否 | 指定配置项：email、aliyun、aliyun_number_verify、tencent |
+
+> `email` 分组（`name=email` 或整份返回里的 `data.email`）同时包含**发件队列参数**：
+> `batch_size` / `batch_interval` / `retry_delay` / `max_attempts` / `send_timeout` / `verify_wait` / `queue_size`，
+> 修改请用 `PUT /api/toml/sms-email-queue`（见 3.18）。
 
 **成功响应** (200):
 ```json
@@ -415,6 +420,9 @@
 | `password` | string | **是** | 邮箱密码 |
 | `sign_name` | string | **是** | 签名名称 |
 | `nickname` | string | 否 | 发件人昵称 |
+
+> 发件队列参数（`batch_size` 等）与邮箱配置同属 `[email]` 段，但用
+> `PUT /api/toml/sms-email-queue` 单独更新（见 3.18），本接口不会改动它们。
 
 **成功响应** (200):
 ```json
@@ -872,6 +880,61 @@
 {
     "code": 200,
     "msg": "修改成功！",
+    "data": null
+}
+```
+
+#### 3.18 更新发件队列配置
+
+- **路径**: `/api/toml/sms-email-queue`
+- **方法**: `PUT`
+- **描述**: 更新邮件发件队列（分批限流 + 失败重试）参数，写入 `config/sms.toml` 的 `[email]` 段
+- **同一份配置的另一种写法**: `PUT /api/toml/sms` + `{ "name": "email_queue", ...同下表字段 }`
+
+**请求参数**（全部可选，只提交要改的字段，未提交的保持原值）：
+
+| 参数名 | 类型 | 必填 | 取值范围 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `batch_size` | int | 否 | 1 ~ 1000 | 10 | 每个批次窗口最多发送多少封通知类邮件 |
+| `batch_interval` | int | 否 | 1 ~ 86400 | 600 | 批次间隔（秒），一批发满后等待多久再发下一批（600 = 10 分钟） |
+| `retry_delay` | int | 否 | 1 ~ 86400 | 60 | 发送失败后的重试延迟（秒） |
+| `max_attempts` | int | 否 | 1 ~ 10 | 3 | 单封邮件最大尝试次数（含首次），超出后标记失败并丢弃 |
+| `send_timeout` | int | 否 | 5 ~ 600 | 30 | 单封发送超时（秒），超时按失败处理，避免 SMTP 卡住整个队列 |
+| `verify_wait` | int | 否 | 0 ~ 60 | 10 | 验证码 / 注册验证邮件等待首轮发送结果的超时（秒），0 = 不等待（纯异步） |
+| `queue_size` | int | 否 | 10 ~ 1000000 | 1000 | 队列最大长度（仅限制通知类邮件，验证码始终受理） |
+
+**行为说明**:
+
+- 值超出取值范围（或非数字）返回 `400`，字段名会在 msg 里给出；
+- 分批限制只作用于**通知类邮件**（评论 / 回复、消息通知、欢迎邮件、运营通知等），
+  验证码与注册验证邮件属于高优先级任务，入队即发、不占用批次额度；
+- 保存后由配置文件监听自动热更新（`initSMS` → `mailQueue.reload`），无需重启；
+  队列在内存中，重启后未发送的任务会丢失（邮件通知按「尽力而为」处理）。
+
+**请求示例**:
+```json
+{
+    "batch_size": 30,
+    "batch_interval": 300,
+    "retry_delay": 120,
+    "max_attempts": 5
+}
+```
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "发件队列配置已保存！",
+    "data": null
+}
+```
+
+**失败响应** (400):
+```json
+{
+    "code": 400,
+    "msg": "batch_size 取值范围 1 ~ 1000！",
     "data": null
 }
 ```

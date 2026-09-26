@@ -171,6 +171,23 @@ nickname  = "${email.nickname}"
 # 邮件签名
 sign_name = "${email.sign_name}"
 
+# ===== 发件队列（分批 + 重试，见 app/facade/mail_queue.go）=====
+# 后台可在「系统设置 → 邮件通知 → 发件队列」修改（PUT /api/toml/sms-email-queue）
+# 每批最多发送多少封通知类邮件（验证码 / 注册验证邮件不受分批限制，入队即发）
+batch_size     = ${email.batch_size}
+# 批次间隔（秒）：一批发满后等待多久再发下一批（10 分钟 = 600）
+batch_interval = ${email.batch_interval}
+# 发送失败后的重试延迟（秒）
+retry_delay    = ${email.retry_delay}
+# 单封邮件最大尝试次数（含首次），超过后标记失败并丢弃，避免无限重试
+max_attempts   = ${email.max_attempts}
+# 单封发送超时（秒）：超时按失败处理，避免 SMTP 卡住整个队列
+send_timeout   = ${email.send_timeout}
+# 验证码 / 注册验证邮件等待首轮发送结果的超时（秒），0 = 不等待（纯异步）
+verify_wait    = ${email.verify_wait}
+# 队列最大长度（仅限制通知类邮件，超出直接丢弃并记日志）
+queue_size     = ${email.queue_size}
+
 
 # 阿里云短信服务配置
 [aliyun]

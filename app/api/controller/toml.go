@@ -318,6 +318,7 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 	allow := map[string]any{
 		"sms":                      this.putSMS,
 		"sms-email":                this.putSMSEmail,
+		"sms-email-queue":          this.putSMSEmailQueue,
 		"sms-aliyun":               this.putSMSAliyun,
 		"sms-aliyun-number-verify": this.putSMSAliYunNumberVerify,
 		"sms-tencent":              this.putSMSTencent,
@@ -411,8 +412,8 @@ func (this *Toml) putSMS(ctx *gin.Context) {
 		return
 	}
 
-	// 允许的修改范围 - 新增 aliyun_number_verify
-	field := []any{"default", "email", "aliyun", "aliyun_number_verify", "tencent"}
+	// 允许的修改范围 - 新增 aliyun_number_verify / email_queue
+	field := []any{"default", "email", "email_queue", "aliyun", "aliyun_number_verify", "tencent"}
 
 	if !utils.In.Array(params["name"], field) {
 		this.json(ctx, nil, facade.Lang(ctx, "不允许的修改范围！"), 400)
@@ -424,6 +425,8 @@ func (this *Toml) putSMS(ctx *gin.Context) {
 		this.putSMSDrive(ctx)
 	case "email":
 		this.putSMSEmail(ctx)
+	case "email_queue":
+		this.putSMSEmailQueue(ctx)
 	case "aliyun":
 		this.putSMSAliyun(ctx)
 	case "aliyun_number_verify": // 新增分支
@@ -593,9 +596,79 @@ func (this *Toml) putSMSDrive(ctx *gin.Context) {
 
 	temp := facade.TempSMS
 	temp = utils.Replace(temp, opts)
-	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
+	temp = this.replaceTomlVars(temp, this.smsTomlData())
 
 	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
+}
+
+// smsTomlData 当前 sms.toml 的可用于模板替换的数据副本
+//
+// 模板 TempSMS 里 [email] 段既有服务信息也有发件队列参数，配置里缺项时会替换成空值，
+// 写出 `batch_size = ` 这种非法 TOML（老配置文件没有队列项）。
+// 因此这里复制一份配置，并用 MailQueueDefaultValues 补齐 [email] 段的缺项。
+func (this *Toml) smsTomlData() map[string]any {
+
+	data := make(map[string]any, len(facade.SMSToml.Result))
+	for key, val := range facade.SMSToml.Result {
+		data[key] = val
+	}
+
+	email := make(map[string]any)
+	for key, val := range cast.ToStringMap(data["email"]) {
+		email[key] = val
+	}
+	for key, val := range facade.MailQueueDefaultValues() {
+		if utils.Is.Empty(email[key]) {
+			email[key] = val
+		}
+	}
+	data["email"] = email
+
+	return data
+}
+
+// putSMSEmailQueue - 修改发件队列配置（config/sms.toml 的 [email] 段）
+//
+// 对应字段（与 app/facade/mail_queue.go 的 MailQueueDefaultValues 一一对应）：
+// batch_size / batch_interval / retry_delay / max_attempts / send_timeout / verify_wait / queue_size
+//
+// 全部可选：只提交需要修改的字段，未提交的保持原值（配置里缺项时用默认值补齐）；
+// 每个字段都有取值范围（见 facade.MailQueueLimits），越界直接返回 400。
+// 保存后由配置监听（initSMS → mailQueue.reload）热更新，无需重启。
+func (this *Toml) putSMSEmailQueue(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	tomlData := this.smsTomlData()
+	email := cast.ToStringMap(tomlData["email"])
+
+	limits := facade.MailQueueLimits()
+	for key, limit := range limits {
+		raw, ok := params[key]
+		// 注意：这里只跳过「未提交 / 空串」，0 是合法值（如 verify_wait = 0 表示纯异步）
+		if !ok || cast.ToString(raw) == "" {
+			continue
+		}
+
+		if !utils.Is.Number(raw) {
+			this.json(ctx, nil, facade.Lang(ctx, "%s 只能是数字！", key), 400)
+			return
+		}
+
+		value := cast.ToInt(raw)
+		if value < limit[0] || value > limit[1] {
+			this.json(ctx, nil, facade.Lang(ctx, "%s 取值范围 %d ~ %d！", key, limit[0], limit[1]), 400)
+			return
+		}
+
+		email[key] = value
+	}
+
+	tomlData["email"] = email
+
+	// 整份文件按模板重建（未提交的字段沿用当前配置）
+	temp := this.replaceTomlVars(facade.TempSMS, tomlData)
+
+	this.saveTomlConfig(ctx, temp, "config/sms.toml", "发件队列配置已保存！")
 }
 
 // putSMSEmail - 修改SMS邮箱配置
@@ -646,7 +719,7 @@ func (this *Toml) putSMSEmail(ctx *gin.Context) {
 		"${email.nickname}":  params["nickname"],
 		"${email.sign_name}": params["sign_name"],
 	})
-	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
+	temp = this.replaceTomlVars(temp, this.smsTomlData())
 
 	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
@@ -693,7 +766,7 @@ func (this *Toml) putSMSAliyun(ctx *gin.Context) {
 		"${aliyun.sign_name}":         params["sign_name"],
 		"${aliyun.verify_code}":       params["verify_code"],
 	})
-	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
+	temp = this.replaceTomlVars(temp, this.smsTomlData())
 
 	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }
@@ -742,7 +815,7 @@ func (this *Toml) putSMSAliYunNumberVerify(ctx *gin.Context) {
 		"${aliyun_number_verify.sign_name}":         params["sign_name"],
 		"${aliyun_number_verify.template_code}":     params["template_code"],
 	})
-	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
+	temp = this.replaceTomlVars(temp, this.smsTomlData())
 
 	// 保存配置文件
 	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
@@ -802,7 +875,7 @@ func (this *Toml) putSMSTencent(ctx *gin.Context) {
 		"${tencent.verify_code}":    params["verify_code"],
 		"${tencent.region}":         params["region"],
 	})
-	temp = this.replaceTomlVars(temp, facade.SMSToml.Result)
+	temp = this.replaceTomlVars(temp, this.smsTomlData())
 
 	this.saveTomlConfig(ctx, temp, "config/sms.toml", "修改成功！")
 }

@@ -69,6 +69,12 @@ func autoUnban() {
 		// 清除用户缓存
 		facade.Cache.Del(fmt.Sprintf("user[%v]", record.Uid))
 
+		// 解封通知（与手动解封同一场景，开关见「系统设置 → 邮件通知」的 user.unbanned）
+		go model.MailNotifyUser(record.Uid, "user.unbanned", "您的账号已解除封禁",
+			"说明：封禁期限已到，账号已自动恢复",
+			"时间："+model.MailNotifyTime(),
+		)
+
 		// 审计日志
 		facade.Log.Info(map[string]any{
 			"uid":       record.Uid,

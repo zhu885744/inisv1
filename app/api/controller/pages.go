@@ -411,6 +411,16 @@ func (this *Pages) create(ctx *gin.Context) {
 		return
 	}
 
+	// 待审核：通知管理员去审核（开关见「系统设置 → 邮件通知」的 page.pending）
+	// audit：0 待审核 / 1 通过 / 2 未通过
+	if table.Audit == 0 {
+		go model.MailNotifyAdmin("page.pending", "有新的独立页面待审核", append(
+			model.MailNotifyUserInfo(uid),
+			"标题："+table.Title,
+			"时间："+model.MailNotifyTime(),
+		)...)
+	}
+
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
@@ -446,13 +456,15 @@ func (this *Pages) update(ctx *gin.Context) {
 	// 开启审核时，只有「首次发布」（尚未审核过）才进入待审核，
 	// 已审核过的页面再次编辑保存不会重置审核状态（此前无条件重设，会把已通过的页面打回待审核）
 	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+
+	// 先取原记录：审核规则与「审核状态变化通知」都要用到 audit / uid
+	prev, _ := facade.DB.Model(&model.Pages{}).WithTrashed().Where("id", params["id"]).Find()
+	prevAudit := cast.ToInt(prev["audit"])
+
 	if !auditSwitch {
 		async.Set("audit", 1)
-	} else {
-		prev, _ := facade.DB.Model(&model.Pages{}).WithTrashed().Where("id", params["id"]).Find()
-		if cast.ToInt(prev["audit"]) == 0 {
-			async.Set("audit", 0)
-		}
+	} else if prevAudit == 0 {
+		async.Set("audit", 0)
 	}
 
 	for key, val := range params {
@@ -463,12 +475,19 @@ func (this *Pages) update(ctx *gin.Context) {
 
 	async.Set("last_update", time.Now().Unix())
 
-	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())
+	// 取一次更新内容：Update 与「审核状态变化」判定共用
+	payload := async.Result()
+	_, err = facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(payload)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
+
+	// 审核状态变化时邮件通知（开关见「系统设置 → 邮件通知」）
+	// audit：0 待审核 / 1 通过 / 2 未通过；只在状态真正变化时发，普通编辑不打扰
+	notifyAuditChange(cast.ToInt(prev["uid"]), "page",
+		cast.ToString(prev["title"]), prevAudit, payload["audit"])
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }

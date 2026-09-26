@@ -272,13 +272,13 @@ func (this *Comm) login(ctx *gin.Context) {
 	// 登录增加经验
 	go this.loginExp(item["id"])
 
-	// 登录成功后，异步创建“账号登录通知”，记录登录账号/时间/IP/设备
-	go func(uid int, account, ip, ua string) {
+	// 登录成功后，异步创建“账号登录通知”，记录账号/昵称/时间/IP/设备
+	go func(uid int, account, nickname, ip, ua string) {
 		notification := new(model.Notification)
-		if _, e := notification.CreateLoginNotification(uid, account, ip, ua); e != nil {
+		if _, e := notification.CreateLoginNotification(uid, account, nickname, ip, ua); e != nil {
 			facade.Log.Error(map[string]any{"error": e.Error(), "uid": uid}, "发送账号登录通知失败")
 		}
-	}(cast.ToInt(item["id"]), cast.ToString(params["account"]), ctx.ClientIP(), ctx.Request.UserAgent())
+	}(cast.ToInt(item["id"]), cast.ToString(params["account"]), cast.ToString(item["nickname"]), ctx.ClientIP(), ctx.Request.UserAgent())
 
 	this.json(ctx, result, facade.Lang(ctx, "登录成功！"), 200)
 }
@@ -527,6 +527,13 @@ func (this *Comm) register(ctx *gin.Context) {
 			facade.Log.Error(map[string]any{"error": err.Error(), "uid": table.Id}, "写入待审核状态失败")
 		} else {
 			table.Status = model.UserStatusAudit
+
+			// 有新用户等待人工审核：通知管理员（开关见「系统设置 → 邮件通知」的 user.pending）
+			go model.MailNotifyAdmin("user.pending", "有新用户等待审核", append(
+				model.MailNotifyUserInfo(table.Id),
+				"邮箱："+cast.ToString(table.Email),
+				"时间："+model.MailNotifyTime(),
+			)...)
 		}
 
 		this.json(ctx, gin.H{
@@ -575,7 +582,7 @@ func (this *Comm) register(ctx *gin.Context) {
 	// 登录增加经验
 	go this.loginExp(table.Id)
 	// 注册欢迎消息 / 欢迎邮件（按后台开关执行，内部异步）
-	model.SendWelcome(table.Id, table.Nickname, cast.ToString(table.Email))
+	model.SendWelcome(table.Id, table.Account, table.Nickname, cast.ToString(table.Email))
 
 	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), 200)
 }
@@ -621,7 +628,7 @@ func (this *Comm) verifyEmail(ctx *gin.Context) {
 	// 验证通过后补发注册欢迎消息 / 欢迎邮件
 	user, _ := facade.DB.Model(&model.Users{}).Find(uid)
 	if !utils.Is.Empty(user) {
-		model.SendWelcome(uid, cast.ToString(user["nickname"]), cast.ToString(user["email"]))
+		model.SendWelcome(uid, cast.ToString(user["account"]), cast.ToString(user["nickname"]), cast.ToString(user["email"]))
 	}
 
 	this.json(ctx, gin.H{"uid": uid}, facade.Lang(ctx, "邮箱验证成功，请登录！"), 200)

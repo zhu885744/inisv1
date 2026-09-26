@@ -583,7 +583,25 @@ func (this *Users) status(ctx *gin.Context) {
 	// 人工审核通过：补发注册欢迎消息 / 欢迎邮件
 	if beforeStatus == model.UserStatusAudit && status == model.UserStatusNormal && !utils.Is.Empty(before) {
 		user := cast.ToStringMap(before)
-		model.SendWelcome(userId, cast.ToString(user["nickname"]), cast.ToString(user["email"]))
+		model.SendWelcome(userId, cast.ToString(user["account"]), cast.ToString(user["nickname"]), cast.ToString(user["email"]))
+	}
+
+	// 状态变更邮件通知（开关见「系统设置 → 邮件通知」的 user.passed / user.frozen / user.unfrozen）
+	// 只在状态真正变化时发，重复点击相同状态不会重复打扰用户
+	scene, title := "", ""
+	switch {
+	case beforeStatus == model.UserStatusAudit && status == model.UserStatusNormal:
+		scene, title = "user.passed", "您的账号已通过审核"
+	case status == model.UserStatusFrozen && beforeStatus != model.UserStatusFrozen:
+		scene, title = "user.frozen", "您的账号已被冻结"
+	case status == model.UserStatusNormal && beforeStatus == model.UserStatusFrozen:
+		scene, title = "user.unfrozen", "您的账号已解除冻结"
+	}
+	if !utils.Is.Empty(scene) {
+		// 账号 / 昵称由 MailNotifyUser 自动带上，这里只补业务信息
+		go model.MailNotifyUser(userId, scene, title,
+			"时间："+model.MailNotifyTime(),
+		)
 	}
 
 	this.json(ctx, gin.H{"id": userId, "status": status}, facade.Lang(ctx, "状态更新成功！"), 200)
@@ -1453,6 +1471,19 @@ func (this *Users) ban(ctx *gin.Context) {
 		"operator_ua":    operatorUa,
 	}, "管理员封禁用户")
 
+	// 封禁通知：把原因、限制范围与到期时间完整告知用户
+	// （开关见「系统设置 → 邮件通知」的 user.banned；账号 / 昵称由 MailNotifyUser 自动带上）
+	expireText := "永久"
+	if expiresAt > 0 {
+		expireText = time.Unix(expiresAt, 0).Format("2006-01-02 15:04:05")
+	}
+	go model.MailNotifyUser(uid, "user.banned", "您的账号已被封禁",
+		"原因："+reason,
+		"限制权限："+model.BanTypeText(banType),
+		"到期时间："+expireText,
+		"冻结时间："+model.MailNotifyTime(),
+	)
+
 	this.json(ctx, gin.H{"id": record.Id}, facade.Lang(ctx, "封禁成功！"), 200)
 }
 
@@ -1555,6 +1586,12 @@ func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
 		"operator_ip": ctx.ClientIP(),
 		"operator_ua": ctx.Request.UserAgent(),
 	}, "管理员解封用户")
+
+	// 解封通知（开关见「系统设置 → 邮件通知」的 user.unbanned；账号 / 昵称自动带上）
+	go model.MailNotifyUser(uid, "user.unbanned", "您的账号已解除封禁",
+		"说明：封禁已由管理员解除，账号可正常登录",
+		"时间："+model.MailNotifyTime(),
+	)
 
 	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "解封成功！"), 200)
 }

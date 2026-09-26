@@ -364,6 +364,16 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
+	// 待审核：通知管理员去审核（开关见「系统设置 → 邮件通知」的 article.pending）
+	// audit：0 待审核 / 1 通过 / 2 未通过
+	if table.Audit == 0 {
+		go model.MailNotifyAdmin("article.pending", "有新的文章待审核", append(
+			model.MailNotifyUserInfo(uid),
+			"标题："+table.Title,
+			"时间："+model.MailNotifyTime(),
+		)...)
+	}
+
 	// 发布文章时触发经验值与积分
 	if status == 1 {
 		go func() {
@@ -455,12 +465,19 @@ func (this *Article) update(ctx *gin.Context) {
 
 	async.Set("last_update", time.Now().Unix())
 
-	_, err = item.Scan(&table).Update(async.Result())
+	// 取一次更新内容：Update 与「审核状态变化」判定共用
+	payload := async.Result()
+	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
+
+	// 审核状态变化时邮件通知（开关见「系统设置 → 邮件通知」）
+	// audit：0 待审核 / 1 通过 / 2 未通过；只在状态真正变化时发，普通编辑不打扰
+	notifyAuditChange(cast.ToInt(findResult["uid"]), "article",
+		cast.ToString(findResult["title"]), prevAudit, payload["audit"])
 
 	if status == 0 {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)

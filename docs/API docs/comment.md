@@ -543,9 +543,10 @@
 - 用户发表评论会获得经验值奖励
 
 ### 6. 邮件通知
-- 支持配置邮件通知功能（`COMMENT` 配置的 `email_notify.enabled`）
-- 评论会通知文章/页面/动态作者
-- 回复评论会通知被回复的用户
+- 开关统一在「系统设置 → 邮件通知」（`SYSTEM_MAIL_NOTIFY` 的 `comment.notify` / `comment.reply` 场景），
+  `COMMENT` 配置不再有独立的 `email_notify`
+- 评论会通知文章/页面/动态作者（`comment.notify`），回复评论会通知被回复的用户（`comment.reply`）；
+  自己评论自己的内容、自己回复自己的评论不会发；收件人没有邮箱时跳过
 - 邮件统一投递到邮箱发件队列（分批发送 + 失败延迟重试），调用侧只入队不阻塞；
   分批 / 重试参数见 `config/sms.toml` 的 `[email]` 段（`app/facade/mail_queue.go`）
 

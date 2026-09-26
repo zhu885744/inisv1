@@ -695,10 +695,20 @@ func (this *Goods) orderStatus(ctx *gin.Context) {
 
 	// 取消订单：走退款流程（退还积分 + 回滚库存）
 	if status == model.OrderStatusCanceled {
-		if _, err := (&model.GoodsOrder{}).CancelOrder(0, orderId, true); err != nil {
+		order, err := (&model.GoodsOrder{}).CancelOrder(0, orderId, true)
+		if err != nil {
 			this.json(ctx, nil, err.Error(), 400)
 			return
 		}
+
+		// 取消并退款：通知买家（开关见「系统设置 → 邮件通知」的 order.canceled）
+		go model.MailNotifyUser(order.Uid, "order.canceled", "您的订单已取消并退还积分",
+			"商品："+order.GoodsTitle,
+			"订单号："+order.OrderNo,
+			"退还积分："+cast.ToString(order.Refund),
+			"时间："+model.MailNotifyTime(),
+		)
+
 		this.json(ctx, gin.H{"id": orderId, "status": status}, facade.Lang(ctx, "订单已取消并退还积分！"), 200)
 		return
 	}
@@ -715,6 +725,19 @@ func (this *Goods) orderStatus(ctx *gin.Context) {
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
+	}
+
+	// 发货：通知买家（开关见「系统设置 → 邮件通知」的 order.shipped）
+	if status == model.OrderStatusShipped {
+		order, _ := facade.DB.Model(&model.GoodsOrder{}).Find(orderId)
+		if !utils.Is.Empty(order) {
+			go model.MailNotifyUser(cast.ToInt(order["uid"]), "order.shipped", "您的订单已发货",
+				"商品："+cast.ToString(order["goods_title"]),
+				"订单号："+cast.ToString(order["order_no"]),
+				"物流："+logistics,
+				"时间："+model.MailNotifyTime(),
+			)
+		}
 	}
 
 	this.json(ctx, gin.H{"id": orderId, "status": status}, facade.Lang(ctx, "更新成功！"), 200)

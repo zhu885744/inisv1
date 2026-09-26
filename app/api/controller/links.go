@@ -668,6 +668,17 @@ func (this *Links) create(ctx *gin.Context) {
 		return
 	}
 
+	// 待审核：通知管理员去审核（开关见「系统设置 → 邮件通知」的 links.pending）
+	// 友链默认 audit=0（待审核），管理员创建时可直接指定
+	if table.Audit == 0 {
+		go model.MailNotifyAdmin("links.pending", "有新的友链申请待审核", append(
+			model.MailNotifyUserInfo(uid),
+			"名称："+table.Nickname,
+			"网址："+table.Url,
+			"时间："+model.MailNotifyTime(),
+		)...)
+	}
+
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
@@ -717,20 +728,30 @@ func (this *Links) update(ctx *gin.Context) {
 
 	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
 
+	// 先取原记录：权限校验与「审核状态变化通知」都要用到 uid / audit
+	itemData, _ := item.Find()
+	prevAudit := cast.ToInt(itemData["audit"])
+
 	if !root {
-		itemData, _ := item.Find()
 		if cast.ToInt(itemData["uid"]) != this.user(ctx).Id {
 			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
 			return
 		}
 	}
 
-	_, err = item.Scan(&table).Update(async.Result())
+	// 取一次更新内容：Update 与「审核状态变化」判定共用
+	payload := async.Result()
+	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
+
+	// 审核状态变化时邮件通知（开关见「系统设置 → 邮件通知」）
+	// audit：0 待审核 / 1 通过 / 2 未通过；友链的展示名是 nickname
+	notifyAuditChange(cast.ToInt(itemData["uid"]), "links",
+		cast.ToString(itemData["nickname"]), prevAudit, payload["audit"])
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }

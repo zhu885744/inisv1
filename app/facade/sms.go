@@ -196,38 +196,45 @@ func NewSMS(mode any) SMSInterface {
 
 // initSMSToml - 初始化SMS配置文件
 func initSMSToml() {
+	opts := map[string]any{
+		"${drive.sms}":                              "email",
+		"${drive.email}":                            "aliyun",
+		"${drive.default}":                          "email",
+		"${email.host}":                             "smtp.qq.com",
+		"${email.port}":                             465,
+		"${email.account}":                          "xxx@qq.com",
+		"${email.password}":                         "",
+		"${email.nickname}":                         "inis",
+		"${email.sign_name}":                        "inis",
+		"${aliyun.access_key_id}":                   "",
+		"${aliyun.access_key_secret}":               "",
+		"${aliyun.endpoint}":                        "dysmsapi.aliyuncs.com",
+		"${aliyun.sign_name}":                       "",
+		"${aliyun.verify_code}":                     "",
+		"${aliyun_number_verify.access_key_id}":     "",
+		"${aliyun_number_verify.access_key_secret}": "",
+		"${aliyun_number_verify.endpoint}":          "dypnsapi.aliyuncs.com",
+		"${aliyun_number_verify.sign_name}":         "",
+		"${aliyun_number_verify.template_code}":     "100001", // 号码验证专用模板
+		"${tencent.secret_id}":                      "",
+		"${tencent.secret_key}":                     "",
+		"${tencent.endpoint}":                       "sms.tencentcloudapi.com",
+		"${tencent.sms_sdk_app_id}":                 "",
+		"${tencent.sign_name}":                      "",
+		"${tencent.verify_code}":                    "",
+		"${tencent.region}":                         "ap-guangzhou",
+	}
+
+	// 发件队列参数（[email] 段）：模板里是占位符，这里补上默认值
+	for key, val := range MailQueueDefaultValues() {
+		opts["${email."+key+"}"] = val
+	}
+
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "sms",
-		Content: utils.Replace(TempSMS, map[string]any{
-			"${drive.sms}":                              "email",
-			"${drive.email}":                            "aliyun",
-			"${drive.default}":                          "email",
-			"${email.host}":                             "smtp.qq.com",
-			"${email.port}":                             465,
-			"${email.account}":                          "xxx@qq.com",
-			"${email.password}":                         "",
-			"${email.nickname}":                         "inis",
-			"${email.sign_name}":                        "inis",
-			"${aliyun.access_key_id}":                   "",
-			"${aliyun.access_key_secret}":               "",
-			"${aliyun.endpoint}":                        "dysmsapi.aliyuncs.com",
-			"${aliyun.sign_name}":                       "",
-			"${aliyun.verify_code}":                     "",
-			"${aliyun_number_verify.access_key_id}":     "",
-			"${aliyun_number_verify.access_key_secret}": "",
-			"${aliyun_number_verify.endpoint}":          "dypnsapi.aliyuncs.com",
-			"${aliyun_number_verify.sign_name}":         "",
-			"${aliyun_number_verify.template_code}":     "100001", // 号码验证专用模板
-			"${tencent.secret_id}":                      "",
-			"${tencent.secret_key}":                     "",
-			"${tencent.endpoint}":                       "sms.tencentcloudapi.com",
-			"${tencent.sms_sdk_app_id}":                 "",
-			"${tencent.sign_name}":                      "",
-			"${tencent.verify_code}":                    "",
-			"${tencent.region}":                         "ap-guangzhou",
-		}),
+		Path:    "config",
+		Mode:    "toml",
+		Name:    "sms",
+		Content: utils.Replace(TempSMS, opts),
 	}).Read()
 
 	if item.Error != nil {
@@ -472,7 +479,8 @@ func (this *GoMailRequest) sendCommentNotify(recipient string, commentInfo map[s
 	<div class="mail-content">
 		<p class="subtitle">您的${bind_label}《${title}》收到了一条新评论</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
-		<p><strong>评论者：</strong>${author_name}</p>
+		<p><strong>评论者账号：</strong>${author_account}</p>
+		<p><strong>评论者昵称：</strong>${author_name}</p>
 		<p><strong>评论时间：</strong>${created_at}</p>
 		<p><strong>评论者邮箱：</strong>${author_email}</p>
 		<p><strong>评论IP：</strong>${ip}</p>
@@ -589,7 +597,8 @@ func (this *GoMailRequest) sendReplyNotify(recipient string, commentInfo map[str
 	<div class="mail-content">
 		<p class="subtitle">您在${bind_label}《${title}》中的评论收到了一条回复</p>
 		<div class="comment-card"><div class="comment-content">${content}</div></div>
-		<p><strong>回复者：</strong>${author_name}</p>
+		<p><strong>回复者账号：</strong>${author_account}</p>
+		<p><strong>回复者昵称：</strong>${author_name}</p>
 		<p><strong>回复时间：</strong>${created_at}</p>
 		<p><strong>回复者邮箱：</strong>${author_email}</p>
 		<p><strong>回复IP：</strong>${ip}</p>
@@ -677,6 +686,16 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 		timeText = time.Now().Format("2006-01-02 15:04:05")
 	}
 
+	// 收件人身份（账号 / 昵称）：调用方没传时用「—」占位，避免模板里留下未替换的占位符
+	accountText := strings.TrimSpace(cast.ToString(messageInfo["account"]))
+	nicknameText := strings.TrimSpace(cast.ToString(messageInfo["nickname"]))
+	if utils.Is.Empty(accountText) {
+		accountText = "—"
+	}
+	if utils.Is.Empty(nicknameText) {
+		nicknameText = "—"
+	}
+
 	site := cast.ToString(SMSToml.Get("email.sign_name"))
 
 	// 正文按纯文本处理：先转义再换行转 <br>（顺序不能反，否则 <br> 会被一起转义）
@@ -718,6 +737,7 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 	</div>
 	<div class="mail-content">
 		<p class="subtitle">您收到一条来自「${site}」的消息</p>
+		<p class="meta"><strong>账号：</strong>${account}　|　<strong>昵称：</strong>${nickname}</p>
 		<div class="msg-title">${title}</div>
 		<div class="msg-card">${content}</div>
 		<p class="meta"><strong>发送时间：</strong>${time}</p>
@@ -738,10 +758,12 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 	item.SetHeader("Subject", title+" - "+site)
 
 	temp := utils.Replace(template, map[string]any{
-		"${site}":    site,
-		"${title}":   html.EscapeString(title),
-		"${content}": body,
-		"${time}":    timeText,
+		"${site}":     site,
+		"${account}":  html.EscapeString(accountText),
+		"${nickname}": html.EscapeString(nicknameText),
+		"${title}":    html.EscapeString(title),
+		"${content}":  body,
+		"${time}":     timeText,
 	})
 
 	item.SetBody("text/html", temp)
@@ -890,6 +912,29 @@ func SendMail(recipient string, subject string, content string) (response *SMSRe
 	}
 
 	return GoMail.SendMail(recipient, subject, content)
+}
+
+// SendCommentNotify - 发送评论通知邮件（包级入口，始终走邮箱驱动）
+//
+// 与 SendMessageNotify 一样直接使用 GoMail，不受 sms.toml 的驱动模式影响
+// （短信驱动发不了邮件）；邮件同样入队分批投递、失败延迟重试。
+func SendCommentNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+
+	if GoMail == nil {
+		return &SMSResponse{Error: errors.New("邮件服务未初始化，请检查config/sms.toml配置")}
+	}
+
+	return GoMail.SendCommentNotify(recipient, commentInfo)
+}
+
+// SendReplyNotify - 发送评论回复通知邮件（包级入口，始终走邮箱驱动）
+func SendReplyNotify(recipient string, commentInfo map[string]any) (response *SMSResponse) {
+
+	if GoMail == nil {
+		return &SMSResponse{Error: errors.New("邮件服务未初始化，请检查config/sms.toml配置")}
+	}
+
+	return GoMail.SendReplyNotify(recipient, commentInfo)
 }
 
 // SendMailUrgent - 发送自定义邮件（优先通道，等待首轮结果）

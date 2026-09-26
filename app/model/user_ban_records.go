@@ -38,6 +38,36 @@ var BanTypeMap = map[int]string{
 	BanTypeInteraction: "限制互动",
 }
 
+// BanTypeOrder 位掩码的展示顺序（直接遍历 map 会让文案顺序随机）
+var BanTypeOrder = []int{BanTypeLogin, BanTypeContent, BanTypeComment, BanTypeUpload, BanTypeInteraction}
+
+// BanTypeText 把封禁类型位掩码转成中文文案（如「限制登录、限制评论」）
+func BanTypeText(banType int) string {
+	if banType == 0 {
+		return "无限制"
+	}
+	if banType == BanTypeAll {
+		return "全面封禁"
+	}
+
+	text := ""
+	for _, bit := range BanTypeOrder {
+		if banType&bit == 0 {
+			continue
+		}
+		if text != "" {
+			text += "、"
+		}
+		text += BanTypeMap[bit]
+	}
+
+	if text == "" {
+		return "账号限制"
+	}
+
+	return text
+}
+
 // UserBanRecords 用户封禁记录表
 type UserBanRecords struct {
 	Id              int    `gorm:"type:int(32); comment:主键;" json:"id"`

@@ -158,8 +158,8 @@ func (this *Notification) CreateBroadcastNotification(fromUid int, typ, title, c
 }
 
 // CreateLoginNotification 创建“账号登录通知”（系统消息）
-// 在用户登录成功后调用，记录登录账号、时间、IP、设备等信息，提醒用户确认是否为本人操作。
-func (this *Notification) CreateLoginNotification(uid int, account, ip, ua string) (*Notification, error) {
+// 在用户登录成功后调用，记录账号、昵称、时间、IP、设备等信息，提醒用户确认是否为本人操作。
+func (this *Notification) CreateLoginNotification(uid int, account, nickname, ip, ua string) (*Notification, error) {
 	now := time.Now()
 	loginTime := now.Format("2006-01-02 15:04:05")
 
@@ -170,8 +170,13 @@ func (this *Notification) CreateLoginNotification(uid int, account, ip, ua strin
 	// 解析为简洁的设备描述（如：Windows 10 Chrome 144）
 	device := parseDevice(ua)
 
+	if utils.Is.Empty(nickname) {
+		nickname = account
+	}
+
 	content := "请确认你的登录信息，并确保是你本人操作。\n\n" +
-		"登录账号：" + account + "\n" +
+		"账号：" + account + "\n" +
+		"昵称：" + nickname + "\n" +
 		"登录时间：" + loginTime + "\n" +
 		"登录IP：" + ip + "\n" +
 		"登录设备：" + device + "\n\n" +

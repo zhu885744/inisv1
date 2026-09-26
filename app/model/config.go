@@ -44,6 +44,7 @@ func InitConfig() {
 			"email":   "",
 			"webhook": "",
 		}), Remark: "QPS自动封禁通知（邮件/Webhook）"},
+		{Key: "SYSTEM_MAIL_NOTIFY", Value: "1", Json: utils.Json.Encode(MailNotifyDefaultConfig()), Remark: "统一邮件通知（各场景开关 + 管理员收件邮箱）"},
 		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
 		{Key: "ALLOW_REGISTER", Value: "1", Json: utils.Json.Encode(facade.H{
 			// 邮箱域名限制：off 关闭 / whitelist 白名单 / blacklist 黑名单
@@ -73,7 +74,8 @@ func InitConfig() {
 			"require_chinese":  1,
 			"sensitive_filter": 1,
 			"sensitive_words":  []string{"色情", "广告", "开户"},
-			"email_notify":     facade.H{"enabled": 1, "retry_count": 3, "retry_interval": 5},
+			// 注：评论 / 回复的邮件开关已并入「统一邮件通知」（SYSTEM_MAIL_NOTIFY 的
+			// comment.notify / comment.reply 场景），此处不再保留 email_notify
 		}), Remark: "评论配置"},
 		{Key: "SYSTEM_EXP_RULES", Json: utils.Json.Encode(facade.H{
 			"like":            facade.H{"name": "点赞", "value": 1, "daily_limit": 10},

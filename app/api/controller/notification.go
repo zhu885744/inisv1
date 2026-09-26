@@ -1150,7 +1150,8 @@ func (this *Notification) sendSystem(ctx *gin.Context) {
 					return
 				}
 
-				email := cast.ToString(cast.ToStringMap(userInfo)["email"])
+				user := cast.ToStringMap(userInfo)
+				email := cast.ToString(user["email"])
 				if utils.Is.Empty(email) {
 					return
 				}
@@ -1158,9 +1159,12 @@ func (this *Notification) sendSystem(ctx *gin.Context) {
 				// 用「用户消息通知」模板（facade.SendMessageNotify）：
 				// 不要用 SendCommentNotify —— 那是评论通知模板，会渲染「评论者 / 评论 IP」等评论字段；
 				// 也刻意不走 facade.SMS：短信驱动发不了邮件，站点配了短信驱动时会静默失败
+				// 收件人的账号 / 昵称一并带上，用户能一眼确认这封邮件发给的是哪个账号
 				response := facade.SendMessageNotify(email, map[string]any{
-					"title":   t,
-					"content": c,
+					"title":    t,
+					"content":  c,
+					"account":  cast.ToString(user["account"]),
+					"nickname": cast.ToString(user["nickname"]),
 				})
 
 				if response != nil && response.Error != nil {

@@ -166,6 +166,7 @@ func createAuthRules() (result []AuthRules) {
 			"PUT": {
 				"path=sms&name=修改SMS服务配置",
 				"path=sms-email&name=修改邮件服务配置",
+				"path=sms-email-queue&name=修改邮件发件队列配置",
 				"path=sms-aliyun&name=修改阿里云短信服务配置",
 				"path=sms-aliyun-number-verify&name=修改阿里云号码验证配置",
 				"path=sms-tencent&name=修改腾讯云短信服务配置",

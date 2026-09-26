@@ -484,9 +484,9 @@
 | `require_chinese` | int | `1` | 是否要求包含中文（0=不要求，1=要求） |
 | `sensitive_filter` | int | `1` | 是否开启敏感词过滤（0=关闭，1=开启） |
 | `sensitive_words` | array | `["色情", "广告", "开户"]` | 敏感词列表 |
-| `email_notify.enabled` | int | `1` | 是否开启邮件通知（0=关闭，1=开启） |
-| `email_notify.retry_count` | int | `3` | 发送失败重试次数 |
-| `email_notify.retry_interval` | int | `5` | 重试间隔（分钟） |
+
+> 说明：评论 / 回复的邮件通知开关已并入 `SYSTEM_MAIL_NOTIFY`（场景 `comment.notify` / `comment.reply`），
+> 本记录不再包含 `email_notify`；老库若残留该字段会被忽略（保存评论配置后即被清理）。
 
 ### 11. SYSTEM_EXP_RULES - 经验值规则配置
 
@@ -548,6 +548,46 @@
 - 更新配置会自动清除经验值配置缓存
 - 可通过 EXP API 的业务接口（签到、点赞、分享、收藏等）验证配置效果
 - 详细使用方法请参考 [EXP API 文档](exp.md)
+
+### 12. SYSTEM_MAIL_NOTIFY - 统一邮件通知
+
+| 属性 | 值 | 说明 |
+| :--- | :--- | :--- |
+| **键名** | `SYSTEM_MAIL_NOTIFY` | - |
+| **默认值** | `1` | 总开关默认开启，使用JSON存储配置 |
+| **备注** | 统一邮件通知（各场景开关 + 管理员收件邮箱） | - |
+| **可见性** | 管理员 | `SYSTEM_` 前缀 |
+
+**JSON 配置结构**:
+
+| 字段 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `enabled` | int | `1` | 总开关（0=所有场景停发，1=按场景开关发送） |
+| `admin_email` | string | `` | 管理员收件邮箱，多个用逗号分隔；留空时取权限组 `root=1` 成员邮箱 |
+| `scenes` | object | 全部 `1` | 各场景开关，键为场景 key，值 `1` 开 / `0` 关 |
+
+**内置场景**（实现见 `app/model/mail-notify.go` 的 `MailNotifyScenes`，后台「系统设置 → 邮件通知」可开关）：
+
+| 场景 key | 收件人 | 触发时机 |
+| :--- | :--- | :--- |
+| `article.pending` / `page.pending` / `links.pending` | 管理员 | 文章 / 独立页面 / 友链进入待审核 |
+| `article.passed` / `page.passed` / `links.passed` | 作者 | 审核通过 |
+| `article.rejected` / `page.rejected` / `links.rejected` | 作者 | 审核未通过（audit=2） |
+| `comment.notify` | 内容作者 | 有人评论文章 / 页面 / 动态 |
+| `comment.reply` | 被回复人 | 有人回复评论 |
+| `user.pending` | 管理员 | 注册需人工审核 |
+| `user.passed` | 用户 | 账号通过人工审核 |
+| `user.frozen` / `user.unfrozen` | 用户 | 账号被冻结 / 解除冻结 |
+| `user.banned` / `user.unbanned` | 用户 | 账号被封禁（含账号、昵称、原因、限制权限、到期时间、冻结时间）/ 解除封禁 |
+| `order.paid` | 管理员 | 用户下单兑换成功（积分已扣除，需发货时提醒） |
+| `order.shipped` | 买家 | 管理员标记订单已发货 |
+| `order.canceled` | 买家 | 订单取消并退还积分 |
+
+**使用说明**:
+- 总开关或场景开关关闭时该邮件直接不发（站内通知不受影响）；场景 key 缺失时按默认值（开启）处理；
+- 邮件统一投递到邮箱队列（`app/facade/mail_queue.go`）：分批发送（默认 10 封 / 10 分钟）、失败延迟重试，
+  参数在 `config/sms.toml` 的 `[email]` 段；评论 / 回复通知的开关也在本记录（`comment.notify` / `comment.reply`）；
+- 修改配置后立即生效（写入时会清理 `config[SYSTEM_MAIL_NOTIFY]` 缓存）。
 
 ---
 

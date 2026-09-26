@@ -4,6 +4,18 @@
 
 `auth-group` 控制器用于管理用户权限分组，支持分组的创建、查询、更新和删除操作。包含特殊的用户关联功能，禁止删除系统管理员分组。
 
+### 权限字段说明
+
+| 字段 | 含义 | 作用范围 |
+| :--- | :--- | :--- |
+| `rules` | 接口权限点（`AuthRules` 的 hash，逗号分隔；或 `all`） | 接口能否调用（`app/api/middleware/rule.go` 按 `[METHOD][路由]` 校验） |
+| `pages` | 后台页面（`AuthPages` 的 hash，逗号分隔；或 `all`） | 后台左侧菜单显示哪些项、能否进入 `/admin`（`pages` 留空 = 拥有全部页面） |
+| `root` | 是否具备「越权操作数据」能力 | 数据范围：如通知可跨用户查看、列表不过滤归属 |
+| `key` | 分组标识 | 仅 `key=admin` 会被当作「超级管理员组」用于前台入口显示；**不是**进入后台的唯一条件 |
+
+> 想让「非 admin 的运营组」只管理一部分后台：新建分组（`key` 任意）→ 勾需要的 `rules` + `pages`，`root` 保持 0。
+> 判定细节见《二次开发规范》的「权限规则 / 页面权限」。
+
 ### 接口类型说明
 
 | 接口类型 | 说明 |
@@ -257,10 +269,10 @@
 | `id` | int | 否 | 分组ID，为空时新增 |
 | `name` | string | **是** | 分组名称 |
 | `key` | string | 否 | 分组标识 |
-| `rules` | string | 否 | 权限规则ID列表，逗号分隔 |
+| `rules` | string | 否 | 接口权限点 hash 列表（逗号分隔）或 `all`（全部接口权限） |
 | `uids` | string | 否 | 用户ID列表，逗号分隔 |
 | `root` | int | 否 | 是否超级管理员组，0/1 |
-| `pages` | string | 否 | 关联页面ID列表 |
+| `pages` | string | 否 | 后台页面 hash 列表（逗号分隔）或 `all`；留空 = 未配置（按「拥有全部页面」处理） |
 | `remark` | string | 否 | 备注 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
@@ -288,10 +300,10 @@
 | :--- | :--- | :--- | :--- |
 | `name` | string | **是** | 分组名称 |
 | `key` | string | 否 | 分组标识 |
-| `rules` | string | 否 | 权限规则ID列表，逗号分隔 |
+| `rules` | string | 否 | 接口权限点 hash 列表（逗号分隔）或 `all`（全部接口权限） |
 | `uids` | string | 否 | 用户ID列表，逗号分隔 |
 | `root` | int | 否 | 是否超级管理员组，0/1 |
-| `pages` | string | 否 | 关联页面ID列表 |
+| `pages` | string | 否 | 后台页面 hash 列表（逗号分隔）或 `all`；留空 = 未配置（按「拥有全部页面」处理） |
 | `remark` | string | 否 | 备注 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
@@ -324,10 +336,10 @@
 | `id` | int | **是** | 分组ID |
 | `name` | string | 否 | 分组名称 |
 | `key` | string | 否 | 分组标识 |
-| `rules` | string | 否 | 权限规则ID列表 |
+| `rules` | string | 否 | 接口权限点 hash 列表（逗号分隔）或 `all`（全部接口权限） |
 | `uids` | string | 否 | 用户ID列表 |
 | `root` | int | 否 | 是否超级管理员组 |
-| `pages` | string | 否 | 关联页面ID列表 |
+| `pages` | string | 否 | 后台页面 hash 列表（逗号分隔）或 `all`；留空 = 未配置（按「拥有全部页面」处理） |
 | `remark` | string | 否 | 备注 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
