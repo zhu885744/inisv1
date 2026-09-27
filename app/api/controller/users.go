@@ -587,22 +587,29 @@ func (this *Users) status(ctx *gin.Context) {
 		model.SendWelcome(userId, cast.ToString(user["account"]), cast.ToString(user["nickname"]), cast.ToString(user["email"]))
 	}
 
-	// 状态变更邮件通知（开关见「系统设置 → 邮件通知」的 user.passed / user.frozen / user.unfrozen）
-	// 只在状态真正变化时发，重复点击相同状态不会重复打扰用户
-	scene, title := "", ""
+	// 状态变更通知：只在状态真正变化时发，重复点击相同状态不会重复打扰用户
+	// 1) 邮件：开关见「系统设置 → 邮件通知」的 user.passed / user.frozen / user.unfrozen
+	// 2) 站内消息：强制发送（冻结/解冻必须让用户知道，否则会「突然登录不了又没有任何说明」）
+	scene, title, message := "", "", ""
 	switch {
 	case beforeStatus == model.UserStatusAudit && status == model.UserStatusNormal:
 		scene, title = "user.passed", "您的账号已通过审核"
+		message = "说明：注册审核已通过，账号可以正常登录"
 	case status == model.UserStatusFrozen && beforeStatus != model.UserStatusFrozen:
 		scene, title = "user.frozen", "您的账号已被冻结"
+		message = "说明：账号已被管理员冻结，暂时无法登录；如有疑问请联系管理员或提交申诉"
 	case status == model.UserStatusNormal && beforeStatus == model.UserStatusFrozen:
 		scene, title = "user.unfrozen", "您的账号已解除冻结"
+		message = "说明：账号冻结已解除，可以正常登录"
 	}
 	if !utils.Is.Empty(scene) {
 		// 账号 / 昵称由 MailNotifyUser 自动带上，这里只补业务信息
 		go model.MailNotifyUser(userId, scene, title,
+			message,
 			"时间："+model.MailNotifyTime(),
 		)
+		go model.SendAccountNotify(userId, title,
+			message+"\n时间："+model.MailNotifyTime())
 	}
 
 	this.json(ctx, gin.H{"id": userId, "status": status}, facade.Lang(ctx, "状态更新成功！"), 200)
@@ -1313,12 +1320,13 @@ func (this *Users) ban(ctx *gin.Context) {
 	}
 	targetMap := cast.ToStringMap(targetUser)
 
-	// 检查是否已在封禁中
+	// 检查是否已在封禁中（申诉中 / 申诉驳回同样算封禁中，需先解封）
 	if cast.ToInt(targetMap["current_ban_id"]) > 0 {
 		existRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(cast.ToInt(targetMap["current_ban_id"]))
 		if !utils.Is.Empty(existRecord) {
-			if cast.ToInt(cast.ToStringMap(existRecord)["status"]) == model.BanStatusActive {
-				this.json(ctx, nil, facade.Lang(ctx, "该用户已在封禁中，请先解封后再操作！"), 400)
+			existMap := cast.ToStringMap(existRecord)
+			if model.BanStatusRestricted(cast.ToInt(existMap["status"])) {
+				this.json(ctx, nil, facade.Lang(ctx, "该用户已在封禁中（%s），请先解封后再操作！", model.BanStatusText(cast.ToInt(existMap["status"]))), 400)
 				return
 			}
 		}
@@ -1473,17 +1481,12 @@ func (this *Users) ban(ctx *gin.Context) {
 	}, "管理员封禁用户")
 
 	// 封禁通知：把原因、限制范围与到期时间完整告知用户
-	// （开关见「系统设置 → 邮件通知」的 user.banned；账号 / 昵称由 MailNotifyUser 自动带上）
-	expireText := "永久"
-	if expiresAt > 0 {
-		expireText = time.Unix(expiresAt, 0).Format("2006-01-02 15:04:05")
-	}
-	go model.MailNotifyUser(uid, "user.banned", "您的账号已被封禁",
-		"原因："+reason,
-		"限制权限："+model.BanTypeText(banType),
-		"到期时间："+expireText,
-		"冻结时间："+model.MailNotifyTime(),
-	)
+	// 1) 邮件：开关见「系统设置 → 邮件通知」的 user.banned（账号 / 昵称由 MailNotifyUser 自动带上）
+	// 2) 站内消息：强制发送，不看任何开关（用户登录后在「消息」中心能看到）
+	banLines := model.BanInfoLines(banType, reason, expiresAt, now)
+	go model.MailNotifyUser(uid, "user.banned", "您的账号已被封禁", banLines...)
+	go model.SendAccountNotify(uid, "您的账号已被封禁",
+		strings.Join(banLines, "\n")+"\n\n如认为封禁有误，可在你的个人主页提交申诉。")
 
 	this.json(ctx, gin.H{"id": record.Id}, facade.Lang(ctx, "封禁成功！"), 200)
 }
@@ -1544,8 +1547,10 @@ func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
 	}
 	recordMap := cast.ToStringMap(record)
 
-	if cast.ToInt(recordMap["status"]) != model.BanStatusActive {
-		this.json(ctx, nil, facade.Lang(ctx, "该封禁记录非生效中状态！"), 400)
+	// 申诉中(3) / 申诉驳回(5) 也可以手动解封（管理员可在申诉处理期间直接放人）；
+	// 已解封(1) / 已撤销(2) / 申诉通过(4) 属于已结束，不能重复解封
+	if !model.BanStatusRestricted(cast.ToInt(recordMap["status"])) {
+		this.json(ctx, nil, facade.Lang(ctx, "该封禁记录已结束（%s），无需解封！", model.BanStatusText(cast.ToInt(recordMap["status"]))), 400)
 		return
 	}
 
@@ -1588,11 +1593,13 @@ func (this *Users) unbanByRecordId(ctx *gin.Context, recordId int) {
 		"operator_ua": ctx.Request.UserAgent(),
 	}, "管理员解封用户")
 
-	// 解封通知（开关见「系统设置 → 邮件通知」的 user.unbanned；账号 / 昵称自动带上）
+	// 解封通知：邮件（开关见「系统设置 → 邮件通知」的 user.unbanned）+ 站内消息（强制）
 	go model.MailNotifyUser(uid, "user.unbanned", "您的账号已解除封禁",
 		"说明：封禁已由管理员解除，账号可正常登录",
 		"时间："+model.MailNotifyTime(),
 	)
+	go model.SendAccountNotify(uid, "您的账号已解除封禁",
+		"说明：封禁已由管理员解除，账号可正常登录\n时间："+model.MailNotifyTime())
 
 	this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "解封成功！"), 200)
 }
@@ -1639,6 +1646,14 @@ func (this *Users) clearBan(ctx *gin.Context) {
 	// 待清除的记录条数（含回收站里的，与下面的物理删除范围一致）
 	total, _ := facade.DB.Model(&model.UserBanRecords{}).Force().Where("uid", uid).Count()
 
+	// 清空前是否仍处于封禁状态（含申诉中 / 申诉驳回）：决定清空后要不要发解封站内消息
+	wasBanned := false
+	if currentBanId := cast.ToInt(targetMap["current_ban_id"]); currentBanId > 0 {
+		if existRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(currentBanId); !utils.Is.Empty(existRecord) {
+			wasBanned = model.BanStatusRestricted(cast.ToInt(cast.ToStringMap(existRecord)["status"]))
+		}
+	}
+
 	// 用户侧封禁字段归零
 	userUpdate := map[string]any{
 		"ban_count":      0,
@@ -1669,11 +1684,18 @@ func (this *Users) clearBan(ctx *gin.Context) {
 	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
 	go this.delCache()
 
+	// 原本是「生效中的封禁」被清掉 → 账号实际已恢复，发一条强制解封消息
+	if wasBanned {
+		go model.SendAccountNotify(uid, "您的账号已解除封禁",
+			"说明：管理员已清空该账号的封禁记录，账号可正常使用\n时间："+model.MailNotifyTime())
+	}
+
 	// 审计日志
 	operator := this.user(ctx)
 	facade.Log.Info(map[string]any{
 		"uid":         uid,
 		"records":     total,
+		"was_banned":  wasBanned,
 		"unfreeze":    cast.ToBool(params["unfreeze"]),
 		"operator_id": operator.Id,
 		"operator_ip": ctx.ClientIP(),
@@ -1926,6 +1948,14 @@ func (this *Users) appealHandle(ctx *gin.Context) {
 			"reply":       reply,
 		}, "管理员通过申诉")
 
+		// 申诉通过 = 解封：站内消息（强制），把管理员回复一并告知
+		appealMessage := "说明：你的申诉已通过，账号已解除封禁"
+		if !utils.Is.Empty(reply) {
+			appealMessage += "\n管理员回复：" + reply
+		}
+		go model.SendAccountNotify(uid, "申诉已通过，账号已解封",
+			appealMessage+"\n时间："+model.MailNotifyTime())
+
 		this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已通过，用户已解封！"), 200)
 
 	} else {
@@ -1948,6 +1978,12 @@ func (this *Users) appealHandle(ctx *gin.Context) {
 			"action":      "reject",
 			"reply":       reply,
 		}, "管理员驳回申诉")
+
+		// 申诉驳回：站内消息（强制），带驳回理由；封禁继续生效
+		go model.SendAccountNotify(uid, "申诉未通过",
+			"说明：你的申诉未通过，封禁继续生效"+
+				utils.Ternary(utils.Is.Empty(reply), "", "\n驳回理由："+reply)+
+				"\n时间："+model.MailNotifyTime())
 
 		this.json(ctx, gin.H{"id": recordId}, facade.Lang(ctx, "申诉已驳回！"), 200)
 	}

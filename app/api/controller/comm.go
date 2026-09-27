@@ -211,14 +211,26 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	// 检查账号是否处于封禁状态（限制登录）
+	// 申诉中 / 申诉驳回期间封禁继续生效 —— 申诉不等于解封，只有真正解封才放行
 	if table.Restrictions&model.BanTypeLogin != 0 && table.CurrentBanId > 0 {
 		banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(table.CurrentBanId)
 		if !utils.Is.Empty(banRecord) {
 			banMap := cast.ToStringMap(banRecord)
-			if cast.ToInt(banMap["status"]) == model.BanStatusActive {
+			status := cast.ToInt(banMap["status"])
+			if model.BanStatusRestricted(status) {
 				reason := cast.ToString(banMap["reason"])
 				duration := cast.ToInt(banMap["duration"])
 				expiresAt := cast.ToInt64(banMap["expires_at"])
+
+				// 申诉相关状态单独说明，避免用户误以为申诉后就能登录了
+				if status == model.BanStatusAppealed {
+					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉审核中）！原因：%s", reason), 403)
+					return
+				}
+				if status == model.BanStatusAppealRejected {
+					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉未通过）！原因：%s", reason), 403)
+					return
+				}
 
 				msg := fmt.Sprintf("您的账号已被封禁！原因：%s", reason)
 				if duration > 0 {

@@ -157,6 +157,34 @@ func (this *Notification) CreateBroadcastNotification(fromUid int, typ, title, c
 	return notif, nil
 }
 
+// SendAccountNotify 账号状态变更的站内通知（系统消息）
+//
+// 覆盖：封禁 / 解封（含到期自动解封）/ 冻结 / 解冻 / 申诉结果 / 清空封禁记录。
+//
+// 与邮件通知（MailNotifyUser，受「系统设置 → 邮件通知」里的场景开关控制）不同：
+// 这条通道**强制发送**，不给任何开关 —— 账号状态变了必须让用户知道，
+// 否则会出现「突然登录不了、也收不到任何说明」。
+//
+// 落库即完成投递（前台「消息」中心通过 notification/* 接口拉取，展示为 type=system）；
+// bind_type 统一为 "ban"，便于以后做「点击通知 → 看封禁详情」的跳转。
+// 任何异常只记日志，绝不打断封禁 / 解封本身的主流程。
+func SendAccountNotify(uid int, title, content string) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "uid": uid}, "发送账号状态站内通知时发生panic")
+		}
+	}()
+
+	if uid <= 0 || utils.Is.Empty(title) {
+		return
+	}
+
+	if _, err := (&Notification{}).CreateNotification(uid, 0, NotificationTypeSystem, title, content, "ban", 0); err != nil {
+		facade.Log.Warn(map[string]any{"uid": uid, "error": err.Error()}, "账号状态站内通知发送失败")
+	}
+}
+
 // CreateLoginNotification 创建“账号登录通知”（系统消息）
 // 在用户登录成功后调用，记录账号、昵称、时间、IP、设备等信息，提醒用户确认是否为本人操作。
 func (this *Notification) CreateLoginNotification(uid int, account, nickname, ip, ua string) (*Notification, error) {

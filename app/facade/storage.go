@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -84,10 +85,10 @@ func initStorageToml() {
 			"${cos.secret_key}":              "",
 			"${cos.bucket}":                  "inis-cos",
 			"${cos.region}":                  "ap-guangzhou",
-			"${cos.domain}":    "",
-			"${cos.path}":      "inis",
-			"${cos.dir_rule}":  DefaultStorageDirRule,
-			"${cos.file_rule}": DefaultStorageFileRule,
+			"${cos.domain}":                  "",
+			"${cos.path}":                    "inis",
+			"${cos.dir_rule}":                DefaultStorageDirRule,
+			"${cos.file_rule}":               DefaultStorageFileRule,
 			"${attachment.allow_extensions}": "jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md",
 			"${attachment.max_file_size}":    51200,
 			"${attachment.concurrent_limit}": 5,
@@ -568,6 +569,19 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 
 	result = &StorageResponse{}
 
+	// 兜底：SDK 里的用法失误（例如 options 内嵌指针没初始化）会 panic，
+	// 不能让整个请求以 500 + 调用栈的形式抛给前端，这里转成普通错误返回
+	defer func() {
+		if err := recover(); err != nil {
+			result.Error = fmt.Errorf("腾讯云 COS 上传异常：%v", err)
+			Log.Error(map[string]any{
+				"error": err,
+				"key":   key,
+				"stack": string(debug.Stack()),
+			}, "COS 上传 panic 已被兜底（请检查 SDK 用法 / 配置）")
+		}
+	}()
+
 	object := this.Object()
 	if object == nil {
 		result.Error = errors.New("腾讯云 COS 未初始化，请检查 bucket / app_id / secret_id / secret_key / region")
@@ -583,7 +597,9 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 	// 上传时才确认存储桶存在（删除等操作不建桶）
 	this.ensureBucket()
 
-	body, size, cleanup, err := cosUploadBody(reader)
+	// 归一化成 *os.File：SDK 对长度可知的 reader 会用带 Content-Length 的常规 PUT，
+	// 其它包装类型（附件上传用的 io.TeeReader）会退化成 chunked，部分网络 / CDN 会失败
+	body, _, cleanup, err := cosUploadBody(reader)
 	defer cleanup()
 	if err != nil {
 		result.Error = err
@@ -591,12 +607,16 @@ func (this *COSStruct) Upload(key string, reader io.Reader) (result *StorageResp
 	}
 
 	// 单个对象设为公共读，配合桶的 public-read，避免私有桶导致图片 403
+	//
+	// 注意：ObjectPutOptions 内嵌的是**指针**（*ACLHeaderOptions / *ObjectPutHeaderOptions），
+	// 两组都要初始化 —— 只填一组时，给另一组的字段赋值会对 nil 解引用 panic
+	// （历史上 options.ContentLength = size 就这么炸过）。
 	options := &cos.ObjectPutOptions{
-		ACLHeaderOptions: &cos.ACLHeaderOptions{XCosACL: "public-read"},
+		ACLHeaderOptions:       &cos.ACLHeaderOptions{XCosACL: "public-read"},
+		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{},
 	}
-	if size > 0 {
-		options.ContentLength = size
-	}
+	// ContentLength 不用手工设置：SDK 的 Put 内部会 GetReaderLen，*os.File 属长度可知的
+	// reader，会自动补上 ContentLength（见 SDK object.go 的 Put 实现）
 
 	if _, err := object.Put(context.Background(), key, body, options); err != nil {
 		result.Error = err

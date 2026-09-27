@@ -74,6 +74,9 @@ func autoUnban() {
 			"说明：封禁期限已到，账号已自动恢复",
 			"时间："+model.MailNotifyTime(),
 		)
+		// 站内消息（强制发送，不看任何开关）
+		go model.SendAccountNotify(record.Uid, "您的账号已解除封禁",
+			"说明：封禁期限已到，账号已自动恢复\n时间："+model.MailNotifyTime())
 
 		// 审计日志
 		facade.Log.Info(map[string]any{

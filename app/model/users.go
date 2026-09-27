@@ -398,16 +398,22 @@ func (this *Users) banInfo(wg *sync.WaitGroup, result *any) {
 		"is_banned":    false,
 		"ban_count":    this.BanCount,
 		"restrictions": this.Restrictions,
+		"status":       0,     // 0 封禁中 / 3 申诉中 / 5 申诉驳回（未封禁时为 0）
+		"appealing":    false, // 是否申诉审核中，便于前端直接判断
 		"record":       nil,
 	}
 
-	// 检查是否有当前生效的封禁记录
+	// 检查是否仍有生效的封禁记录：申诉中 / 申诉驳回期间封禁继续生效，
+	// 只有真正解封（已解封 / 已撤销 / 申诉通过）才算恢复
 	if this.CurrentBanId > 0 {
 		record, _ := facade.DB.Model(&UserBanRecords{}).Find(this.CurrentBanId)
 		if !utils.Is.Empty(record) {
 			banRecord := cast.ToStringMap(record)
-			if cast.ToInt(banRecord["status"]) == BanStatusActive {
+			status := cast.ToInt(banRecord["status"])
+			if BanStatusRestricted(status) {
 				banInfo["is_banned"] = true
+				banInfo["status"] = status
+				banInfo["appealing"] = status == BanStatusAppealed
 				banInfo["record"] = record
 			}
 		}

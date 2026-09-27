@@ -2,6 +2,7 @@ package model
 
 import (
 	"inis/app/facade"
+	"time"
 
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -18,6 +19,40 @@ const (
 	BanStatusAppealApproved = 4 // 申诉通过
 	BanStatusAppealRejected = 5 // 申诉驳回
 )
+
+// BanStatusRestricted 该封禁记录是否让用户继续处于「被封禁」状态
+//
+// **申诉中(3) 与 申诉驳回(5) 都算**：提交申诉、申诉被驳回都不会解除封禁，
+// 只有 已解封(1)、已撤销(2)、申诉通过(4) 才是真正恢复。
+//
+// 判定口径统一走这里 —— 历史上前台/登录/中间件各处都只认「生效中(0)」，
+// 结果用户一提交申诉，封禁标识与登录限制就凭空消失了。
+func BanStatusRestricted(status int) bool {
+	switch status {
+	case BanStatusActive, BanStatusAppealed, BanStatusAppealRejected:
+		return true
+	}
+	return false
+}
+
+// BanStatusText 封禁记录状态文案（提示语 / 站内消息 / 后台展示共用）
+func BanStatusText(status int) string {
+	switch status {
+	case BanStatusActive:
+		return "封禁中"
+	case BanStatusExpired:
+		return "已解封"
+	case BanStatusRevoked:
+		return "已撤销"
+	case BanStatusAppealed:
+		return "申诉中"
+	case BanStatusAppealApproved:
+		return "申诉通过"
+	case BanStatusAppealRejected:
+		return "申诉驳回"
+	}
+	return "未知"
+}
 
 // 封禁类型位掩码常量
 const (
@@ -66,6 +101,27 @@ func BanTypeText(banType int) string {
 	}
 
 	return text
+}
+
+// BanInfoLines 封禁信息文案（邮件通知与站内消息共用，避免两处口径不一致）
+//
+//	原因：违反社区规定
+//	限制权限：全面封禁
+//	到期时间：2026-09-26 17:20:17（永久封禁时为「永久」）
+//	冻结时间：2026-09-25 17:20:17
+func BanInfoLines(banType int, reason string, expiresAt int64, banAt int64) []string {
+
+	expireText := "永久"
+	if expiresAt > 0 {
+		expireText = time.Unix(expiresAt, 0).Format("2006-01-02 15:04:05")
+	}
+
+	return []string{
+		"原因：" + reason,
+		"限制权限：" + BanTypeText(banType),
+		"到期时间：" + expireText,
+		"冻结时间：" + time.Unix(banAt, 0).Format("2006-01-02 15:04:05"),
+	}
 }
 
 // UserBanRecords 用户封禁记录表

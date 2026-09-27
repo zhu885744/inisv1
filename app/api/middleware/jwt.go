@@ -135,10 +135,21 @@ func validateUserStatus(user map[string]any) error {
 			banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(currentBanId)
 			if !utils.Is.Empty(banRecord) {
 				banMap := cast.ToStringMap(banRecord)
-				if cast.ToInt(banMap["status"]) == model.BanStatusActive {
+				// 申诉中 / 申诉驳回期间封禁继续生效（只有真正解封才放行）
+				if model.BanStatusRestricted(cast.ToInt(banMap["status"])) {
+					status := cast.ToInt(banMap["status"])
 					reason := cast.ToString(banMap["reason"])
 					duration := cast.ToInt(banMap["duration"])
 					expiresAt := cast.ToInt64(banMap["expires_at"])
+
+					// 申诉相关状态单独说明，避免用户以为申诉后就自动解封了
+					if status == model.BanStatusAppealed {
+						return fmt.Errorf("您的账号仍处于封禁状态（申诉审核中）！原因：%s", reason)
+					}
+					if status == model.BanStatusAppealRejected {
+						return fmt.Errorf("您的账号仍处于封禁状态（申诉未通过）！原因：%s", reason)
+					}
+
 					if duration > 0 {
 						remainingDays := (expiresAt - time.Now().Unix()) / 86400
 						if remainingDays > 0 {
