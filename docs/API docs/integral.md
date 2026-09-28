@@ -12,16 +12,26 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 
 | 任务类型 | 名称 | 单次积分 | 每日限制次数 | 图标 | 说明 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `check-in` | 每日签到 | 5 | 1 | `bi-calendar-check` | 每日签到 |
 | `login` | 每日登录 | 2 | 1 | `bi-box-arrow-in-right` | 每日首次登录 |
 | `article-create` | 发布文章 | 10 | 5 | `bi-file-earmark-text` | 发布文章（自动触发） |
 | `comment` | 发表评论 | 2 | 10 | `bi-chat-dots` | 发表评论（自动触发） |
 | `moments` | 发布动态 | 20 | 1 | `bi-lightning` | 发布动态（自动触发） |
 | `share` | 分享内容 | 2 | 3 | `bi-share` | 分享文章/页面/动态（自动触发） |
 
+> **每日签到不在这里配置**：签到已独立成模块，它的积分来自签到配置
+> （`SYSTEM_CHECKIN_RULES` 基础奖励里的积分，见 [checkin.md](checkin.md)）。
+> 任务列表里的签到项由后端 `model.IntegralTaskConfig()` 按签到配置动态注入，
+> 并带 `source: "checkin"` 标记，**不写入** `SYSTEM_INTEGRAL_RULES`；
+> 历史配置里残留的 `check-in` 会在启动迁移时自动清理（读取时也会被忽略）。
+
 **配置方式**：管理员可通过配置 API 修改 `SYSTEM_INTEGRAL_RULES` 的 JSON 值来调整规则，修改后立即生效。
 
 > 规则字段说明：`name` 名称、`value` 单次积分、`daily_limit` 每日上限（**`0` 表示不限制**，不再拦截）、`icon` 前端图标类名（可选，缺省返回 `bi-coin`）。
+
+> **签到任务的特殊处理**：签到积分由签到模块的配置决定（`SYSTEM_CHECKIN_RULES` 的 `base` 奖励，
+> 见 [checkin.md](checkin.md)）。规则列表与「今日任务进度」里 `check-in` 的 `value`
+> 自动跟随签到配置中基础奖励的积分合计；是否完成以签到记录（`inis_checkin`）为准，
+> 而不是积分流水条数。签到关闭（`enabled = 0`）时该条任务不会出现。
 
 ### 流水类型（type）
 
@@ -256,6 +266,9 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 | value | int | 单次获得的积分 |
 | daily_limit | int | 每日限制次数（0 表示不限制） |
 | icon | string | 前端图标类名（如 `bi-calendar-check`） |
+| source | string | 仅签到项返回 `checkin`：表示该条来自签到配置，管理端不应对它编辑/保存 |
+
+> 顺序固定（签到置顶，其余按类型升序），管理端渲染规则表时请跳过 `source = checkin` 的那条。
 
 **响应示例**：
 
@@ -264,7 +277,7 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
   "code": 200,
   "msg": "查询成功！",
   "data": [
-    { "type": "check-in", "name": "每日签到", "value": 5, "daily_limit": 1, "icon": "bi-calendar-check" },
+    { "type": "check-in", "name": "每日签到", "value": 5, "daily_limit": 1, "icon": "bi-calendar-check", "source": "checkin" },
     { "type": "login", "name": "每日登录", "value": 2, "daily_limit": 1, "icon": "bi-box-arrow-in-right" }
   ]
 }
@@ -386,6 +399,8 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 
 **说明**：登录用户凭卡密兑换积分，兑换成功后积分立即到账并写入 `card` 类型流水。同一张卡密在并发场景下仅能被兑换一次（数据库条件更新 + 影响行数校验）。
 
+> 卡密分两种可兑换状态：`0 未使用`（任何人凭卡密都能兑换）与 `2 已发放`（活动奖励，**只有绑定用户**能兑换，其它人兑换会得到「卡密已被使用！」）。
+
 **请求参数**：
 
 | 参数名 | 类型 | 必填 | 说明 |
@@ -494,7 +509,8 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | total | int | 卡密总数 |
-| unused | int | 未使用且未过期数量 |
+| unused | int | 未使用且未过期数量（**可用库存**） |
+| granted | int | 已发放给用户、待其兑换的数量 |
 | used | int | 已使用数量 |
 | expired | int | 已过期未使用数量 |
 | value_total | int | 累计发放积分面额 |
@@ -513,10 +529,14 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 |--------|------|------|------|
 | ids | array/string | 是 | 卡密ID列表，支持数组或在字符串中用任意分隔符（后端正则提取数字） |
 
+> **已发放（`status = 2`）的卡密不能删除**：这类卡密是活动（如签到）奖励，
+> 已绑定到某个用户，删掉用户就找不回自己的奖励。提交时会自动跳过，
+> 响应里用 `skipped` 告知跳过数量；全部都是已发放时返回 202「已发放给用户的卡密不能删除！」。
+
 **响应示例**：
 
 ```json
-{ "code": 200, "msg": "删除成功！", "data": { "ids": [1, 2, 3] } }
+{ "code": 200, "msg": "删除成功！1 张已发放给用户的卡密已跳过。", "data": { "ids": [1, 2], "skipped": 1 } }
 ```
 
 ### 12. 导出未使用卡密 [业务接口-管理员专用]
@@ -565,6 +585,57 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 | 400 | 导出失败（数据库异常等） |
 | 403 | 无权限（非管理员调用） |
 
+### 13. 我的待兑换卡密 [业务接口-需登录]
+
+**请求方式**：GET
+**请求路径**：`/api/integral/card-mine`
+
+**说明**：返回发放给自己、尚未兑换的卡密（`status = 2 已发放`）。
+签到等活动把卡密直接发到用户账号里，用户可能没留意消息中心，
+这里让他在「我的积分 → 卡密兑换」随时找回，并支持一键兑换（逐张调 `card-redeem` 即可）。
+
+**请求参数**：
+
+| 参数名 | 类型 | 必填 | 默认 | 说明 |
+|--------|------|------|------|------|
+| limit | int | 否 | 10 | 条数（最大 100） |
+
+**响应字段**（数组项）：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| card_id | int | 卡密记录ID |
+| card | string | 卡密明文（属于自己，可直接兑换） |
+| value | int | 面额（兑换后得到的积分） |
+| batch | string | 批次号 |
+| expire_time | int64 | 过期时间戳（0 表示永久有效） |
+| expired | bool | 是否已过期 |
+| granted_at | int64 | 发放时间戳（来自卡密的 `json` 字段） |
+| source | string | 来源类型，如 `check-in`（签到） |
+| remark | string | 备注 |
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "msg": "查询成功！",
+  "data": [
+    {
+      "card_id": 12,
+      "card": "K7M9X2P7Q1Z8B4N6",
+      "value": 50,
+      "batch": "20260927153000AB12CD",
+      "expire_time": 0,
+      "expired": false,
+      "granted_at": 1790426827,
+      "source": "check-in",
+      "remark": ""
+    }
+  ]
+}
+```
+
 ---
 
 ## 卡密数据模型（inis_integral_card）
@@ -574,11 +645,12 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 | id | int | 主键，自增 |
 | card | varchar(64) | 卡密（**唯一索引**，字符集剔除 `0/1/I/O`） |
 | value | int | 积分面额 |
-| status | tinyint | 状态：0 未使用 / 1 已使用 |
+| status | tinyint | 状态：`0` 未使用（谁都能兑换）/ `1` 已使用（已兑换成积分）/ `2` 已发放（活动奖励发给某用户，只有本人能兑换） |
 | batch | varchar(32) | 批次号 |
 | expire_time | int64 | 过期时间戳（**0 表示永久有效**） |
-| uid | int | 使用该卡密的用户ID |
-| use_time | int64 | 使用时间戳 |
+| uid | int | 使用 / 被发放该卡密的用户ID |
+| use_time | int64 | 使用（兑换）时间戳 |
+| json | longtext | 已发放卡密会记录 `{ granted_at, source }`（发放时间与来源，如 `check-in`） |
 | remark | varchar(255) | 备注 |
 | create_time / update_time / delete_time | int64 | 公共字段（软删除） |
 
@@ -592,7 +664,7 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 
 | 行为 | 触发位置 | 积分类型 |
 |------|----------|----------|
-| 签到 | `exp.go` `checkIn` | `check-in` |
+| 签到 | `checkin.go` `sign`（签到模块的奖励引擎发放） | `check-in` |
 | 登录 | `comm.go` `loginExp` | `login` |
 | 发布文章 | `article.go` `create` | `article-create` |
 | 发表评论 | `comment.go` `create` | `comment` |
@@ -628,7 +700,7 @@ Integral 控制器负责用户积分管理。积分是独立于经验值（EXP�
 - 普通用户只能查询自己的积分余额、明细、任务进度
 - 排行榜与任务规则为公开接口
 - 只有管理员可以调整用户积分（`give`）、生成/查询/删除卡密（`card-generate`/`card-all`/`card-stats`/`card-remove`/`card-delete`）
-- 登录用户可凭卡密自助兑换积分（`card-redeem`）
+- 登录用户可凭卡密自助兑换积分（`card-redeem`），并查看自己的待兑换卡密（`card-mine`）
 
 ### 权限规则（auth-rules）
 

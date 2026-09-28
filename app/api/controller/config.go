@@ -154,8 +154,10 @@ func (this *Config) INDEX(ctx *gin.Context) {
 func (this *Config) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "config"})
 	facade.Cache.DelTags([]any{"[GET]", "[?]"})
-	// 清除经验值配置缓存
+	// 清除经验值 / 积分 / 签到配置缓存（三者的规则都以 config 表为存储）
 	facade.Cache.Del(model.ExpCacheKey)
+	facade.Cache.Del(model.IntegralCacheKey)
+	facade.Cache.Del(model.CheckinCacheKey)
 }
 
 func (this *Config) one(ctx *gin.Context) {

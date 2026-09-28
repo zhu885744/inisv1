@@ -436,19 +436,28 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common",
 				"path=active&type=common&name=活跃度排行",
 				"path=rules&type=common&name=经验任务规则",
-				"path=check-in-status&type=login&name=签到状态",
-				"path=check-in-rank&type=common&name=签到排行",
-				"path=check-in-calendar&type=login&name=签到日历",
 			},
 			"PUT": {"update", "restore"},
 			"POST": {
 				"save",
 				"create",
-				"path=check-in&type=login&name=每日签到",
 				"path=give&type=default&name=发放经验值",
 				"path=share&type=login&name=分享",
 			},
 			"DELETE": {"remove", "delete", "clear"},
+		},
+		// 签到（独立模块）：exp 里那几条 check-in 规则是老接口，保留只为兼容旧版前端
+		"checkin": {
+			"GET": {
+				"path=status&type=login&name=签到状态",
+				"path=calendar&type=login&name=签到日历",
+				"path=rank&type=common&name=签到排行",
+				"path=rules&type=common&name=签到规则",
+			},
+			"POST": {
+				"path=sign&type=login&name=每日签到",
+				"path=makeup&type=login&name=补签",
+			},
 		},
 		"integral": {
 			"GET": {
@@ -460,6 +469,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=card-all&type=default&name=卡密列表",
 				"path=card-stats&type=default&name=卡密统计",
 				"path=card-export&type=default&name=导出未使用卡密",
+				"path=card-mine&type=login&name=我的卡密",
 			},
 			"POST": {
 				"path=give&type=default&name=调整积分",
@@ -743,6 +753,7 @@ func createAuthRules() (result []AuthRules) {
 		"notification":  "【消息通知 API】",
 		"integral":      "【积分 API】",
 		"goods":         "【商品 API】",
+		"checkin":       "【签到 API】",
 	}
 
 	// 基础方法

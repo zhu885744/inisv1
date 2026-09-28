@@ -41,6 +41,7 @@ func (this *Integral) IGET(ctx *gin.Context) {
 		"card-all":    this.cardAll,
 		"card-stats":  this.cardStats,
 		"card-export": this.cardExport,
+		"card-mine":   this.cardMine,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -109,10 +110,16 @@ func (this *Integral) status(ctx *gin.Context) {
 }
 
 // rules - 获取任务规则列表（哪些行为能赚积分）
+//
+// 其中 source=checkin 的一条是「每日签到」虚拟任务：签到已独立成模块，
+// 它的名称 / 积分来自签到配置（SYSTEM_CHECKIN_RULES），不由积分规则维护，
+// 管理端渲染规则表时应跳过该条（保存时也别把它写进 SYSTEM_INTEGRAL_RULES）。
 func (this *Integral) rules(ctx *gin.Context) {
-	config := model.GetIntegralConfig()
+	config := model.IntegralTaskConfig()
 	result := make([]facade.H, 0, len(config))
-	for key, rule := range config {
+
+	for _, key := range model.IntegralRuleKeys(config) {
+		rule := config[key]
 		icon := cast.ToString(rule["icon"])
 		if utils.Is.Empty(icon) {
 			icon = "bi-coin"
@@ -123,8 +130,10 @@ func (this *Integral) rules(ctx *gin.Context) {
 			"value":       cast.ToInt(rule["value"]),
 			"daily_limit": cast.ToInt(rule["daily_limit"]),
 			"icon":        icon,
+			"source":      rule["source"],
 		})
 	}
+
 	this.json(ctx, result, facade.Lang(ctx, "查询成功！"), 200)
 }
 
@@ -658,8 +667,22 @@ func (this *Integral) cardAll(ctx *gin.Context) {
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
+// cardMine - 我的待兑换卡密（登录用户）
+//
+// 场景：签到等活动奖励把卡密直接发到用户账号里（状态=2 已发放），
+// 用户可能没留意消息中心，这里让他在「我的积分 → 卡密兑换」随时找回、一键兑换。
+func (this *Integral) cardMine(ctx *gin.Context) {
+	user := this.user(ctx)
+	if user.Id == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	this.json(ctx, model.MyIntegralCards(user.Id, this.meta.limit(ctx)), facade.Lang(ctx, "查询成功！"), 200)
+}
+
 // cardStats - 卡密统计（管理员）
-// 返回：总数 / 未使用 / 已使用 / 已过期 / 累计发放积分 / 已兑换积分
+// 返回：总数 / 未使用 / 已发放（待兑换）/ 已使用 / 已过期 / 累计发放积分 / 已兑换积分
 func (this *Integral) cardStats(ctx *gin.Context) {
 	if !this.meta.permit(ctx) {
 		this.json(ctx, nil, facade.Lang(ctx, "无权限：当前账号未被授予该权限点！"), 403)
@@ -673,6 +696,7 @@ func (this *Integral) cardStats(ctx *gin.Context) {
 		"SELECT COUNT(id) AS total, "+
 			"COALESCE(SUM(CASE WHEN status = 0 AND (expire_time = 0 OR expire_time >= ?) THEN 1 ELSE 0 END), 0) AS unused, "+
 			"COALESCE(SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END), 0) AS used, "+
+			"COALESCE(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END), 0) AS granted, "+
 			"COALESCE(SUM(CASE WHEN status = 0 AND expire_time > 0 AND expire_time < ? THEN 1 ELSE 0 END), 0) AS expired, "+
 			"COALESCE(SUM(value), 0) AS value_total, "+
 			"COALESCE(SUM(CASE WHEN status = 1 THEN value ELSE 0 END), 0) AS value_used "+
@@ -693,6 +717,7 @@ func (this *Integral) cardStats(ctx *gin.Context) {
 		"total":       cast.ToInt(row["total"]),
 		"unused":      cast.ToInt(row["unused"]),
 		"used":        cast.ToInt(row["used"]),
+		"granted":     cast.ToInt(row["granted"]),
 		"expired":     cast.ToInt(row["expired"]),
 		"value_total": cast.ToInt(row["value_total"]),
 		"value_used":  cast.ToInt(row["value_used"]),
@@ -779,20 +804,28 @@ func (this *Integral) cardRemove(ctx *gin.Context) {
 	}
 
 	query := facade.DB.Model(&model.IntegralCard{})
-	columnData, _ := query.WhereIn("id", ids).Column("id")
-	ids = utils.Unity.Ids(columnData)
+	// 已发放给用户的卡密（活动奖励）不允许删除：删了用户就找不回自己的奖励
+	columnData, _ := query.WhereIn("id", ids).Not("status", "=", model.IntegralCardStatusGranted).Column("id")
+	deletable := utils.Unity.Ids(columnData)
 
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+	if utils.Is.Empty(deletable) {
+		this.json(ctx, nil, facade.Lang(ctx, "已发放给用户的卡密不能删除！"), 202)
 		return
 	}
 
-	if _, err := query.Delete(ids); err != nil {
+	if _, err := facade.DB.Model(&model.IntegralCard{}).Delete(deletable); err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
+	// 有跳过的（已发放）时在提示里说明，避免管理员以为「全删了」
+	skipped := len(ids) - len(deletable)
+	msg := "删除成功！"
+	if skipped > 0 {
+		msg = fmt.Sprintf("删除成功！%d 张已发放给用户的卡密已跳过。", skipped)
+	}
+
+	this.json(ctx, gin.H{"ids": deletable, "skipped": skipped}, facade.Lang(ctx, msg), 200)
 }
 
 // cardDelete - 彻底删除卡密（管理员）
@@ -809,19 +842,26 @@ func (this *Integral) cardDelete(ctx *gin.Context) {
 		return
 	}
 
+	// 已发放给用户的卡密（活动奖励）不允许删除（含彻底删除）
 	query := facade.DB.Model(&model.IntegralCard{}).WithTrashed()
-	columnData, _ := query.WhereIn("id", ids).Column("id")
-	ids = utils.Unity.Ids(columnData)
+	columnData, _ := query.WhereIn("id", ids).Not("status", "=", model.IntegralCardStatusGranted).Column("id")
+	deletable := utils.Unity.Ids(columnData)
 
-	if utils.Is.Empty(ids) {
-		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+	if utils.Is.Empty(deletable) {
+		this.json(ctx, nil, facade.Lang(ctx, "已发放给用户的卡密不能删除！"), 202)
 		return
 	}
 
-	if _, err := query.Force().Delete(ids); err != nil {
+	if _, err := facade.DB.Model(&model.IntegralCard{}).WithTrashed().Force().Delete(deletable); err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
+	skipped := len(ids) - len(deletable)
+	msg := "删除成功！"
+	if skipped > 0 {
+		msg = fmt.Sprintf("删除成功！%d 张已发放给用户的卡密已跳过。", skipped)
+	}
+
+	this.json(ctx, gin.H{"ids": deletable, "skipped": skipped}, facade.Lang(ctx, msg), 200)
 }

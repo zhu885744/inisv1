@@ -506,8 +506,6 @@
 | `name` | string | 操作名称（用于显示和描述） |
 | `value` | int | 单次操作获得的经验值 |
 | `daily_limit` | int | 每日限制次数（0表示不限制） |
-| `streak_bonus` | object | 连续签到加成（仅 `check-in` 生效）：`enabled` 是否启用、`per_day` 每连续一天额外奖励、`max` 加成上限 |
-| `milestones` | object | 里程碑奖励（仅 `check-in` 生效）：`{天数: 奖励经验}` 键值对 |
 
 **支持的经验值类型**:
 
@@ -519,8 +517,12 @@
 | `share` | 分享 | `1` | `10` | 分享文章/页面/动态 |
 | `login` | 登录 | `5` | `1` | 每日首次登录 |
 | `comment` | 评论 | `1` | `10` | 发表评论 |
-| `check-in` | 签到 | `10` | `1` | 每日签到 |
 | `moments` | 发布动态 | `50` | `1` | 发布动态（自动触发） |
+
+> **签到已迁移**：原先的 `check-in` 规则（含 `streak_bonus` / `milestones`）已迁到独立配置
+> `SYSTEM_CHECKIN_RULES`（见下一节）。读取本配置时会自动剔除残留的 `check-in` 键，
+> 因此 `GET /api/exp/rules` 不会再返回它；保存一次经验配置即会把它从库中清理掉。
+> 签到奖励的详细配置请参考 [Checkin API 文档](checkin.md)。
 
 **完整配置示例**:
 
@@ -532,24 +534,66 @@
   "share": {"name": "分享", "value": 1, "daily_limit": 10},
   "login": {"name": "登录", "value": 5, "daily_limit": 1},
   "comment": {"name": "评论", "value": 1, "daily_limit": 10},
-  "check-in": {
-    "name": "签到",
-    "value": 10,
-    "daily_limit": 1,
-    "streak_bonus": { "enabled": 1, "per_day": 2, "max": 50 },
-    "milestones": { "7": 50, "15": 100, "30": 200 }
-  },
   "moments": {"name": "发布动态", "value": 50, "daily_limit": 1}
 }
 ```
 
 **使用说明**:
 - 修改配置后立即生效，无需重启服务
-- 更新配置会自动清除经验值配置缓存
-- 可通过 EXP API 的业务接口（签到、点赞、分享、收藏等）验证配置效果
+- 更新配置会自动清除经验值 / 积分 / 签到配置缓存
+- 可通过 EXP API 的业务接口（点赞、分享、收藏等）验证配置效果
 - 详细使用方法请参考 [EXP API 文档](exp.md)
 
-### 12. SYSTEM_MAIL_NOTIFY - 统一邮件通知
+### 12. SYSTEM_CHECKIN_RULES - 签到配置
+
+| 属性 | 值 | 说明 |
+| :--- | :--- | :--- |
+| **键名** | `SYSTEM_CHECKIN_RULES` | - |
+| **默认值** | - | 使用 JSON 存储配置 |
+| **备注** | 每日签到配置 | 后台「签到管理」页维护 |
+| **可见性** | 管理员 | `SYSTEM_` 前缀 |
+
+签到模块（`/api/checkin/*`）的全部规则：开关、每日重置时间、站内信通知、文案池，
+以及**基础奖励 / 连签加成 / 周期奖励 / 里程碑 / 月度全勤 / 随机奖励 / 补签**。
+
+奖励项支持多资产（内置 `exp` 经验、`integral` 积分、`card` **卡密**，可扩展注册）、
+随机区间（`min`/`max`）与触发概率（`chance`）。
+
+> 卡密奖励：`{"asset":"card","value":50,"fallback":"integral"}` 表示发一张面额 50 的卡密
+> （从「积分 → 卡密」池子里取，绑定给用户后由用户自己兑换）；
+> 卡密池没有可用卡密时按 `fallback` 降级（默认改发等额积分），不会让签到失败。
+
+**顶层字段**:
+
+| 字段 | 类型 | 默认 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `enabled` | int | `1` | 总开关 |
+| `name` | string | `每日签到` | 名称 |
+| `reset_hour` | int | `0` | 每日重置时间点（0-23） |
+| `notice` | int | `0` | 签到成功后是否发站内信 |
+| `tips` | array | 5 条 | 随机文案池 |
+| `base` | array | 经验 10 + 积分 5 | 基础奖励（奖励项数组） |
+| `streak` | object | `{enabled:1, asset:"exp", per_day:2, max:50}` | 连续签到加成 |
+| `cycle` | object | 7 天 | 周期奖励 `{enabled, loop, days:[{label, rewards}]}` |
+| `milestones` | array | 7/15/30 天 | 里程碑 `[{day, label, rewards}]` |
+| `monthly` | array | 20/28 天 | 月累计（全勤） |
+| `random` | array | 10% 概率 20 积分 | 随机奖励（奖励项数组，支持 `chance`） |
+| `makeup` | object | `{enabled:1, days:7, limit:3, asset:"integral", cost:20}` | 补签 |
+
+**完整结构、奖励项写法、默认值、扩展新资产的方式**：见
+[Checkin API 文档 → 签到配置](checkin.md)。
+
+> 签到独立后，`SYSTEM_EXP_RULES` / `SYSTEM_INTEGRAL_RULES` 里**不再保留** `check-in`：
+> 读取时会自动忽略，启动迁移（`model.InitConfig`）还会把它从这两份历史 JSON 中删掉，
+> 因此后台「经验 / 积分 → 获取规则」页里也不会再出现签到项。
+> 用户端「今日任务 / 积分获取途径」里的签到项由签到配置动态生成。
+
+**使用说明**:
+- 保存后立即生效（缓存自动失效），已签到的用户当天不会重复发放；
+- 修改奖励只影响之后的签到，不会补发历史签到；
+- 前端用户页 `/checkin`、后台配置页 `/admin/checkin` 都读取本配置。
+
+### 13. SYSTEM_MAIL_NOTIFY - 统一邮件通知
 
 | 属性 | 值 | 说明 |
 | :--- | :--- | :--- |

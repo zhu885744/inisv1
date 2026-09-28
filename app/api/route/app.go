@@ -24,6 +24,7 @@ var defaultMiddleware = []gin.HandlerFunc{
 // 所有可用的控制器
 var controllers = map[string]controller.ApiInterface{
 	"exp":           &controller.EXP{},
+	"checkin":       &controller.Checkin{},
 	"comm":          &controller.Comm{},
 	"toml":          &controller.Toml{},
 	"tags":          &controller.Tags{},

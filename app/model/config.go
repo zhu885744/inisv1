@@ -78,27 +78,13 @@ func InitConfig() {
 			// comment.notify / comment.reply 场景），此处不再保留 email_notify
 		}), Remark: "评论配置"},
 		{Key: "SYSTEM_EXP_RULES", Json: utils.Json.Encode(facade.H{
-			"like":            facade.H{"name": "点赞", "value": 1, "daily_limit": 10},
-			"collect":         facade.H{"name": "收藏", "value": 1, "daily_limit": 10},
-			"visit":           facade.H{"name": "访问", "value": 1, "daily_limit": 10},
-			"share":           facade.H{"name": "分享", "value": 1, "daily_limit": 10},
-			"login":           facade.H{"name": "登录", "value": 5, "daily_limit": 1},
-			"comment":         facade.H{"name": "评论", "value": 1, "daily_limit": 10},
-			"check-in": facade.H{
-				"name":        "签到",
-				"value":       10,
-				"daily_limit": 1,
-				"streak_bonus": facade.H{
-					"enabled":  1,
-					"per_day":  2,
-					"max":      50,
-				},
-				"milestones": facade.H{
-					"7":  50,
-					"15": 100,
-					"30": 200,
-				},
-			},
+			"like":    facade.H{"name": "点赞", "value": 1, "daily_limit": 10},
+			"collect": facade.H{"name": "收藏", "value": 1, "daily_limit": 10},
+			"visit":   facade.H{"name": "访问", "value": 1, "daily_limit": 10},
+			"share":   facade.H{"name": "分享", "value": 1, "daily_limit": 10},
+			"login":   facade.H{"name": "登录", "value": 5, "daily_limit": 1},
+			"comment": facade.H{"name": "评论", "value": 1, "daily_limit": 10},
+			// 注：签到规则已独立成 SYSTEM_CHECKIN_RULES（model/checkin.go），不再挂在经验规则里
 			"moments":         facade.H{"name": "发布动态", "value": 50, "daily_limit": 1},
 			"article-create":  facade.H{"name": "发布文章", "value": 5, "daily_limit": 10},
 			"article-like":    facade.H{"name": "内容获赞", "value": 5, "daily_limit": 10},
@@ -107,12 +93,15 @@ func InitConfig() {
 			"comment-like":    facade.H{"name": "评论获赞", "value": 5, "daily_limit": 10},
 		}), Remark: "经验值规则配置"},
 		{Key: "SYSTEM_INTEGRAL_RULES", Json: utils.Json.Encode(facade.H{
-			"check-in":       facade.H{"name": "每日签到", "value": 5, "daily_limit": 1},
+			// 注：签到积分已独立到 SYSTEM_CHECKIN_RULES（基础奖励里的积分），
+			// 任务列表里的「每日签到」由 model.IntegralTaskConfig() 动态注入，不在这里配置
 			"login":          facade.H{"name": "每日登录", "value": 2, "daily_limit": 1},
 			"article-create": facade.H{"name": "发布文章", "value": 10, "daily_limit": 5},
 			"comment":        facade.H{"name": "发表评论", "value": 2, "daily_limit": 10},
 			"moments":        facade.H{"name": "发布动态", "value": 20, "daily_limit": 1},
 		}), Remark: "积分规则配置"},
+		// 签到配置（独立于经验 / 积分规则）：奖励项由奖励引擎统一发放，见 model/checkin.go
+		{Key: CheckinCacheKey, Json: utils.Json.Encode(defaultCheckinConfig()), Remark: "每日签到配置"},
 	}
 
 	for _, item := range configs {
@@ -121,6 +110,54 @@ func InitConfig() {
 			continue
 		}
 		_, _ = facade.DB.Model(&item).Create(&item)
+	}
+
+	// 兼容旧库：清理历史配置里残留的签到规则（签到已独立到 SYSTEM_CHECKIN_RULES）
+	cleanupLegacyCheckinRules()
+}
+
+// cleanupLegacyCheckinRules - 删除经验 / 积分规则里残留的 `check-in` 配置（幂等）
+//
+// 背景：签到原先挂在 SYSTEM_EXP_RULES 与 SYSTEM_INTEGRAL_RULES 里，独立成
+// SYSTEM_CHECKIN_RULES 之后，这两份历史 JSON 里的 check-in 已经不再生效。
+// 读取时虽然会忽略它，但后台规则页以「原始 JSON」为基底保存，会把它一直带下去，
+// 因此在启动迁移时顺手删掉，让配置表保持干净。
+func cleanupLegacyCheckinRules() {
+
+	for _, key := range []string{ExpCacheKey, IntegralCacheKey} {
+
+		item, _ := facade.DB.Model(&Config{}).Where("key", key).Find()
+		if utils.Is.Empty(item) {
+			continue
+		}
+
+		// json 可能是已解码的对象，也可能是原始字符串，两种都兼容
+		jsonData := asStringMap(item["json"])
+		if len(jsonData) == 0 {
+			if raw := cast.ToString(item["json"]); !utils.Is.Empty(raw) {
+				jsonData = asStringMap(utils.Json.Decode(raw))
+			}
+		}
+		if len(jsonData) == 0 {
+			continue
+		}
+
+		if _, exist := jsonData[IntegralTypeCheckIn]; !exist {
+			continue
+		}
+
+		delete(jsonData, IntegralTypeCheckIn)
+
+		if _, err := facade.DB.Model(&Config{}).Where("key", key).Update(map[string]any{
+			"json": utils.Json.Encode(jsonData),
+		}); err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error(), "key": key}, "清理签到规则失败")
+			continue
+		}
+
+		// 清缓存，避免旧的（含 check-in 的）配置被继续读到
+		facade.Cache.Del(key)
+		facade.Log.Info(map[string]any{"key": key}, "已清理规则配置里残留的 check-in（签到已独立到 SYSTEM_CHECKIN_RULES）")
 	}
 }
 

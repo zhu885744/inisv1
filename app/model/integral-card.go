@@ -20,6 +20,12 @@ const (
 	IntegralCardStatusUnused = 0
 	// IntegralCardStatusUsed 卡密已使用
 	IntegralCardStatusUsed = 1
+	// IntegralCardStatusGranted 卡密已发放（奖励发放出去、绑定到某个用户，等用户自己兑换）
+	//
+	// 与「已使用」的区别：已发放的卡密仍然有效，但**只有绑定用户**能兑换；
+	// 签到等活动奖励卡密时使用该状态（见 GrantIntegralCardTx），
+	// 这样卡密既不会重复发给多个人，用户也能保留「拿到一张券」的体验。
+	IntegralCardStatusGranted = 2
 	// IntegralCardMinLength 卡密最小长度（安全要求：不小于 8 位）
 	IntegralCardMinLength = 8
 	// IntegralCardMaxLength 卡密最大长度
@@ -86,12 +92,13 @@ func (this *IntegralCard) result() facade.H {
 	now := time.Now().Unix()
 	expired := this.ExpireTime > 0 && now > this.ExpireTime
 
-	// available：仅未使用且未过期才可兑换
-	available := this.Status == IntegralCardStatusUnused && !expired
+	// available：未使用（谁都能兑换）或已发放（绑定的用户能兑换），且未过期
+	available := (this.Status == IntegralCardStatusUnused || this.Status == IntegralCardStatusGranted) && !expired
 
 	return facade.H{
 		"expired":   expired,
 		"available": available,
+		"granted":   this.Status == IntegralCardStatusGranted,
 	}
 }
 
@@ -239,7 +246,10 @@ func RedeemIntegralCard(uid int, card string) (result facade.H, err error) {
 		}
 
 		// 2. 校验使用状态与有效期
-		if record.Status == IntegralCardStatusUsed {
+		// 已发放的卡密（活动奖励）只有绑定用户能兑换；不属于自己时按「已被使用」提示，
+		// 避免泄露卡密归属。
+		if record.Status == IntegralCardStatusUsed ||
+			(record.Status == IntegralCardStatusGranted && record.Uid != uid) {
 			return errors.New("卡密已被使用！")
 		}
 
@@ -248,9 +258,11 @@ func RedeemIntegralCard(uid int, card string) (result facade.H, err error) {
 			return errors.New("卡密已过期！")
 		}
 
-		// 3. 原子占用卡密：仅「未使用」状态可被占用
+		// 3. 原子占用卡密：未使用的任何人均可，已发放的仅绑定用户可
 		occupied := tx.Model(&IntegralCard{}).
-			Where("id = ? AND status = ?", record.Id, IntegralCardStatusUnused).
+			Where("id = ?", record.Id).
+			Where("status = ? OR (status = ? AND uid = ?)",
+				IntegralCardStatusUnused, IntegralCardStatusGranted, uid).
 			Updates(map[string]any{
 				"status":   IntegralCardStatusUsed,
 				"uid":      uid,
@@ -312,4 +324,148 @@ func RedeemIntegralCard(uid int, card string) (result facade.H, err error) {
 	}, "卡密兑换积分成功")
 
 	return result, nil
+}
+
+// ErrIntegralCardEmpty - 卡密池没有可用卡密（未使用且未过期）时的哨兵错误
+//
+// 奖励发放这类场景不能因为「没卡了」而整体失败，调用方（如卡密奖励资产）捕获它后
+// 走降级策略（改发等额积分 / 跳过），而不是把错误抛给用户。
+var ErrIntegralCardEmpty = errors.New("卡密池没有可用卡密！")
+
+// GrantIntegralCardTx - 从卡密池发一张卡密给用户（在事务内执行）
+//
+// 语义：把一张「未使用 + 未过期」的卡密置为「已发放」（status=2）并绑定 uid，
+// 用户之后到「积分 → 卡密兑换」把它兑换成积分（RedeemIntegralCard 允许本人已发放的卡密）。
+//
+// value > 0：只挑该面额的卡密；value <= 0：不限面额，取任意一张。
+// 池子为空时返回 ErrIntegralCardEmpty。
+//
+// 并发安全：先查候选，再用「状态条件更新 + 影响行数」原子占用；被并发抢走则重试。
+func GrantIntegralCardTx(tx *gorm.DB, uid int, value int, meta facade.H) (facade.H, error) {
+
+	if uid <= 0 {
+		return nil, errors.New("请先登录！")
+	}
+	if tx == nil {
+		tx = facade.DB.Drive()
+	}
+
+	now := time.Now().Unix()
+
+	for attempt := 0; attempt < 3; attempt++ {
+
+		var record IntegralCard
+
+		query := tx.Where("status = ?", IntegralCardStatusUnused).
+			Where("(expire_time = 0 OR expire_time >= ?)", now)
+		if value > 0 {
+			query = query.Where("value = ?", value)
+		}
+
+		if err := query.Order("id asc").First(&record).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrIntegralCardEmpty
+			}
+			return nil, err
+		}
+
+		occupied := tx.Model(&IntegralCard{}).
+			Where("id = ? AND status = ?", record.Id, IntegralCardStatusUnused).
+			Updates(map[string]any{
+				"status": IntegralCardStatusGranted,
+				"uid":    uid,
+				"json": utils.Json.Encode(map[string]any{
+					"granted_at": now,
+					"source":     cast.ToString(meta["type"]),
+				}),
+			})
+		if occupied.Error != nil {
+			return nil, occupied.Error
+		}
+		// 被并发抢走：换一张重试
+		if occupied.RowsAffected == 0 {
+			continue
+		}
+
+		return facade.H{
+			"card_id":     record.Id,
+			"card":        record.Card,
+			"value":       record.Value,
+			"batch":       record.Batch,
+			"expire_time": record.ExpireTime,
+			"granted_at":  now,
+		}, nil
+	}
+
+	return nil, ErrIntegralCardEmpty
+}
+
+// AvailableIntegralCardCount - 可用卡密数量（未使用且未过期）
+//
+// value > 0 时只统计该面额；用于后台提示「卡密池还剩多少张」。
+func AvailableIntegralCardCount(value int) int {
+
+	now := time.Now().Unix()
+	sql := "SELECT COUNT(*) FROM inis_integral_card " +
+		"WHERE status = ? AND (expire_time = 0 OR expire_time >= ?) " +
+		"AND (delete_time IS NULL OR delete_time = 0)"
+	args := []any{IntegralCardStatusUnused, now}
+
+	if value > 0 {
+		sql += " AND value = ?"
+		args = append(args, value)
+	}
+
+	var count int64
+	facade.DB.Drive().Raw(sql, args...).Scan(&count)
+
+	return int(count)
+}
+
+// MyIntegralCards - 我的待兑换卡密（发放给我、尚未兑换的卡密）
+//
+// 场景：签到等活动把卡密发到用户手里后，用户可能在消息中心漏看，
+// 这里让他能在「我的积分 → 卡密兑换」里随时找回。
+func MyIntegralCards(uid int, limit int) []facade.H {
+
+	result := make([]facade.H, 0)
+	if uid <= 0 {
+		return result
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	rows, _ := facade.DB.Model(&[]IntegralCard{}).Where([]any{
+		[]any{"uid", "=", uid},
+		[]any{"status", "=", IntegralCardStatusGranted},
+	}).Order("id desc").Limit(limit).Select()
+
+	now := time.Now().Unix()
+
+	for _, row := range rows {
+		expireTime := cast.ToInt64(row["expire_time"])
+
+		// json 里存了发放时间与来源；Select() 不触发 AfterFind，这里两种形态都兼容
+		meta := asStringMap(row["json"])
+		if len(meta) == 0 {
+			if raw := cast.ToString(row["json"]); !utils.Is.Empty(raw) {
+				meta = asStringMap(utils.Json.Decode(raw))
+			}
+		}
+
+		result = append(result, facade.H{
+			"card_id":     cast.ToInt(row["id"]),
+			"card":        cast.ToString(row["card"]),
+			"value":       cast.ToInt(row["value"]),
+			"batch":       cast.ToString(row["batch"]),
+			"expire_time": expireTime,
+			"expired":     expireTime > 0 && now > expireTime,
+			"granted_at":  cast.ToInt64(meta["granted_at"]),
+			"source":      cast.ToString(meta["source"]),
+			"remark":      cast.ToString(row["remark"]),
+		})
+	}
+
+	return result
 }

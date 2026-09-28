@@ -2,7 +2,7 @@
 
 ## 接口概述
 
-EXP 控制器负责用户经验值管理，支持经验值的增删改查、统计聚合，以及分享、签到等互动功能。点赞和收藏功能已独立到 `user-likes` 和 `user-collects` 模块。
+EXP 控制器负责用户经验值管理，支持经验值的增删改查、统计聚合，以及分享等互动功能。点赞和收藏功能已独立到 `user-likes` 和 `user-collects` 模块；**签到已独立到 `checkin` 模块**（见 [checkin.md](./checkin.md)），本控制器仅保留旧端点做兼容。
 
 **接口类型**：基础接口 + 业务接口
 
@@ -15,7 +15,6 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 | `visit` | 访问 | 1 | 10 | 访问文章/页面 |
 | `share` | 分享 | 1 | 10 | 分享文章/页面/动态 |
 | `login` | 登录 | 5 | 1 | 每日首次登录 |
-| `check-in` | 签到 | 10 | 1 | 每日签到 |
 | `moments` | 发布动态 | 50 | 1 | 发布动态（自动触发） |
 | `give` | 管理员发放 | 自定义 | 无限制 | 管理员手动给用户发放经验值 |
 | `article-create` | 发布文章 | 5 | 10 | 发布文章获得经验值（自动触发） |
@@ -190,203 +189,30 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 
 ### 业务接口
 
-#### 16. 签到 [业务接口]
+#### 16. 签到 [业务接口]（已迁移）
 
-**请求方式**：POST  
-**请求路径**：`/api/exp/check-in`
+> **签到已独立成模块**：请使用 `POST /api/checkin/sign`，详见 [checkin.md](./checkin.md)。
+>
+> 本端点（`POST /api/exp/check-in`）为兼容旧版前端 / 第三方调用保留，内部直接调用新的签到模块，
+> 因此行为与 `/api/checkin/sign` 完全一致（响应额外保留 `value` 字段 = 本次获得的经验合计）：
+>
+> - 奖励不再只有经验：配置项从经验规则里的 `check-in` 项改为独立的 `SYSTEM_CHECKIN_RULES`，
+>   支持基础奖励、周期奖励、连签加成、里程碑、月全勤、随机奖励等多种来源与多种资产；
+> - 连签天数、日历、排行榜都改为查签到表 `inis_checkin`（不再是 `inis_exp` 流水）。
 
-**说明**：用户每日签到获取经验值，每日仅可签到一次，重复签到返回 202 状态码。签到奖励由「基础经验 + 连续签到加成 + 里程碑奖励」构成，规则由 `SYSTEM_EXP_RULES` 配置项决定（默认基础 +10 EXP，每连续一天额外 +2，上限 +50，连续 7/15/30 天分别额外奖励 50/100/200 EXP）。
+#### 17. 签到状态 [业务接口]（已迁移）
 
-**响应字段**：
+> **已迁移**：`GET /api/checkin/status`（需登录），返回连签天数、周期进度、今日可得奖励、
+> 里程碑、月累计与补签信息，详见 [checkin.md](./checkin.md)。
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| value | int | 本次签到获得的总经验值（base + bonus + milestone） |
-| base | int | 基础经验值 |
-| bonus | int | 连续签到加成 |
-| milestone | int | 里程碑奖励（达到 7/15/30 天时额外奖励，否则为 0） |
-| streak | int | 签到后的连续签到天数 |
+#### 18. 签到排行榜 [业务接口]（已迁移）
 
-**响应示例**：
+> **已迁移**：`GET /api/checkin/rank`（公开接口），参数与响应结构见 [checkin.md](./checkin.md)。
 
-```json
-{
-  "code": 200,
-  "msg": "签到成功！",
-  "data": {
-    "value": 74,
-    "base": 10,
-    "bonus": 14,
-    "milestone": 50,
-    "streak": 7
-  }
-}
-```
+#### 19. 签到日历 [业务接口]（已迁移）
 
-**重复签到响应**：
-
-```json
-{
-  "code": 202,
-  "msg": "今天已经签到过了！",
-  "data": {
-    "value": 0
-  }
-}
-```
-
-#### 17. 签到状态 [业务接口]
-
-**请求方式**：GET  
-**请求路径**：`/api/exp/check-in-status`
-
-**说明**：查询当前用户今日签到状态及连续签到天数（需登录）
-
-**响应字段**：
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| checked | bool | 今天是否已签到 |
-| value | int | 今日签到获得的总经验值（未签到时为 0） |
-| base | int | 基础经验值（未签到时为签到后的预期值） |
-| bonus | int | 连续签到加成（未签到时为签到后的预期值） |
-| milestone | int | 里程碑奖励（未签到时为签到后的预期值） |
-| check_in_time | int64 | 签到时间戳（未签到时为 0） |
-| streak | int | 连续签到天数（已签到含今天，未签到截至昨天） |
-| today | int64 | 今天 0 点的时间戳 |
-| next_milestone | object | 下一个里程碑 `{day, reward}`，无则 null |
-
-**响应示例**：
-
-```json
-{
-  "code": 200,
-  "msg": "查询成功！",
-  "data": {
-    "checked": true,
-    "value": 74,
-    "base": 10,
-    "bonus": 14,
-    "milestone": 50,
-    "check_in_time": 1750982400,
-    "streak": 7,
-    "today": 1750953600,
-    "next_milestone": {
-      "day": 15,
-      "reward": 100
-    }
-  }
-}
-```
-
-#### 18. 签到排行榜 [业务接口]
-
-**请求方式**：GET  
-**请求路径**：`/api/exp/check-in-rank`
-
-**说明**：获取指定时间范围内签到次数最多的用户排行（公开接口，无需登录）
-
-**请求参数**：
-
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| start | int64 | 否 | 本月1号 00:00 | 查询起始时间戳 |
-| end | int64 | 否 | 本月末 23:59:59 | 查询结束时间戳 |
-| limit | int | 否 | 系统配置 | 返回数量限制 |
-
-**响应字段**（数组项）：
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| rank | int | 排名（从 1 开始） |
-| id | int | 用户 ID |
-| nickname | string | 用户昵称 |
-| avatar | string | 用户头像 |
-| check_in_count | int | 签到次数 |
-| total_exp | int | 签到获得的总经验值 |
-
-**响应示例**：
-
-```json
-{
-  "code": 200,
-  "msg": "数据请求成功！",
-  "data": [
-    {
-      "rank": 1,
-      "id": 1,
-      "nickname": "admin",
-      "avatar": "",
-      "check_in_count": 25,
-      "total_exp": 250
-    },
-    {
-      "rank": 2,
-      "id": 2,
-      "nickname": "test",
-      "avatar": "",
-      "check_in_count": 20,
-      "total_exp": 200
-    }
-  ]
-}
-```
-
-#### 19. 签到日历 [业务接口]
-
-**请求方式**：GET  
-**请求路径**：`/api/exp/check-in-calendar`
-
-**说明**：获取指定月份的签到日历（需登录），用于前端月历视图展示
-
-**请求参数**：
-
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| year | int | 否 | 当前年份 | 查询年份 |
-| month | int | 否 | 当前月份 | 查询月份（1-12） |
-
-**响应字段**：
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| year | int | 年份 |
-| month | int | 月份 |
-| days | array | 当月每天的签到状态数组 |
-| streak | int | 连续签到天数 |
-| total | int | 当月已签到天数 |
-| today | int | 今天日期（非当月时为 0） |
-
-`days` 数组项字段：
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| day | int | 日期（1-31） |
-| checked | bool | 当天是否已签到 |
-| value | int | 当天签到获得的经验值（未签到时为 0） |
-
-**响应示例**：
-
-```json
-{
-  "code": 200,
-  "msg": "查询成功！",
-  "data": {
-    "year": 2026,
-    "month": 9,
-    "days": [
-      { "day": 1, "checked": true, "value": 10 },
-      { "day": 2, "checked": true, "value": 12 },
-      { "day": 3, "checked": false, "value": 0 },
-      { "day": 4, "checked": true, "value": 16 }
-    ],
-    "streak": 2,
-    "total": 3,
-    "today": 4
-  }
-}
-```
-
+> **已迁移**：`GET /api/checkin/calendar`（需登录），`days` 项新增 `source`（1 正常 / 2 补签）、
+> `exp`、`integral` 字段，详见 [checkin.md](./checkin.md)。
 #### 20. 分享 [业务接口]
 
 **请求方式**：POST  
@@ -456,10 +282,13 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
-| type | string | 任务类型（check-in/login/article-create 等） |
+| type | string | 任务类型（login/article-create/comment 等） |
 | name | string | 任务名称 |
 | value | int | 单次获得的经验值 |
 | daily_limit | int | 每日限制次数（0 表示不限制） |
+
+> 签到已独立成模块，规则配置见 `SYSTEM_CHECKIN_RULES`（[checkin.md](./checkin.md)），
+> 本接口不再返回 `check-in` 项；历史配置里残留的 `check-in` 会被自动忽略。
 
 **响应示例**：
 
@@ -468,7 +297,6 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
   "code": 200,
   "msg": "查询成功！",
   "data": [
-    { "type": "check-in", "name": "签到", "value": 10, "daily_limit": 1 },
     { "type": "login", "name": "登录", "value": 5, "daily_limit": 1 },
     { "type": "article-create", "name": "发布文章", "value": 5, "daily_limit": 10 },
     { "type": "comment", "name": "评论", "value": 1, "daily_limit": 10 }
@@ -557,20 +385,16 @@ curl -X POST "/api/exp/give" \
 | `name` | string | 操作名称（用于显示） |
 | `value` | int | 单次操作获得的经验值 |
 | `daily_limit` | int | 每日限制次数 |
-| `streak_bonus` | object | 连续签到加成（仅 `check-in` 生效）：`enabled` 是否启用、`per_day` 每连续一天额外奖励、`max` 加成上限 |
-| `milestones` | object | 里程碑奖励（仅 `check-in` 生效）：`{天数: 奖励经验}` 键值对 |
+
+> 说明：签到相关的 `streak_bonus` / `milestones` 字段**已随签到模块一起迁出**，
+> 现在写在 `SYSTEM_CHECKIN_RULES` 里（结构见 [checkin.md](./checkin.md)）。
+> 历史配置中残留的 `check-in` 项在读取时会被自动剔除，不会再出现在 `GET /api/exp/rules` 的结果里。
 
 **配置示例**：
 ```json
 {
   "like": {"name": "点赞", "value": 1, "daily_limit": 10},
-  "check-in": {
-    "name": "签到",
-    "value": 10,
-    "daily_limit": 1,
-    "streak_bonus": { "enabled": 1, "per_day": 2, "max": 50 },
-    "milestones": { "7": 50, "15": 100, "30": 200 }
-  },
+  "login": {"name": "登录", "value": 5, "daily_limit": 1},
   "moments": {"name": "发布动态", "value": 50, "daily_limit": 1}
 }
 ```

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"inis/app/facade"
+	"sort"
 	"time"
 
 	"github.com/spf13/cast"
@@ -31,9 +32,12 @@ const (
 
 // defaultIntegralRules - 默认积分任务规则（作为配置缺失时的兜底）
 // value: 单次积分；daily_limit: 每日可完成次数（0 = 不限制）；icon: 前端展示图标
+//
+// 注意：这里**不含** `check-in`（每日签到）——签到已独立成模块，它的积分来自签到配置
+// （SYSTEM_CHECKIN_RULES 的基础奖励），任务列表里的签到项由 IntegralTaskConfig() 动态注入，
+// 所以积分规则里不需要、也不应该再配一份签到积分。
 func defaultIntegralRules() map[string]facade.H {
 	return map[string]facade.H{
-		IntegralTypeCheckIn:       {"name": "每日签到", "value": 5, "daily_limit": 1, "icon": "bi-calendar-check"},
 		IntegralTypeLogin:         {"name": "每日登录", "value": 2, "daily_limit": 1, "icon": "bi-box-arrow-in-right"},
 		IntegralTypeArticleCreate: {"name": "发布文章", "value": 10, "daily_limit": 5, "icon": "bi-file-earmark-text"},
 		IntegralTypeComment:       {"name": "发表评论", "value": 2, "daily_limit": 10, "icon": "bi-chat-dots"},
@@ -55,6 +59,8 @@ func GetIntegralConfig() map[string]facade.H {
 					data[k] = v
 				}
 			}
+			// 签到已独立成模块，剔除历史遗留的 check-in 规则
+			delete(data, IntegralTypeCheckIn)
 			return data
 		}
 	}
@@ -74,12 +80,68 @@ func GetIntegralConfig() map[string]facade.H {
 					config[k] = v
 				}
 			}
+			// 同上：剔除已迁移的签到规则（不写回数据库，保存一次积分配置即会被清理）
+			delete(config, IntegralTypeCheckIn)
 			facade.Cache.Set(IntegralCacheKey, config)
 			return config
 		}
 	}
 
 	return defaultConfig
+}
+
+// IntegralTaskConfig - 积分任务清单（积分规则 + 从签到模块注入的「每日签到」）
+//
+// 签到独立之后，积分规则里不再保留 check-in；但用户端「今日任务」「积分获取途径」仍然应该
+// 看到「每日签到」这一项，所以在这里按签到配置动态生成一条**虚拟任务**：
+//
+//	value       取签到基础奖励里的积分合计（改签到积分，这里跟着变）
+//	daily_limit 固定 1（一天一次）
+//	source      checkin（前端据此标记「来自签到配置」，管理端保存规则时会跳过它）
+//
+// 返回的是**副本**，调用方修改不会污染缓存。
+func IntegralTaskConfig() map[string]facade.H {
+	config := GetIntegralConfig()
+
+	result := make(map[string]facade.H, len(config)+1)
+	for key, rule := range config {
+		result[key] = rule
+	}
+
+	checkin := GetCheckinConfig()
+	if CheckinEnabled(checkin) {
+		result[IntegralTypeCheckIn] = facade.H{
+			"name":        CheckinName(checkin),
+			"value":       CheckinBaseIntegral(checkin),
+			"daily_limit": 1,
+			"icon":        "bi-calendar-check",
+			"source":      "checkin",
+		}
+	}
+
+	return result
+}
+
+// IntegralRuleKeys - 任务 / 规则的展示顺序（签到置顶，其余按类型升序）
+//
+// map 遍历本身是无序的，不排序的话前端每次刷新列表顺序都会变。
+func IntegralRuleKeys(config map[string]facade.H) []string {
+	keys := make([]string, 0, len(config))
+	for key := range config {
+		keys = append(keys, key)
+	}
+
+	sort.SliceStable(keys, func(i, j int) bool {
+		if keys[i] == IntegralTypeCheckIn {
+			return true
+		}
+		if keys[j] == IntegralTypeCheckIn {
+			return false
+		}
+		return keys[i] < keys[j]
+	})
+
+	return keys
 }
 
 // Integral - 积分流水表
@@ -190,7 +252,8 @@ func IntegralTodayCount(uid int, typ string) (count int, total int) {
 // IntegralTasks - 今日积分任务进度（登录用户）
 // 返回：任务列表（含今日完成次数、进度、可获积分）+ 今日合计 + 连签信息
 func IntegralTasks(uid int) facade.H {
-	config := GetIntegralConfig()
+	// 任务清单 = 积分规则 + 从签到模块注入的「每日签到」
+	config := IntegralTaskConfig()
 	today := integralTodayStart()
 
 	// 一次性查出今日各类型完成情况
@@ -213,11 +276,24 @@ func IntegralTasks(uid int) facade.H {
 	todayIncome := 0
 	doneCount := 0
 
-	for key, rule := range config {
+	// 每日签到：完成状态以签到记录为准（积分由签到奖励引擎按签到配置发放，流水条数可能为 0）
+	checkinDone := CheckinTodayChecked(uid)
+
+	for _, key := range IntegralRuleKeys(config) {
+		rule := config[key]
 		limit := cast.ToInt(rule["daily_limit"])
 		count := countMap[key]
 		income := valueMap[key]
 		done := limit > 0 && count >= limit
+		value := cast.ToInt(rule["value"])
+
+		if key == IntegralTypeCheckIn {
+			done = checkinDone
+			if checkinDone {
+				count = limit
+			}
+		}
+
 		if done {
 			doneCount++
 		}
@@ -237,33 +313,34 @@ func IntegralTasks(uid int) facade.H {
 		// 未完成的任务展示"还能拿多少分"
 		remain := 0
 		if limit == 0 {
-			remain = cast.ToInt(rule["value"])
+			remain = value
 		} else if count < limit {
-			remain = (limit - count) * cast.ToInt(rule["value"])
+			remain = (limit - count) * value
 		}
 
 		list = append(list, facade.H{
 			"type":         key,
 			"name":         rule["name"],
 			"icon":         rule["icon"],
-			"value":        cast.ToInt(rule["value"]),
+			"value":        value,
 			"daily_limit":  limit,
 			"today_count":  count,
 			"today_income": income,
 			"progress":     progress,
 			"done":         done,
 			"remain":       remain,
+			// source=checkin 表示这条任务来自签到配置（前端标记 / 管理端保存时跳过）
+			"source": rule["source"],
 		})
 	}
 
-	// 连签信息（与签到任务共用 exp 表，复用经验侧连续签到计算）
-	todayTime := time.Now()
-	if _, ok := countMap[IntegralTypeCheckIn]; ok {
-		// 今日已签到：连续天数含今天
-	} else {
-		todayTime = todayTime.AddDate(0, 0, -1)
+	// 连签信息（签到已独立成模块，见 model/checkin.go）
+	// 今日已签到：连续天数含今天；未签到：展示截至昨天的连续天数
+	checkinDay := CheckinDayTime(time.Now())
+	if !checkinDone {
+		checkinDay = checkinDay.AddDate(0, 0, -1)
 	}
-	streak := CheckInStreak(uid, time.Date(todayTime.Year(), todayTime.Month(), todayTime.Day(), 0, 0, 0, 0, todayTime.Location()))
+	streak := CheckinStreakOf(uid, checkinDay)
 
 	return facade.H{
 		"list":         list,

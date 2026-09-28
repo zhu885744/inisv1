@@ -51,6 +51,7 @@ func InitTable() {
 		{"Pages", InitPages},
 		{"Level", InitLevel},
 		{"EXP", InitEXP},
+		{"Checkin", InitCheckin},
 		{"QpsWarn", InitQpsWarn},
 		{"IpBlack", InitIpBlack},
 		{"IpWhite", InitIpWhite},
