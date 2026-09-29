@@ -400,6 +400,150 @@ func GrantIntegralCardTx(tx *gorm.DB, uid int, value int, meta facade.H) (facade
 	return nil, ErrIntegralCardEmpty
 }
 
+// BindIntegralCards - 手动设置卡密的兑换人（管理员功能）
+//
+// 支持三种操作，一次可传多张卡密 id：
+//   - uid > 0：把「未使用」的卡密置为「已发放」并绑定该用户；已是「已发放」的卡密会**改绑**到该用户
+//   - uid = 0：解除绑定 —— 「已发放」的卡密退回「未使用」（清空 uid / 使用时间）
+//
+// 「已使用」（status=1）的卡密一律跳过：它的积分流水已经落库（见 RedeemIntegralCard），
+// 改 uid 会让流水与卡密归属对不上账。
+//
+// 并发安全：逐张做「状态条件更新 + RowsAffected 判断」，被并发兑换走的那张会被跳过，
+// 不会出现「明明已经兑换了却又被改绑」的情况。
+//
+// 返回：实际生效的卡密明细（含明文，供后台回显 / 给用户发通知）、跳过数量。
+func BindIntegralCards(ids []int, uid int) (list []facade.H, skipped int, err error) {
+
+	// id 去重 + 过滤非法值
+	clean := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		id = cast.ToInt(id)
+		if id <= 0 {
+			continue
+		}
+		if _, exist := seen[id]; exist {
+			continue
+		}
+		seen[id] = struct{}{}
+		clean = append(clean, id)
+	}
+	if len(clean) == 0 {
+		return nil, 0, errors.New("请选择要操作的卡密！")
+	}
+
+	// 绑定前先确认目标用户存在（解绑不需要）
+	if uid > 0 {
+		var user Users
+		if err := facade.DB.Drive().Where("id = ?", uid).First(&user).Error; err != nil {
+			return nil, 0, errors.New("目标用户不存在！")
+		}
+	}
+
+	now := time.Now().Unix()
+	list = make([]facade.H, 0, len(clean))
+
+	err = facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+
+		var records []IntegralCard
+		if err := tx.Where("id IN ?", clean).Find(&records).Error; err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return errors.New("卡密不存在！")
+		}
+
+		for _, record := range records {
+
+			// 已使用：不可改绑（流水已落库）
+			if record.Status == IntegralCardStatusUsed {
+				skipped++
+				continue
+			}
+
+			// 解绑：只有「已发放」的卡密需要退回未使用
+			if uid <= 0 {
+				if record.Status != IntegralCardStatusGranted {
+					skipped++
+					continue
+				}
+				affected := tx.Model(&IntegralCard{}).
+					Where("id = ? AND status = ?", record.Id, IntegralCardStatusGranted).
+					Updates(map[string]any{
+						"status":   IntegralCardStatusUnused,
+						"uid":      0,
+						"use_time": 0,
+						"json": utils.Json.Encode(map[string]any{
+							"unbound_at": now,
+							"prev_uid":   record.Uid,
+						}),
+					})
+				if affected.Error != nil {
+					return affected.Error
+				}
+				if affected.RowsAffected == 0 {
+					skipped++ // 被并发兑换走了
+					continue
+				}
+				list = append(list, facade.H{
+					"id":          record.Id,
+					"card":        record.Card,
+					"value":       record.Value,
+					"prev_uid":    record.Uid,
+					"expire_time": record.ExpireTime,
+				})
+				continue
+			}
+
+			// 绑定 / 改绑：只接受「未使用」与「已发放」，状态条件更新保证并发安全
+			affected := tx.Model(&IntegralCard{}).
+				Where("id = ?", record.Id).
+				Where("status IN ?", []int{IntegralCardStatusUnused, IntegralCardStatusGranted}).
+				Updates(map[string]any{
+					"status":   IntegralCardStatusGranted,
+					"uid":      uid,
+					"use_time": 0,
+					"json": utils.Json.Encode(map[string]any{
+						"granted_at": now,
+						"source":     "manual",
+						"prev_uid":   record.Uid,
+					}),
+				})
+			if affected.Error != nil {
+				return affected.Error
+			}
+			if affected.RowsAffected == 0 {
+				skipped++ // 被并发兑换走了
+				continue
+			}
+
+			list = append(list, facade.H{
+				"id":          record.Id,
+				"card":        record.Card,
+				"value":       record.Value,
+				"prev_uid":    record.Uid,
+				"expire_time": record.ExpireTime,
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	facade.Log.Info(map[string]any{
+		"user_id":  uid,
+		"count":    len(list),
+		"skipped":  skipped,
+		"card_ids": clean,
+	}, "管理员设置卡密兑换人")
+
+	return list, skipped, nil
+}
+
 // AvailableIntegralCardCount - 可用卡密数量（未使用且未过期）
 //
 // value > 0 时只统计该面额；用于后台提示「卡密池还剩多少张」。

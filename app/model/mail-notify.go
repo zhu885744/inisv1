@@ -69,6 +69,9 @@ func MailNotifyScenes() []MailNotifyScene {
 		{Key: "links.pending", Label: "友链待审核", Group: "内容审核", Target: MailTargetAdmin, Default: 1, Desc: "有新的友链申请时，通知管理员"},
 		{Key: "links.passed", Label: "友链审核通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "友链通过审核时通知申请者"},
 		{Key: "links.rejected", Label: "友链审核未通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "友链被驳回时通知申请者"},
+		{Key: "moments.pending", Label: "动态待审核", Group: "内容审核", Target: MailTargetAdmin, Default: 1, Desc: "用户发布动态进入待审核时，通知管理员去审核"},
+		{Key: "moments.passed", Label: "动态审核通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "动态审核通过时通知作者"},
+		{Key: "moments.rejected", Label: "动态审核未通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "动态被驳回时通知作者"},
 
 		// ---------- 评论互动 ----------
 		{Key: "comment.notify", Label: "评论通知（内容作者）", Group: "评论互动", Target: MailTargetUser, Default: 1, Desc: "有人评论文章 / 页面 / 动态时通知内容作者"},
@@ -273,18 +276,31 @@ func MailNotifySiteURL() string {
 	return strings.TrimRight(cast.ToString(facade.AppToml.Get("app.domain", "")), "/")
 }
 
-// superAdminEmails 超级管理员邮箱（权限组 root=1 的成员，去重后返回）
-func superAdminEmails() []string {
+// SuperAdminUids 超级管理员 uid（权限组 root=1 的成员，去重后返回）
+//
+// 「通知管理员」的两个通道共用这一份收件人来源：
+//   - 邮件：superAdminEmails()（本文件）
+//   - 站内信：NotifyAdmins()（notification.go）
+func SuperAdminUids() []int {
 	groups, _ := facade.DB.Model(&[]AuthGroup{}).Where("root", 1).Select()
 
-	var uids []any
+	var uids []int
 	for _, group := range groups {
 		for _, uid := range utils.Unity.Ids(group["uids"]) {
-			if !utils.InArray(uid, uids) {
-				uids = append(uids, uid)
+			id := cast.ToInt(uid)
+			if id <= 0 || utils.InArray(id, uids) {
+				continue
 			}
+			uids = append(uids, id)
 		}
 	}
+
+	return uids
+}
+
+// superAdminEmails 超级管理员邮箱（权限组 root=1 的成员，去重后返回）
+func superAdminEmails() []string {
+	uids := SuperAdminUids()
 
 	if utils.Is.Empty(uids) {
 		return nil

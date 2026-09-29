@@ -474,6 +474,7 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=give&type=default&name=调整积分",
 				"path=card-generate&type=default&name=生成卡密",
+				"path=card-bind&type=default&name=设置卡密兑换人",
 				"path=card-redeem&type=login&name=卡密兑换积分",
 			},
 			"DELETE": {

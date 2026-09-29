@@ -18,6 +18,7 @@ type Moments struct {
 	Top         int                   `gorm:"type:int(12); comment:置顶; default:0;" json:"top"`
 	Views       int                   `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
 	Audit       int                   `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
+	Reason      string                `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
 	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布; default:1;" json:"status"`
 	LastUpdate  int64                 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`

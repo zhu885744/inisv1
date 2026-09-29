@@ -21,6 +21,7 @@ type Pages struct {
 	Tags       string `gorm:"comment:标签; default:Null;" json:"tags"`
 	Remark     string `gorm:"comment:备注; default:Null;" json:"remark"`
 	Audit      int    `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
+	Reason     string `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
 	Views      int    `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
 	LastUpdate int64  `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	// 以下为公共字段

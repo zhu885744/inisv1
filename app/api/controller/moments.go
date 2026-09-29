@@ -345,7 +345,8 @@ func (this *Moments) create(ctx *gin.Context) {
 	allowFields := append([]any{}, momentsAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "audit", "top")
+		// reason（驳回原因）与 audit 一样只允许管理员写，普通作者不能自己填 / 清
+		allowFields = append(allowFields, "audit", "top", "reason")
 	}
 
 	status := cast.ToInt(params["status"])
@@ -383,6 +384,12 @@ func (this *Moments) create(ctx *gin.Context) {
 		return
 	}
 
+	// 待审核：通知管理员去审核（邮件受「系统设置 → 邮件通知」的 moments.pending 控制，站内信始终发）
+	// audit：0 待审核 / 1 通过 / 2 未通过；草稿（status=0）audit 恒为 1，不会误发
+	if cast.ToInt(table.Audit) == 0 {
+		go notifyMomentsAudit(uid, table.Id, table.Content, cast.ToInt(table.Audit), table.Reason)
+	}
+
 	if status == 0 {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
 	} else {
@@ -415,7 +422,8 @@ func (this *Moments) update(ctx *gin.Context) {
 	allowFields := append([]any{}, momentsAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "audit", "top")
+		// reason（驳回原因）与 audit 一样只允许管理员写
+		allowFields = append(allowFields, "audit", "top", "reason")
 	}
 
 	status := cast.ToInt(params["status"])
@@ -459,17 +467,105 @@ func (this *Moments) update(ctx *gin.Context) {
 		}
 	}
 
-	_, err = item.Scan(&table).Update(async.Result())
+	// 取一次更新内容：Update 与「审核状态变化」判定共用
+	payload := async.Result()
+	// 审核通过时清空驳回原因：作者不该继续看到已经过期的原因
+	if cast.ToInt(payload["audit"]) == 1 {
+		payload["reason"] = ""
+	}
+	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
+	// 审核状态变化时通知（邮件 + 站内信），普通编辑保存（audit 未变）不打扰任何人
+	// audit：0 待审核 / 1 通过 / 2 未通过；后台「批量审核」在前端是逐条调 update，
+	// 这里按条判定状态是否变化，天然不会重复发
+	//
+	// 注意：必须判断 payload 里**是否真的带了 audit** —— 作者编辑自己「已审核过」的动态时
+	// audit 不会进 payload（保持原状态），此时 cast.ToInt(nil) 会得到 0，
+	// 不加这个判断就会把「未通过(2)」误判成「变成待审核(0)」，给管理员发一条假通知。
+	if rawAudit, ok := payload["audit"]; ok {
+		if nowAudit := cast.ToInt(rawAudit); nowAudit != cast.ToInt(prev["audit"]) {
+			content := cast.ToString(payload["content"])
+			if utils.Is.Empty(content) {
+				content = cast.ToString(prev["content"])
+			}
+			go notifyMomentsAudit(cast.ToInt(prev["uid"]), table.Id, content, nowAudit, cast.ToString(payload["reason"]))
+		}
+	}
+
 	if status == 0 {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
 	} else {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+	}
+}
+
+// momentsSummary 动态正文摘要（通知文案用）
+//
+// 复用 search.go 的 cleanSearchText：去掉 HTML 标签、图片 / 链接语法、Markdown 标记并折叠空白，
+// 否则正文里的 <img src="..."> 会原样进到通知标题里。截断 30 字（与评论通知口径一致）。
+func momentsSummary(content string) string {
+	text := cleanSearchText(content)
+	if text == "" {
+		return "（无正文）"
+	}
+	if len([]rune(text)) > 30 {
+		text = string([]rune(text)[:30]) + "..."
+	}
+	return text
+}
+
+// notifyMomentsAudit 动态审核通知（邮件 + 站内信），audit 为「变更后」的状态
+//
+//	0 待审核 → 通知管理员去审核（邮件开关 moments.pending，站内信始终发）
+//	1 通过   → 通知作者（邮件开关 moments.passed，站内信始终发）
+//	2 未通过 → 通知作者（邮件开关 moments.rejected，站内信始终发），并带上管理员填写的驳回原因
+//
+// 文案带动态正文摘要（动态没有标题，「内容」直接用摘要代入）；
+// 站内信 bind_type 固定为 moments、bind_id 为动态 id，消息中心点击可跳转到动态页。
+//
+// 调用方负责判断「审核状态是否真的变了」（见 create / update），
+// 因此反复编辑、批量审核都不会重复打扰。所有发送都在子协程里进行，不阻塞响应。
+func notifyMomentsAudit(uid, bindId int, content string, audit int, reason string) {
+	if uid <= 0 {
+		return
+	}
+
+	summary := momentsSummary(content)
+	now := model.MailNotifyTime()
+	reason = strings.TrimSpace(reason)
+
+	// 邮件正文：与其它场景保持一致的「字段名：值」风格
+	lines := []string{"动态：" + summary, "时间：" + now}
+	if audit == 2 && reason != "" {
+		lines = append(lines, "驳回原因："+reason)
+	}
+
+	// 站内信正文：驳回原因放最前面（消息列表内容区只有 2 行高度，原因比时间更需要被看到）
+	notifyContent := "时间：" + now
+	if audit == 2 && reason != "" {
+		notifyContent = "驳回原因：" + reason + " · " + notifyContent
+	}
+
+	switch audit {
+	case 0:
+		title := "您有新的动态「" + summary + "」待审核"
+		account, nickname := model.MailNotifyUserIdentity(uid)
+		model.MailNotifyAdmin("moments.pending", title, append(model.MailNotifyUserInfo(uid), lines...)...)
+		model.NotifyAdmins(uid, model.NotificationTypeMoments, title,
+			"作者："+nickname+"（"+account+"） · "+notifyContent, "moments", bindId)
+	case 1:
+		title := "您的动态「" + summary + "」审核已通过"
+		model.MailNotifyUser(uid, "moments.passed", title, lines...)
+		model.CreateUserNotify(uid, 0, model.NotificationTypeMoments, title, notifyContent, "moments", bindId)
+	case 2:
+		title := "您的动态「" + summary + "」审核未通过"
+		model.MailNotifyUser(uid, "moments.rejected", title, lines...)
+		model.CreateUserNotify(uid, 0, model.NotificationTypeMoments, title, notifyContent, "moments", bindId)
 	}
 }
 

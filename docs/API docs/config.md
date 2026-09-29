@@ -617,6 +617,8 @@
 | `article.pending` / `page.pending` / `links.pending` | 管理员 | 文章 / 独立页面 / 友链进入待审核 |
 | `article.passed` / `page.passed` / `links.passed` | 作者 | 审核通过 |
 | `article.rejected` / `page.rejected` / `links.rejected` | 作者 | 审核未通过（audit=2） |
+| `moments.pending` | 管理员 | 动态进入待审核（`audit=0`） |
+| `moments.passed` / `moments.rejected` | 动态作者 | 动态审核通过 / 未通过 |
 | `comment.notify` | 内容作者 | 有人评论文章 / 页面 / 动态 |
 | `comment.reply` | 被回复人 | 有人回复评论 |
 | `user.pending` | 管理员 | 注册需人工审核 |

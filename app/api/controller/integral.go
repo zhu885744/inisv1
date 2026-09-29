@@ -58,6 +58,7 @@ func (this *Integral) IPOST(ctx *gin.Context) {
 		"give":          this.give,
 		"card-generate": this.cardGenerate,
 		"card-redeem":   this.cardRedeem,
+		"card-bind":     this.cardBind,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -524,6 +525,86 @@ func (this *Integral) cardRedeem(ctx *gin.Context) {
 	this.redeemReset(user.Id)
 
 	this.json(ctx, result, facade.Lang(ctx, "兑换成功！"), 200)
+}
+
+// cardBind - 手动设置卡密的兑换人（管理员）
+//
+// 入参：ids（卡密 id，逗号分隔或数组）、uid（目标用户 id；0 表示解除绑定）
+// 语义：未使用的卡密 → 置为「已发放」并绑定该用户；已发放的卡密 → 改绑（传 uid=0 则退回未使用）
+// 已兑换（status=1）的卡密会被跳过：积分流水已经落库，改 uid 会让归属对不上账。
+// 绑定成功后给目标用户发一条站内信（解绑不发），用户可在「我的积分 → 卡密兑换」里查看。
+func (this *Integral) cardBind(ctx *gin.Context) {
+	if !this.meta.permit(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限：当前账号未被授予该权限点！"), 403)
+		return
+	}
+
+	params := this.params(ctx)
+	ids := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	uid := cast.ToInt(params["uid"])
+
+	list, skipped, err := model.BindIntegralCards(cast.ToIntSlice(ids), uid)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+	if len(list) == 0 {
+		msg := "没有可操作的卡密（已兑换的卡密不能改绑）！"
+		if uid <= 0 {
+			msg = "选中的卡密都没有绑定用户，无需解绑！"
+		}
+		this.json(ctx, nil, facade.Lang(ctx, msg), 202)
+		return
+	}
+
+	// 绑定成功后给目标用户发站内信：卡密到手了得让他知道；解绑（uid=0）不打扰用户
+	if uid > 0 {
+		go notifyIntegralCardBound(uid, this.user(ctx).Id, list)
+	}
+
+	msg := fmt.Sprintf("操作成功！共 %d 张卡密。", len(list))
+	if skipped > 0 {
+		msg = fmt.Sprintf("操作成功！共 %d 张卡密，%d 张已兑换的卡密已跳过。", len(list), skipped)
+	}
+
+	this.json(ctx, gin.H{
+		"list":    list,
+		"count":   len(list),
+		"skipped": skipped,
+		"uid":     uid,
+	}, facade.Lang(ctx, msg), 200)
+}
+
+// notifyIntegralCardBound - 卡密绑定给用户后的站内信
+//
+// 明文最多列出 5 张（消息内容有长度上限），其余用「等 N 张」概括；
+// 卡密同时能在「我的积分 → 卡密兑换」里查到，消息里只是提醒。
+func notifyIntegralCardBound(uid, fromUid int, list []facade.H) {
+
+	total := 0
+	cards := make([]string, 0, 5)
+	for index, item := range list {
+		total += cast.ToInt(item["value"])
+		if index < 5 {
+			cards = append(cards, cast.ToString(item["card"]))
+		}
+	}
+
+	content := fmt.Sprintf("管理员为你绑定了 %d 张积分卡密，共 %d 积分。", len(list), total)
+	if len(cards) > 0 {
+		content += "\n卡密：" + strings.Join(cards, "、")
+		if len(list) > len(cards) {
+			content += fmt.Sprintf(" 等 %d 张", len(list))
+		}
+	}
+	content += "\n兑换入口：「我的积分 → 卡密兑换」"
+
+	model.CreateUserNotify(uid, fromUid, model.NotificationTypeSystem, "你收到了积分卡密", content, "integral-card", 0)
 }
 
 // appendCardUser - 为卡密列表补充使用者昵称（一次性批量查询，避免 N+1）

@@ -638,12 +638,13 @@ func (this *Links) create(ctx *gin.Context) {
 	allow := linksAllowFieldsSlice
 
 	if this.meta.root(ctx) {
-		allow = append(allow, "audit", "remark")
+		// reason（驳回原因）与 audit 一样只允许管理员写
+		allow = append(allow, "audit", "remark", "reason")
 	}
 
 	for key, val := range params {
 		if utils.Get.Type(val) == "string" {
-			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
+			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" || key == "reason" {
 				if facade.Comm.DetectXSS(cast.ToString(val)) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
@@ -668,15 +669,18 @@ func (this *Links) create(ctx *gin.Context) {
 		return
 	}
 
-	// 待审核：通知管理员去审核（开关见「系统设置 → 邮件通知」的 links.pending）
+	// 待审核：通知管理员去审核（邮件受「系统设置 → 邮件通知」的 links.pending 控制，站内信始终发）
 	// 友链默认 audit=0（待审核），管理员创建时可直接指定
 	if table.Audit == 0 {
-		go model.MailNotifyAdmin("links.pending", "有新的友链申请待审核", append(
+		title := "有新的友链申请待审核"
+		go model.MailNotifyAdmin("links.pending", title, append(
 			model.MailNotifyUserInfo(uid),
 			"名称："+table.Nickname,
 			"网址："+table.Url,
 			"时间："+model.MailNotifyTime(),
 		)...)
+		go model.NotifyAdmins(uid, model.NotificationTypeLinks, title,
+			"名称："+table.Nickname+" · 时间："+model.MailNotifyTime(), "links", table.Id)
 	}
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
@@ -703,12 +707,13 @@ func (this *Links) update(ctx *gin.Context) {
 	allow := linksAllowFieldsSlice
 
 	if root {
-		allow = append(allow, "audit", "remark")
+		// reason（驳回原因）与 audit 一样只允许管理员写
+		allow = append(allow, "audit", "remark", "reason")
 	}
 
 	for key, val := range params {
 		if utils.Get.Type(val) == "string" {
-			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" {
+			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" || key == "reason" {
 				if facade.Comm.DetectXSS(cast.ToString(val)) {
 					this.json(ctx, nil, facade.Lang(ctx, "内容包含恶意代码，禁止提交！"), 400)
 					return
@@ -741,6 +746,10 @@ func (this *Links) update(ctx *gin.Context) {
 
 	// 取一次更新内容：Update 与「审核状态变化」判定共用
 	payload := async.Result()
+	// 审核通过时清空驳回原因：作者不该继续看到已经过期的原因
+	if cast.ToInt(payload["audit"]) == 1 {
+		payload["reason"] = ""
+	}
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -748,10 +757,17 @@ func (this *Links) update(ctx *gin.Context) {
 		return
 	}
 
-	// 审核状态变化时邮件通知（开关见「系统设置 → 邮件通知」）
+	// 审核状态变化时通知（邮件 + 站内信，驳回时带上原因）
 	// audit：0 待审核 / 1 通过 / 2 未通过；友链的展示名是 nickname
-	notifyAuditChange(cast.ToInt(itemData["uid"]), "links",
-		cast.ToString(itemData["nickname"]), prevAudit, payload["audit"])
+	notifyAuditChange(auditNotifyInfo{
+		Uid:       cast.ToInt(itemData["uid"]),
+		Kind:      "links",
+		Title:     cast.ToString(itemData["nickname"]),
+		BindId:    cast.ToInt(itemData["id"]),
+		PrevAudit: prevAudit,
+		Audit:     payload["audit"],
+		Reason:    cast.ToString(payload["reason"]),
+	})
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }

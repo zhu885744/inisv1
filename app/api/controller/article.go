@@ -326,7 +326,8 @@ func (this *Article) create(ctx *gin.Context) {
 	allowFields := append([]any{}, articleAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "top", "audit")
+		// reason（驳回原因）与 audit 一样只允许管理员写，普通作者不能自己填 / 清
+		allowFields = append(allowFields, "top", "audit", "reason")
 	}
 
 	// 获取状态：0-草稿，1-发布
@@ -364,14 +365,17 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
-	// 待审核：通知管理员去审核（开关见「系统设置 → 邮件通知」的 article.pending）
+	// 待审核：通知管理员去审核（邮件受「系统设置 → 邮件通知」的 article.pending 控制，站内信始终发）
 	// audit：0 待审核 / 1 通过 / 2 未通过
 	if table.Audit == 0 {
-		go model.MailNotifyAdmin("article.pending", "有新的文章待审核", append(
+		title := "有新的文章待审核"
+		go model.MailNotifyAdmin("article.pending", title, append(
 			model.MailNotifyUserInfo(uid),
 			"标题："+table.Title,
 			"时间："+model.MailNotifyTime(),
 		)...)
+		go model.NotifyAdmins(uid, model.NotificationTypeArticle, title,
+			"标题："+table.Title+" · 时间："+model.MailNotifyTime(), "article", table.Id)
 	}
 
 	// 发布文章时触发经验值与积分
@@ -418,7 +422,8 @@ func (this *Article) update(ctx *gin.Context) {
 	allowFields := append([]any{}, articleAllowFieldsSlice...)
 	root := this.meta.root(ctx)
 	if root {
-		allowFields = append(allowFields, "top", "audit")
+		// reason（驳回原因）与 audit 一样只允许管理员写
+		allowFields = append(allowFields, "top", "audit", "reason")
 	}
 
 	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
@@ -467,6 +472,10 @@ func (this *Article) update(ctx *gin.Context) {
 
 	// 取一次更新内容：Update 与「审核状态变化」判定共用
 	payload := async.Result()
+	// 审核通过时清空驳回原因：作者不该继续看到已经过期的原因
+	if cast.ToInt(payload["audit"]) == 1 {
+		payload["reason"] = ""
+	}
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -474,10 +483,17 @@ func (this *Article) update(ctx *gin.Context) {
 		return
 	}
 
-	// 审核状态变化时邮件通知（开关见「系统设置 → 邮件通知」）
+	// 审核状态变化时通知（邮件 + 站内信，驳回时带上原因）
 	// audit：0 待审核 / 1 通过 / 2 未通过；只在状态真正变化时发，普通编辑不打扰
-	notifyAuditChange(cast.ToInt(findResult["uid"]), "article",
-		cast.ToString(findResult["title"]), prevAudit, payload["audit"])
+	notifyAuditChange(auditNotifyInfo{
+		Uid:       cast.ToInt(findResult["uid"]),
+		Kind:      "article",
+		Title:     cast.ToString(findResult["title"]),
+		BindId:    cast.ToInt(findResult["id"]),
+		PrevAudit: prevAudit,
+		Audit:     payload["audit"],
+		Reason:    cast.ToString(payload["reason"]),
+	})
 
 	if status == 0 {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)

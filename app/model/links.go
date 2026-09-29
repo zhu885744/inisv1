@@ -18,6 +18,7 @@ type Links struct {
 	Avatar      string `gorm:"size:256; comment:头像; default:Null;" json:"avatar"`
 	Target      string `gorm:"size:32; comment:打开方式; default:'_blank';" json:"target"`
 	Audit       int    `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
+	Reason      string `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
 	Remark      string `gorm:"comment:备注; default:Null;" json:"remark"`
 	Group       int    `gorm:"size:32; comment:分组; default:0;" json:"group"`
 	// 以下为公共字段

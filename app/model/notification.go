@@ -21,13 +21,17 @@ const (
 	NotificationTypeCollect = "collect" // 被收藏
 	NotificationTypeFollow  = "follow"  // 被关注
 	NotificationTypeSystem  = "system"  // 系统消息（含管理员调整积分等积分变动通知）
+	NotificationTypeMoments = "moments" // 动态（发布待审 / 审核通过 / 审核未通过）
+	NotificationTypeArticle = "article" // 文章（待审核 / 审核通过 / 审核未通过）
+	NotificationTypePage    = "page"    // 独立页面（待审核 / 审核通过 / 审核未通过）
+	NotificationTypeLinks   = "links"   // 友链（待审核 / 审核通过 / 审核未通过）
 )
 
 type Notification struct {
 	Id       int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Uid      int    `gorm:"type:int(32); comment:接收用户ID 0表示广播通知(推送给全体用户);" json:"uid"`
 	FromUid  int    `gorm:"type:int(32); comment:触发用户ID;" json:"from_uid"`
-	Type     string `gorm:"type:varchar(32); comment:通知类型(comment/like/follow/system);" json:"type"`
+	Type     string `gorm:"type:varchar(32); comment:通知类型(comment/like/collect/follow/system/moments);" json:"type"`
 	Title    string `gorm:"type:varchar(256); comment:通知标题;" json:"title"`
 	Content  string `gorm:"type:varchar(1024); comment:通知内容;" json:"content"`
 	BindId   int    `gorm:"type:int(32); comment:关联实体ID; default:0;" json:"bind_id"`
@@ -182,6 +186,61 @@ func SendAccountNotify(uid int, title, content string) {
 
 	if _, err := (&Notification{}).CreateNotification(uid, 0, NotificationTypeSystem, title, content, "ban", 0); err != nil {
 		facade.Log.Warn(map[string]any{"uid": uid, "error": err.Error()}, "账号状态站内通知发送失败")
+	}
+}
+
+// NotifyAdmins 给所有超级管理员发站内信（「有新的动态待审核」这类提醒运营者的场景）
+//
+// 与邮件通道的区别：
+//   - 邮件走 MailNotifyAdmin，受「系统设置 → 邮件通知」里对应场景开关控制；
+//   - 站内信无开关，落库即完成投递（和评论、点赞通知一样），保证运营者不会漏看。
+//
+// 实现说明：给每个超级管理员各建一条记录，而不是用广播（uid=0）——
+// 广播是全体用户可见的，普通用户不该看到「有新的动态待审核」。
+// 任何异常只记日志，绝不打断发布 / 审核本身的主流程。
+func NotifyAdmins(fromUid int, typ, title, content, bindType string, bindId int) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "from_uid": fromUid}, "发送管理员站内通知时发生panic")
+		}
+	}()
+
+	if utils.Is.Empty(title) {
+		return
+	}
+
+	for _, uid := range SuperAdminUids() {
+		// 管理员自己发布的内容不必提醒自己
+		if uid <= 0 || uid == fromUid {
+			continue
+		}
+
+		if _, err := (&Notification{}).CreateNotification(uid, fromUid, typ, title, content, bindType, bindId); err != nil {
+			facade.Log.Warn(map[string]any{"uid": uid, "error": err.Error()}, "管理员站内通知发送失败")
+		}
+	}
+}
+
+// CreateUserNotify 给指定用户发一条站内信（业务通知的轻量入口）
+//
+// 用于「审核结果」这类必须让用户知道的通知：只做落库 + 异常兜底，不做开关判断
+// （站内信与邮件的开关策略不同 —— 邮件可在「系统设置 → 邮件通知」按场景关闭，
+// 站内信与评论、点赞通知一样，落库即达）。
+func CreateUserNotify(uid, fromUid int, typ, title, content, bindType string, bindId int) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err, "uid": uid}, "发送用户站内通知时发生panic")
+		}
+	}()
+
+	if uid <= 0 || utils.Is.Empty(title) {
+		return
+	}
+
+	if _, err := (&Notification{}).CreateNotification(uid, fromUid, typ, title, content, bindType, bindId); err != nil {
+		facade.Log.Warn(map[string]any{"uid": uid, "error": err.Error()}, "用户站内通知发送失败")
 	}
 }
 
