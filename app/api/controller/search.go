@@ -42,14 +42,94 @@ func (this *Search) buildSearchQuery(keyword string, searchFields []string, audi
 	}
 }
 
-// highlightKeyword 关键词高亮
+// highlightKeyword 关键词高亮（大小写不敏感）
 func (this *Search) highlightKeyword(text string, keyword string) string {
 	if text == "" || keyword == "" {
 		return text
 	}
-	// 转义正则特殊字符
-	re := regexp.MustCompile(regexp.QuoteMeta(keyword))
+	// 转义正则特殊字符；(?i) 让英文关键词大小写都能命中
+	re := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(keyword))
 	return re.ReplaceAllString(text, `<mark>$0</mark>`)
+}
+
+// 搜索结果「内容预览」用的清理规则（见 cleanSearchText）
+var (
+	searchHTMLTagRe      = regexp.MustCompile(`<[^>]*>`)
+	searchMarkdownImgRe  = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	searchMarkdownLinkRe = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	searchMarkdownLineRe = regexp.MustCompile(`(?m)^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+`)
+	// 代码块围栏（含 ```go 这种语言标记）
+	searchMarkdownFenceRe = regexp.MustCompile("(?m)^\\s*```.*$")
+)
+
+// cleanSearchText - 把正文整理成一段可读纯文本（用于搜索结果的摘要 / 内容预览）
+//
+// 只做轻量清理：去 HTML 标签、图片与链接语法、代码块围栏、行首 Markdown 标记，最后折叠空白。
+// 目的是让「搜索结果里那一段话」看起来像正常文本，而不是一串标记。
+func cleanSearchText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	text = searchHTMLTagRe.ReplaceAllString(text, " ")
+	text = searchMarkdownImgRe.ReplaceAllString(text, " ")
+	text = searchMarkdownLinkRe.ReplaceAllString(text, "$1")
+	text = searchMarkdownFenceRe.ReplaceAllString(text, " ")
+	text = searchMarkdownLineRe.ReplaceAllString(text, "")
+
+	return strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+}
+
+// snippetKeyword - 从正文里截取「包含关键词」的一段作为内容预览
+//
+// 返回的片段已做纯文本化处理，关键词用 <mark> 包裹（前端直接 v-html 展示即可）：
+//   - 以关键词为锚点，前后各保留 before / after 个字符（按 rune 切，不会截断中文）；
+//   - 截断处补省略号；
+//   - 正文里找不到关键词（例如命中标题 / 标签）时，从开头截取。
+func (this *Search) snippetKeyword(content string, keyword string, before, after int) string {
+	text := cleanSearchText(content)
+	if text == "" {
+		return ""
+	}
+	if before <= 0 {
+		before = 40
+	}
+	if after <= 0 {
+		after = 100
+	}
+
+	runes := []rune(text)
+	keyRunes := []rune(keyword)
+
+	// 用字节索引定位，再换算成 rune 索引，避免把多字节字符切坏
+	index := -1
+	if keyword != "" {
+		if byteIndex := strings.Index(strings.ToLower(text), strings.ToLower(keyword)); byteIndex >= 0 {
+			index = len([]rune(text[:byteIndex]))
+		}
+	}
+	if index < 0 {
+		index = 0
+	}
+
+	start := index - before
+	if start < 0 {
+		start = 0
+	}
+	end := index + len(keyRunes) + after
+	if end > len(runes) {
+		end = len(runes)
+	}
+
+	snippet := this.highlightKeyword(string(runes[start:end]), keyword)
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(runes) {
+		snippet += "..."
+	}
+
+	return snippet
 }
 
 // highlightResult 高亮搜索结果中的关键词
@@ -99,14 +179,22 @@ func (this *Search) maskEmail(email string) string {
 func (this *Search) processSearchResult(items any, count int64, limit int, searchType string, keyword ...string) map[string]interface{} {
 	var data []map[string]any
 
+	// 内容预览要从正文里截，这里先把关键词取出来
+	word := ""
+	if len(keyword) > 0 {
+		word = keyword[0]
+	}
+
 	switch v := items.(type) {
 	case []model.Article:
 		for _, article := range v {
+			// snippet 为「内容预览」：摘要为空时前端会退化成展示这段正文片段
 			data = append(data, map[string]any{
 				"id":          article.Id,
 				"title":       article.Title,
 				"covers":      article.Covers,
 				"abstract":    article.Abstract,
+				"snippet":     this.snippetKeyword(article.Content, word, 40, 100),
 				"create_time": article.CreateTime,
 				"tags":        article.Tags,
 				"views":       article.Views,
@@ -119,6 +207,7 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 				"id":          page.Id,
 				"key":         page.Key,
 				"title":       page.Title,
+				"snippet":     this.snippetKeyword(page.Content, word, 40, 100),
 				"create_time": page.CreateTime,
 				"views":       page.Views,
 				"audit":       page.Audit,

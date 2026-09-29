@@ -44,6 +44,7 @@
         "title": "<mark>搜索</mark>结果标题",
         "covers": "https://example.com/cover.jpg",
         "abstract": "文章<mark>摘要</mark>...",
+        "snippet": "...正文中命中<mark>搜索</mark>的那一段前后各截若干字...",
         "tags": "标签1,标签2",
         "views": 123,
         "create_time": 1699920000,
@@ -58,10 +59,25 @@
 }
 ```
 
+**响应字段**（数组项）：
+
+| 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| id | int | 文章 ID |
+| title | string | 标题（含 `<mark>` 高亮） |
+| covers | string | 封面（多张时逗号分隔，取第一张即可） |
+| abstract | string | 摘要（含 `<mark>` 高亮，可能为空） |
+| snippet | string | **内容预览**：从正文里截取包含关键词的一段（去 HTML / Markdown 标记，含高亮与省略号） |
+| tags | string | 标签（逗号分隔） |
+| views | int | 浏览量 |
+| create_time | int64 | 发布时间戳 |
+| audit | int | 审核状态（只返回 `1`） |
+
 **说明**:
 - 搜索结果中的关键词会被 `<mark>` 标签包裹，实现高亮显示
 - 默认搜索字段：title、content、abstract、tags
 - 可通过 `fields=title,abstract` 指定只搜索标题和摘要
+- **列表页建议展示 `abstract`，为空时退化成 `snippet`**，避免结果只剩标题
 
 ---
 
@@ -92,6 +108,7 @@
         "id": 1,
         "key": "about",
         "title": "<mark>关于</mark>我们",
+        "snippet": "...页面正文里命中<mark>关于</mark>的那一段...",
         "create_time": 1699920000,
         "views": 45,
         "audit": 1
@@ -108,6 +125,7 @@
 **说明**:
 - 默认搜索字段：title、content、key
 - 仅搜索审核通过的页面（audit = 1）
+- `snippet` 为内容预览（页面没有摘要字段，列表页直接用 `snippet` 展示即可）
 
 ---
 
@@ -439,3 +457,25 @@ mark {
 - 搜索关键词会被自动添加 `%` 通配符（前后匹配）
 - 多个字段之间使用 `OR` 连接
 - 审核条件使用 `AND` 连接
+
+### 8. 内容预览（snippet）
+
+文章与页面搜索结果会额外返回 `snippet` —— 从正文里截取「包含关键词」的一段，用于列表页展示内容预览：
+
+- 截取规则：以关键词为锚点，**前 40 / 后 100 个字符**（按 rune 截，不会切断中文），截断处补 `...`；
+- 正文做了轻量清理：去 HTML 标签、图片与链接语法、代码块围栏、行首 Markdown 标记（`#` `>` `-` `*` `1.`），并折叠空白；
+- 关键词在正文里找不到时（例如命中标题 / 标签），从正文开头截取；
+- 关键词同样用 `<mark>` 包裹，且**大小写不敏感**（标题等字段的高亮也改成了不敏感匹配）。
+
+**列表页展示建议**：
+
+| 类型 | 展示字段 |
+| :--- | :--- |
+| 文章 | 封面 `covers`（首张）+ 标题 `title` + 摘要 `abstract`（为空退化成 `snippet`）+ `views` / `create_time`（标签 `tags` 仍会返回，但列表页不展示，避免噪声） |
+| 页面 | 标题 `title` + `snippet` + `key` + `views` / `create_time` |
+| 标签 | 头像 `avatar` + 名称 `name` + 简介 `description` |
+| 用户 | 头像 `avatar` + 昵称 `nickname` + 简介 `description` + 头衔 `title` + 脱敏邮箱 |
+| 友链 | 头像 `avatar` + 名称 `nickname` + 简介 `description` + 域名 |
+| 动态 | 首图 `images`（第一张）+ 正文 `content` + 位置 `location` + `create_time` |
+
+> 前端参考实现：`Mellow/src/views/Search.vue`（`thumbOf` / `summaryOf` / `metaOf` 三个函数按类型取字段）。
