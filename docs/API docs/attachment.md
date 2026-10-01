@@ -1003,6 +1003,15 @@ categories.forEach(category => {
   - Office 新格式（docx/xlsx/pptx）：验证 ZIP 头部标识
   - 压缩格式（zip/rar/7z）：验证文件头标识
   - SVG：验证 `<svg` 或 `<?xml` 头部，防止存储型 XSS 攻击
+- **内容与扩展名不符时的处理**（QQ / 微信保存的二维码图、浏览器「另存为」的图片
+  经常是「文件名 `.jpg`、内容其实是 PNG / WebP」）：
+  - 真实类型**能按文件头判定**（jpg / png / gif / webp / bmp / pdf / rar / 7z）
+    且该类型在允许列表里 → **按真实内容纠正扩展名**，照常上传成功，日志里记一条 `from → to`；
+    存储对象与 `mime_type` 都用真实类型（如 `xxx.png`、`image/png`），
+    `original_name` 仍是用户上传时的名字（便于对上号）；
+  - 判定不了（doc/xls/ppt 同为 OLE2 头，docx/xlsx/pptx 与 zip 同为 PK 头）或真实类型不被允许
+    → 返回 `文件内容与扩展名不匹配：内容的真实类型是 PNG 图片，请把后缀改成 .png 后再上传`，
+    而不是一句没有信息量的「不匹配」
 - **文件名安全**：使用 `filepath.Clean` + 正则过滤非法字符，防止路径遍历攻击
   - 过滤字符：`<>`:`/\|?*` 和控制字符（0x00-0x1F）
   - 移除 `../` 类路径穿越

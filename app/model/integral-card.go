@@ -168,6 +168,148 @@ func buildIntegralCards(batch string, value, count, length int, expireTime int64
 	return list, nil
 }
 
+// ImportIntegralCards - 导入「自定义卡密」（管理员自己填写的卡密内容）
+//
+// 与 GenerateIntegralCards 的区别：卡密内容由管理员提供，不再随机生成，
+// 适用于「卡密来自其它系统 / 自己印制 / 指定编号」的场景。
+//
+// 规则（与兑换接口 RedeemIntegralCard 的校验保持一致）：
+//   - 每个卡密都做标准化（去空格与连字符、转大写），所以管理员填「sn-0001-aaaa」、
+//     用户兑「SN 0001 AAAA」都能命中同一张卡；
+//   - 长度须在 8 ~ 64 位之间，空行忽略；
+//   - 与系统里已有卡密重复的会被跳过（含回收站中的卡密 —— 唯一索引不会因软删除释放）；
+//   - 单次上限 1000 张；全部被跳过时返回错误，避免管理员误以为导入成功。
+//
+// 返回：成功写入的卡密列表、批次号、导入报告（total / success / skipped / skipped_count / truncated）。
+func ImportIntegralCards(codes []string, value int, expireTime int64, remark string) (list []IntegralCard, batch string, report facade.H, err error) {
+
+	if value <= 0 {
+		return nil, "", nil, errors.New("积分面额必须大于0！")
+	}
+	if value > IntegralCardMaxValue {
+		return nil, "", nil, fmt.Errorf("积分面额不能超过 %d！", IntegralCardMaxValue)
+	}
+	if expireTime > 0 && expireTime <= time.Now().Unix() {
+		return nil, "", nil, errors.New("卡密有效期必须晚于当前时间！")
+	}
+
+	total := 0
+	seen := make(map[string]struct{}, len(codes))
+	skipped := make([]facade.H, 0)
+	valid := make([]string, 0, len(codes))
+
+	// 标准化 + 内存去重 + 格式校验
+	for _, raw := range codes {
+		card := normalizeIntegralCard(raw)
+		if card == "" {
+			continue // 空行不算失败
+		}
+		total++
+
+		if len(card) < IntegralCardMinLength || len(card) > IntegralCardMaxLength {
+			skipped = append(skipped, facade.H{
+				"code":   card,
+				"reason": fmt.Sprintf("长度需在 %d ~ %d 位之间", IntegralCardMinLength, IntegralCardMaxLength),
+			})
+			continue
+		}
+		if _, exist := seen[card]; exist {
+			skipped = append(skipped, facade.H{"code": card, "reason": "本次导入内容里重复"})
+			continue
+		}
+
+		seen[card] = struct{}{}
+		valid = append(valid, card)
+	}
+
+	// 报告骨架：即便下面直接返回错误，前端也能拿到已统计的信息
+	report = facade.H{
+		"total":         total,
+		"success":       0,
+		"skipped":       skipped,
+		"skipped_count": len(skipped),
+		"truncated":     false,
+	}
+
+	if len(valid) == 0 {
+		return nil, "", report, errors.New("没有可导入的卡密：请检查内容是否为空或格式不正确！")
+	}
+	if len(valid) > IntegralCardMaxCount {
+		return nil, "", report, fmt.Errorf("单次最多导入 %d 张，请分批导入！", IntegralCardMaxCount)
+	}
+
+	// 与库里已有卡密比对（用 Raw 查，绕过软删除过滤：回收站里的卡密同样占用卡号）
+	existing := make(map[string]struct{}, len(valid))
+	for start := 0; start < len(valid); start += 500 {
+		end := start + 500
+		if end > len(valid) {
+			end = len(valid)
+		}
+
+		var rows []string
+		if err = facade.DB.Drive().Raw("SELECT card FROM inis_integral_card WHERE card IN ?", valid[start:end]).
+			Scan(&rows).Error; err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error()}, "查询已有卡密失败")
+			return nil, "", report, errors.New("导入失败，请稍后重试！")
+		}
+		for _, item := range rows {
+			existing[item] = struct{}{}
+		}
+	}
+
+	batch = fmt.Sprintf("%s%s", time.Now().Format("20060102150405"), randomIntegralBatch())
+
+	for _, card := range valid {
+		if _, exist := existing[card]; exist {
+			skipped = append(skipped, facade.H{"code": card, "reason": "系统里已存在相同卡密"})
+			continue
+		}
+		list = append(list, IntegralCard{
+			Card:       card,
+			Value:      value,
+			Status:     IntegralCardStatusUnused,
+			Batch:      batch,
+			ExpireTime: expireTime,
+			Remark:     remark,
+		})
+	}
+
+	report["skipped"] = skipped
+	report["skipped_count"] = len(skipped)
+
+	if len(list) == 0 {
+		return nil, "", report, errors.New("这些卡密系统里都已存在，没有新增（可在卡密列表里搜索确认）！")
+	}
+
+	if err = facade.DB.Drive().Create(&list).Error; err != nil {
+		facade.Log.Error(map[string]any{
+			"error": err.Error(),
+			"value": value,
+			"count": len(list),
+		}, "导入自定义卡密失败")
+		return nil, "", report, errors.New("导入失败，请稍后重试！")
+	}
+
+	// 报告里的跳过明细限制条数（一次贴 1000 行时，几十条明细够排查了）
+	const reportLimit = 50
+	if len(skipped) > reportLimit {
+		report["skipped"] = skipped[:reportLimit]
+		report["truncated"] = true
+	}
+	report["success"] = len(list)
+	report["batch"] = batch
+
+	facade.Log.Info(map[string]any{
+		"batch":    batch,
+		"value":    value,
+		"success":  len(list),
+		"skipped":  len(skipped),
+		"operator": "admin",
+	}, "导入自定义卡密")
+
+	return list, batch, report, nil
+}
+
 // GenerateIntegralCards - 批量生成卡密
 // value: 积分面额（>0）；count: 生成数量（1~1000）；length: 卡密长度（8~64，默认 16）；
 // expireTime: 过期时间戳（0 表示永久有效，>0 时必须晚于当前时间）；remark: 备注
@@ -326,11 +468,11 @@ func RedeemIntegralCard(uid int, card string) (result facade.H, err error) {
 	return result, nil
 }
 
-// ErrIntegralCardEmpty - 卡密池没有可用卡密（未使用且未过期）时的哨兵错误
+// ErrIntegralCardEmpty - 没有可用卡密（未使用且未过期）时的哨兵错误
 //
 // 奖励发放这类场景不能因为「没卡了」而整体失败，调用方（如卡密奖励资产）捕获它后
 // 走降级策略（改发等额积分 / 跳过），而不是把错误抛给用户。
-var ErrIntegralCardEmpty = errors.New("卡密池没有可用卡密！")
+var ErrIntegralCardEmpty = errors.New("没有可用的卡密！")
 
 // GrantIntegralCardTx - 从卡密池发一张卡密给用户（在事务内执行）
 //
@@ -341,6 +483,10 @@ var ErrIntegralCardEmpty = errors.New("卡密池没有可用卡密！")
 // 池子为空时返回 ErrIntegralCardEmpty。
 //
 // 并发安全：先查候选，再用「状态条件更新 + 影响行数」原子占用；被并发抢走则重试。
+//
+// 注意：签到等奖励已改为发「奖励项里自己填的纯卡密」（独立库存表，见
+// reward-card-stock.go），不再从积分卡密池取，因此本函数目前没有调用方 ——
+// 保留它作为「积分卡密池」的通用发放能力（例如将来做「管理员批量发卡给指定用户」）。
 func GrantIntegralCardTx(tx *gorm.DB, uid int, value int, meta facade.H) (facade.H, error) {
 
 	if uid <= 0 {
@@ -546,7 +692,8 @@ func BindIntegralCards(ids []int, uid int) (list []facade.H, skipped int, err er
 
 // AvailableIntegralCardCount - 可用卡密数量（未使用且未过期）
 //
-// value > 0 时只统计该面额；用于后台提示「卡密池还剩多少张」。
+// value > 0 时只统计该面额；用于统计「卡密池还剩多少张」
+// （后台「积分 → 卡密」的统计走 integral.go 的 cardStats，本函数目前无调用方）。
 func AvailableIntegralCardCount(value int) int {
 
 	now := time.Now().Unix()

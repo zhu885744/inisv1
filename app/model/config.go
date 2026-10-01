@@ -93,8 +93,6 @@ func InitConfig() {
 			"comment-like":    facade.H{"name": "评论获赞", "value": 5, "daily_limit": 10},
 		}), Remark: "经验值规则配置"},
 		{Key: "SYSTEM_INTEGRAL_RULES", Json: utils.Json.Encode(facade.H{
-			// 注：签到积分已独立到 SYSTEM_CHECKIN_RULES（基础奖励里的积分），
-			// 任务列表里的「每日签到」由 model.IntegralTaskConfig() 动态注入，不在这里配置
 			"login":          facade.H{"name": "每日登录", "value": 2, "daily_limit": 1},
 			"article-create": facade.H{"name": "发布文章", "value": 10, "daily_limit": 5},
 			"comment":        facade.H{"name": "发表评论", "value": 2, "daily_limit": 10},

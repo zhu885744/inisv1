@@ -96,6 +96,9 @@ func (this *Checkin) AfterFind(tx *gorm.DB) (err error) {
 
 // defaultCheckinConfig - 签到默认配置
 //
+// 默认数值刻意压得很小（单笔奖励 / 消耗都不超过 10），避免新站点一上线就发放过量；
+// 想调大直接在后台「签到」页改，或改这里的默认值（只影响尚未保存过配置的站点）。
+//
 // 结构说明（全部可在后台「签到」页里改）：
 //
 //	enabled     总开关（0 关闭，其它值开启）
@@ -124,14 +127,14 @@ func defaultCheckinConfig() facade.H {
 			"连续签到有惊喜，别忘了明天再来",
 		},
 		"base": []any{
-			facade.H{"asset": "exp", "value": 10},
-			facade.H{"asset": "integral", "value": 5},
+			facade.H{"asset": "exp", "value": 3},
+			facade.H{"asset": "integral", "value": 2},
 		},
 		"streak": facade.H{
 			"enabled": 1,
 			"asset":   "exp",
-			"per_day": 2,
-			"max":     50,
+			"per_day": 1,
+			"max":     5,
 		},
 		"cycle": facade.H{
 			"enabled": 1,
@@ -139,47 +142,47 @@ func defaultCheckinConfig() facade.H {
 			"days": []any{
 				facade.H{"label": "第 1 天"},
 				facade.H{"label": "第 2 天"},
-				facade.H{"label": "第 3 天", "rewards": []any{facade.H{"asset": "integral", "value": 5}}},
+				facade.H{"label": "第 3 天", "rewards": []any{facade.H{"asset": "integral", "value": 2}}},
 				facade.H{"label": "第 4 天"},
 				facade.H{"label": "第 5 天"},
 				facade.H{"label": "第 6 天"},
-				facade.H{"label": "第 7 天", "rewards": []any{facade.H{"asset": "integral", "value": 30, "label": "周期礼包"}}},
+				facade.H{"label": "第 7 天", "rewards": []any{facade.H{"asset": "integral", "value": 5, "label": "周期礼包"}}},
 			},
 		},
 		"milestones": []any{
 			facade.H{"day": 7, "label": "连签一周", "rewards": []any{
-				facade.H{"asset": "exp", "value": 50},
-				facade.H{"asset": "integral", "value": 20},
+				facade.H{"asset": "exp", "value": 5},
+				facade.H{"asset": "integral", "value": 3},
 			}},
 			facade.H{"day": 15, "label": "半月坚持", "rewards": []any{
-				facade.H{"asset": "exp", "value": 100},
-				facade.H{"asset": "integral", "value": 50},
+				facade.H{"asset": "exp", "value": 8},
+				facade.H{"asset": "integral", "value": 5},
 			}},
 			facade.H{"day": 30, "label": "月度全勤", "rewards": []any{
-				facade.H{"asset": "exp", "value": 200},
-				facade.H{"asset": "integral", "value": 100},
+				facade.H{"asset": "exp", "value": 10},
+				facade.H{"asset": "integral", "value": 10},
 			}},
 		},
 		"monthly": []any{
 			facade.H{"day": 20, "label": "月签满 20 天", "rewards": []any{
-				facade.H{"asset": "integral", "value": 50},
+				facade.H{"asset": "integral", "value": 8},
 			}},
 			facade.H{"day": 28, "label": "当月全勤", "rewards": []any{
-				facade.H{"asset": "integral", "value": 200},
-				// 卡密奖励示例：从卡密池取一张面额 50 的卡密发给用户；
-				// 池子为空时（fallback=integral）自动改发 50 积分，不会让签到失败
-				facade.H{"asset": "card", "value": 50, "fallback": "integral", "label": "全勤卡密"},
+				facade.H{"asset": "integral", "value": 10},
+				// 卡密奖励示例：卡密内容由管理员在后台签到页填写（一行一个，纯卡密、与积分无关）。
+				// 这里给个空清单 —— 没填卡密时这份奖励不发卡密（库存制：发完即失效，不降级）
+				facade.H{"asset": "card", "value": 1, "codes": []any{}, "label": "全勤卡密"},
 			}},
 		},
 		"random": []any{
-			facade.H{"asset": "integral", "value": 20, "chance": 10, "label": "幸运奖励"},
+			facade.H{"asset": "integral", "value": 5, "chance": 10, "label": "幸运奖励"},
 		},
 		"makeup": facade.H{
 			"enabled": 1,
 			"days":    7,
 			"limit":   3,
 			"asset":   "integral",
-			"cost":    20,
+			"cost":    5,
 		},
 	}
 }
@@ -908,12 +911,11 @@ func checkinCardsOf(items []facade.H) []facade.H {
 
 		extra := asStringMap(item["extra"])
 		result = append(result, facade.H{
-			"card":           cast.ToString(extra["card"]),
-			"value":          cast.ToInt(extra["value"]),
-			"card_missing":   cast.ToBool(extra["card_missing"]),
-			"fallback":       cast.ToString(extra["fallback"]),
-			"fallback_value": cast.ToInt(extra["fallback_value"]),
-			"granted_at":     cast.ToInt64(extra["granted_at"]),
+			"card_id":      cast.ToInt(extra["card_id"]),
+			"card":         cast.ToString(extra["card"]),
+			"card_missing": cast.ToBool(extra["card_missing"]),
+			"reason":       cast.ToString(extra["reason"]),
+			"granted_at":   cast.ToInt64(extra["granted_at"]),
 		})
 	}
 
@@ -1564,6 +1566,7 @@ func checkinGrantText(items []facade.H) string {
 	groupValue := facade.H{} // group → []string（构成说明）
 
 	cardCount := 0
+	cardMissing := false
 	codes := make([]string, 0)
 
 	for _, item := range items {
@@ -1571,10 +1574,14 @@ func checkinGrantText(items []facade.H) string {
 		group := cast.ToString(item["group"])
 
 		if asset == RewardCardAssetKey {
-			cardCount++
+			// 卡密是「纯卡密」：明细里的 value 只是奖励引擎要求的占位（1 张），不是面额，
+			// 因此文案里只报张数与明文；库存发完时标记一下，末尾提示「未发放」。
 			extra := asStringMap(item["extra"])
-			if code := cast.ToString(extra["card"]); !utils.Is.Empty(code) {
-				codes = append(codes, code+"（面额 "+cast.ToString(extra["value"])+" 积分）")
+			if code := cast.ToString(extra["card"]); code != "" {
+				cardCount++
+				codes = append(codes, code)
+			} else if cast.ToBool(extra["card_missing"]) {
+				cardMissing = true
 			}
 			continue
 		}
@@ -1630,8 +1637,12 @@ func checkinGrantText(items []facade.H) string {
 		result += "（" + strings.Join(breakdown, " · ") + "）"
 	}
 
+	if cardMissing {
+		result += "（卡密库存已发完，本次未发放）"
+	}
+
 	if len(codes) > 0 {
-		result += "。卡密：" + strings.Join(codes, "；") + "，到「我的积分 → 卡密兑换」兑换"
+		result += "。卡密：" + strings.Join(codes, "；") + "，请自行保存"
 	}
 
 	return result

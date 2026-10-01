@@ -66,6 +66,7 @@ func InitTable() {
 		{"Integral", InitIntegral},
 		{"Goods", InitGoods},
 		{"IntegralCard", InitIntegralCard},
+		{"RewardCard", InitRewardCard},
 	}
 
 	for _, item := range allow {

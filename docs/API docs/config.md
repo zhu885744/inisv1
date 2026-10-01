@@ -559,9 +559,9 @@
 奖励项支持多资产（内置 `exp` 经验、`integral` 积分、`card` **卡密**，可扩展注册）、
 随机区间（`min`/`max`）与触发概率（`chance`）。
 
-> 卡密奖励：`{"asset":"card","value":50,"fallback":"integral"}` 表示发一张面额 50 的卡密
-> （从「积分 → 卡密」池子里取，绑定给用户后由用户自己兑换）；
-> 卡密池没有可用卡密时按 `fallback` 降级（默认改发等额积分），不会让签到失败。
+> 卡密奖励：`{"asset":"card","value":1,"codes":["SN2026000001"]}` 表示发这些**纯卡密**——
+> 卡密内容就是 `codes`（一行一个），与积分无关（没有面额、不进「积分 → 卡密」的池子）；
+> 库存制：每发一次消耗一张，**库存发完即失效**（什么都不发，不做降级），签到不会失败。
 
 **顶层字段**:
 
@@ -578,7 +578,7 @@
 | `milestones` | array | 7/15/30 天 | 里程碑 `[{day, label, rewards}]` |
 | `monthly` | array | 20/28 天 | 月累计（全勤） |
 | `random` | array | 10% 概率 20 积分 | 随机奖励（奖励项数组，支持 `chance`） |
-| `makeup` | object | `{enabled:1, days:7, limit:3, asset:"integral", cost:20}` | 补签 |
+| `makeup` | object | `{enabled:1, days:7, limit:3, asset:"integral", cost:5}` | 补签 |
 
 **完整结构、奖励项写法、默认值、扩展新资产的方式**：见
 [Checkin API 文档 → 签到配置](checkin.md)。

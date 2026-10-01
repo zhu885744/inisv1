@@ -40,7 +40,7 @@ import (
 // extra 字段里，不需要附加信息时返回 nil 即可。
 //
 // 说明：Grant 会收到调用方传入的 meta，常见键有 type / description / json，
-// 以及 config（该奖励项在配置里的额外键，如卡密的 fallback），按需读取即可。
+// 以及 config（该奖励项在配置里的额外键，如卡密的 codes —— 自定义卡密内容），按需读取即可。
 type RewardAsset struct {
 	Key     string
 	Name    string
@@ -255,8 +255,8 @@ func parseRewardItem(row map[string]any, group string) []RewardItem {
 
 // rewardItemExtra - 取出奖励项里「通用字段之外」的配置，原样交给资产实现
 //
-// 例如卡密可以写 {"asset":"card","value":100,"fallback":"integral"}，
-// fallback 就是额外配置，卡密资产在池子为空时按它降级。
+// 例如卡密可以写 {"asset":"card","value":1,"codes":["SN2026000001"]}，
+// codes 就是额外配置，卡密资产据此从自己的库存里发码。
 func rewardItemExtra(row map[string]any) facade.H {
 	extra := facade.H{}
 
@@ -417,7 +417,7 @@ func GrantRewardsTx(tx *gorm.DB, uid int, items []RewardItem, meta facade.H) (fa
 				continue
 			}
 
-			// 把该奖励项的额外配置透传给资产实现（如卡密的 fallback）
+			// 把该奖励项的额外配置透传给资产实现（如卡密的 codes）
 			itemMeta := make(facade.H, len(meta)+1)
 			for key, value := range meta {
 				itemMeta[key] = value

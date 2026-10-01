@@ -85,21 +85,25 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
 
 ```json
 "base": [
-  { "asset": "exp", "value": 10 },
-  { "asset": "integral", "value": 5 }
+  { "asset": "exp", "value": 3 },
+  { "asset": "integral", "value": 2 }
 ]
 ```
 ```json
-"base": { "exp": 10, "integral": 5 }
+"base": { "exp": 3, "integral": 2 }
 ```
 ```json
 "random": [
-  { "asset": "integral", "value": 20, "chance": 10, "label": "幸运奖励" },
-  { "asset": "integral", "min": 5, "max": 15 }
+  { "asset": "integral", "value": 5, "chance": 10, "label": "幸运奖励" },
+  { "asset": "integral", "min": 2, "max": 8 }
 ]
 ```
 
 ### 默认配置
+
+> 默认数值刻意压得很小（**单笔奖励 / 消耗都不超过 10**），新站点不会一上线就发放过量；
+> 想调大直接在后台「签到」页改，或改 `app/model/checkin.go` 的 `defaultCheckinConfig()`
+> （只影响尚未保存过配置的站点）。
 
 ```json
 {
@@ -115,41 +119,41 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
     "连续签到有惊喜，别忘了明天再来"
   ],
   "base": [
-    { "asset": "exp", "value": 10 },
-    { "asset": "integral", "value": 5 }
+    { "asset": "exp", "value": 3 },
+    { "asset": "integral", "value": 2 }
   ],
-  "streak": { "enabled": 1, "asset": "exp", "per_day": 2, "max": 50 },
+  "streak": { "enabled": 1, "asset": "exp", "per_day": 1, "max": 5 },
   "cycle": {
     "enabled": 1,
     "loop": 1,
     "days": [
       { "label": "第 1 天" },
       { "label": "第 2 天" },
-      { "label": "第 3 天", "rewards": [{ "asset": "integral", "value": 5 }] },
+      { "label": "第 3 天", "rewards": [{ "asset": "integral", "value": 2 }] },
       { "label": "第 4 天" },
       { "label": "第 5 天" },
       { "label": "第 6 天" },
-      { "label": "第 7 天", "rewards": [{ "asset": "integral", "value": 30, "label": "周期礼包" }] }
+      { "label": "第 7 天", "rewards": [{ "asset": "integral", "value": 5, "label": "周期礼包" }] }
     ]
   },
   "milestones": [
-    { "day": 7, "label": "连签一周", "rewards": [{ "asset": "exp", "value": 50 }, { "asset": "integral", "value": 20 }] },
-    { "day": 15, "label": "半月坚持", "rewards": [{ "asset": "exp", "value": 100 }, { "asset": "integral", "value": 50 }] },
-    { "day": 30, "label": "月度全勤", "rewards": [{ "asset": "exp", "value": 200 }, { "asset": "integral", "value": 100 }] }
+    { "day": 7, "label": "连签一周", "rewards": [{ "asset": "exp", "value": 5 }, { "asset": "integral", "value": 3 }] },
+    { "day": 15, "label": "半月坚持", "rewards": [{ "asset": "exp", "value": 8 }, { "asset": "integral", "value": 5 }] },
+    { "day": 30, "label": "月度全勤", "rewards": [{ "asset": "exp", "value": 10 }, { "asset": "integral", "value": 10 }] }
   ],
   "monthly": [
-    { "day": 20, "label": "月签满 20 天", "rewards": [{ "asset": "integral", "value": 50 }] },
+    { "day": 20, "label": "月签满 20 天", "rewards": [{ "asset": "integral", "value": 8 }] },
     {
       "day": 28,
       "label": "当月全勤",
       "rewards": [
-        { "asset": "integral", "value": 200 },
-        { "asset": "card", "value": 50, "fallback": "integral", "label": "全勤卡密" }
+        { "asset": "integral", "value": 10 },
+        { "asset": "card", "value": 1, "codes": [], "label": "全勤卡密" }
       ]
     }
   ],
-  "random": [{ "asset": "integral", "value": 20, "chance": 10, "label": "幸运奖励" }],
-  "makeup": { "enabled": 1, "days": 7, "limit": 3, "asset": "integral", "cost": 20 }
+  "random": [{ "asset": "integral", "value": 5, "chance": 10, "label": "幸运奖励" }],
+  "makeup": { "enabled": 1, "days": 7, "limit": 3, "asset": "integral", "cost": 5 }
 }
 ```
 
@@ -175,7 +179,7 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
 | 定位 | 日常正向激励 | 阶段性大奖（如连签 7/30 天） |
 | 判定 | 已启用且未达上限即发 | `before < 档位 <= after`，跨越才发 |
 
-两者会在同一天叠加（例如连签第 7 天 = 基础 + 周期奖励 + 连签加成 7×2 + 里程碑奖励）。
+两者会在同一天叠加（例如默认值下连签第 7 天 = 基础 + 周期奖励 + 连签加成 `min(7×1, 5)` + 里程碑奖励）。
 觉得收益给多了，可以只留其中一个（把另一个 `enabled` 设为 `0`）。
 
 **`cycle` 周期奖励**
@@ -193,7 +197,7 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
 | `enabled` | `1` | 是否允许补签 |
 | `days` | `7` | 可补签最近 N 天内的日期（不含今天） |
 | `limit` | `3` | 每月补签次数上限（`0` 不限制） |
-| `asset` / `cost` | `integral` / `20` | 每次补签消耗的资产与数量 |
+| `asset` / `cost` | `integral` / `5` | 每次补签消耗的资产与数量 |
 | `rewards` | 缺省 | 补签发放的奖励项（缺省 = 基础奖励） |
 
 > 补签发放**补签奖励（默认基础奖励）**，不补发周期奖励与连签加成；
@@ -208,42 +212,47 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
 | :--- | :--- | :--- | :--- | :--- |
 | `exp` | 经验 | 经验值 | `bi-star` | `inis_exp` 流水 + `users.exp` |
 | `integral` | 积分 | 积分 | `bi-coin` | `inis_integral` 流水 + `users.integral` |
-| `card` | 卡密 | 张 | `bi-ticket-perforated` | 从卡密池取一张绑定给用户（`inis_integral_card` 状态置为 `2 已发放`），用户到「我的积分 → 卡密兑换」兑换成积分（见下节） |
+| `card` | 卡密 | 张 | `bi-ticket-perforated` | **纯卡密**：发的是奖励项里自己填写的卡密（`codes`，一行一个），与积分无关；库存制，发完即失效（见下节） |
 
 - 经验 / 积分：`app/model/reward.go`
-- 卡密：`app/model/reward-card.go`
+- 卡密：资产注册在 `app/model/reward-card.go`，库存表与发放逻辑在 `app/model/reward-card-stock.go`
 
-### 卡密奖励（`asset = card`）
+### 卡密奖励（`asset = card`）—— 纯卡密 · 库存制
 
-想「连签满多少天送一张卡密」，把奖励项的资产选成 `card` 即可：
+签到的卡密由你在奖励项里直接指定，是一串**与积分无关**的码（外部渠道兑换码、自己印制的码…）：
 
 ```json
-{ "asset": "card", "value": 50, "fallback": "integral", "label": "全勤卡密" }
+{ "asset": "card", "value": 1, "codes": ["SN2026000001", "SN2026000002"], "label": "全勤卡密" }
 ```
+
+后台「签到管理」页的奖励行下方有对应文本框，一行一个，并实时显示「剩余 N 张（已发 M）」。
 
 | 字段 | 说明 |
 | :--- | :--- |
-| `value` | 卡密**面额**（会挑池子里面额相同的卡密）；填 `0` 表示不限面额，取任意一张 |
-| `fallback` | 卡密池没有可用卡密时的降级方式：`integral`（默认，改发等额积分）/ `exp`（改发等额经验）/ `none`（不发，只在明细里标注） |
-| `fallback_value` | 可选，降级发放的数量（缺省用卡密的 `value` 面额） |
+| `codes` | **卡密内容**（数组，一行一个）= 库存清单；留空则这份奖励不发卡密 |
+| `value` | 占位值，固定 `1`（奖励引擎会丢弃 value / min / max 全为 0 的奖励项）；**不代表面额**，卡密与积分无关 |
 
-**发放流程**
+**发放流程（库存制）**
 
-1. 从卡密池取一张「未使用 + 未过期」的卡密（`value > 0` 时按面额匹配，否则任意一张）；
-2. 原子占用（状态条件更新 + 影响行数判断，并发下不会重复发同一张）并置为 `2 已发放`、绑定 `uid`；
-3. 卡密明文随奖励明细一起返回（`items[].extra.card`），签到记录里也会保存；
-4. 用户到「我的积分 → 卡密兑换」输入卡密，或直接用「我的待兑换卡密」一键兑换（`GET /api/integral/card-mine`）。
+1. `codes` 里的卡密按需补进库存表 `inis_reward_card`（幂等：已存在的一律不动）；
+2. 从这些码里原子取一张「未发放」的（状态条件更新 + 影响行数判断，并发下不会重复发同一张），置为「已发放」并绑定 `uid`；
+3. 卡密明文随奖励明细一起返回（`items[].extra.card`），签到记录与站内信里也会带上；
+4. **发完即失效**：没有未发放的码时这份奖励什么都不发 —— **不做任何降级 / 改发**，签到本身照常成功，
+   响应里带 `{ "card_missing": true, "reason": "库存已发完" }`，前端提示「活动卡密已发完（库存不足），本次未发放」。
 
-**卡密池为空时**：既不报错也不会让签到失败，按 `fallback` 降级（默认改发等额积分），
-响应里会带上 `{ "card_missing": true, "fallback": "integral", "fallback_value": 50 }`，
-前端据此提示「卡密池暂无库存，本次已改发 50 积分」。
+| 行为 | 说明 |
+| :--- | :--- |
+| 库存 | 就是 `codes` 清单。把某个码从配置里删掉，它就不会再被发出去（已发出去的不受影响） |
+| 幂等 | 反复保存配置不会重复入库；新加的卡密在下次发放或查询库存时自动补进库存 |
+| 格式 | 去掉空格与连字符、转大写，长度 8 ~ 64 位（不合法的会被跳过并记日志，不影响签到） |
+| 用户侧 | 「签到」页的「今日获得的卡密」直接显示明文 + 一键复制（纯卡密，站内不需要兑换） |
+| 查询库存 | 后台签到页调用 `POST /api/checkin/card-stock`（传 `codes`）→ `{ total, issued, remain }`，需管理员权限点 `card-stock` |
 
 **其它说明**
 
-- 已发放的卡密**只有绑定用户能兑换**（`RedeemIntegralCard` 放行 `status = 2 且 uid = 本人`），
-  其它人拿到卡密会得到「卡密已被使用！」；已发放的卡密不允许在后台删除（避免用户找不回奖励）；
-- 卡密需要在后台「积分 → 卡密」里先生成；后台「签到管理」页顶部会显示当前可用卡密数量；
-- 卡密的状态：`0 未使用`（谁都能兑换）/ `1 已使用`（已兑换成积分）/ `2 已发放`（奖励已发到某用户账号，待其兑换）。
+- 奖励卡密单独存在 `inis_reward_card`（一行一张码），状态只有 `0 未发放` / `1 已发放`，与积分卡密互不影响；
+- 「积分 → 卡密」那套（后台生成随机卡密 / 导出 / 设置兑换人 / 用户兑换积分）依然可用，只是**与签到奖励无关**；
+- 站内信与签到成功文案里会带上卡密明文并提示「请自行保存」，不再提「去兑换积分」。
 
 扩展新资产（例如金币、道具、会员天数）只需注册一次：
 
@@ -330,14 +339,14 @@ model.RegisterRewardAsset(model.RewardAsset{
 | month_days | int | 本月已签到天数 |
 | rewards | object | 奖励明细，按来源分组（见「奖励构成」），**含概率 / 区间项**（带 `chance` / `min` / `max`） |
 | items | array | **必得**的奖励项列表（含 name / unit / icon），已排除概率与区间项 |
-| total | object | 必得奖励的按资产汇总：`{ exp: 24, integral: 5 }`（卡密的值为面额合计） |
+| total | object | 必得奖励的按资产汇总：`{ exp: 24, integral: 5, card: 1 }`（卡密按张数计，与积分无关） |
 | chance_items | array | 概率 / 区间奖励项（非必得），结构与 `items` 相同，另有 `chance` / `min` / `max` |
 | chance_total | object | 概率 / 区间奖励的按资产汇总（**不要**与 `total` 相加展示，否则用户会误以为必得） |
 
 > 「签到可得」请只用 `items` / `total`（必得部分）；`chance_items` / `chance_total` 建议用
 > 「另有 10% 概率获得 20 积分」「另有 5~15 积分」这类文案单独提示。
 > 已签到时（`checked = true`）这两个字段为空数组 / 空对象，`items` / `total` 是实际发放结果。
-| cards | array | 今日获得的卡密：`[{ card, value, card_missing, fallback, fallback_value, granted_at }]`（未签到或没配卡密时为 `[]`） |
+| cards | array | 今日获得的卡密：`[{ card_id, card, card_missing, reason, granted_at }]`（`card` 为明文；未签到 / 没配卡密时为空数组） |
 | milestones | array | 里程碑列表：`[{ day, label, rewards, reached, days_left }]` |
 | next_milestone | object | 下一个未达成的里程碑（无则 `null`） |
 | monthly / next_monthly | array / object | 月累计档位与下一个档位 |
@@ -364,36 +373,36 @@ model.RegisterRewardAsset(model.RewardAsset{
     "cycle_days": [
       { "day": 1, "label": "第 1 天", "rewards": [] },
       { "day": 2, "label": "第 2 天", "rewards": [] },
-      { "day": 3, "label": "第 3 天", "rewards": [{ "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin" }] }
+      { "day": 3, "label": "第 3 天", "rewards": [{ "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin" }] }
     ],
     "month_days": 5,
     "rewards": {
       "base": [
-        { "asset": "exp", "value": 10, "name": "经验", "unit": "经验值", "icon": "bi-star" },
-        { "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin" }
+        { "asset": "exp", "value": 3, "name": "经验", "unit": "经验值", "icon": "bi-star" },
+        { "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin" }
       ],
-      "cycle": [{ "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin" }],
-      "streak": [{ "asset": "exp", "value": 6, "name": "经验", "unit": "经验值", "icon": "bi-star", "label": "连续签到加成" }],
-      "random": [{ "asset": "integral", "value": 20, "chance": 10, "label": "幸运奖励", "name": "积分", "unit": "积分", "icon": "bi-coin" }]
+      "cycle": [{ "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin" }],
+      "streak": [{ "asset": "exp", "value": 2, "name": "经验", "unit": "经验值", "icon": "bi-star", "label": "连续签到加成" }],
+      "random": [{ "asset": "integral", "value": 5, "chance": 10, "label": "幸运奖励", "name": "积分", "unit": "积分", "icon": "bi-coin" }]
     },
     "items": [
-      { "asset": "exp", "value": 10, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "base" },
-      { "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "base" },
-      { "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "cycle" },
-      { "asset": "exp", "value": 6, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "streak", "label": "连续签到加成" }
+      { "asset": "exp", "value": 3, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "base" },
+      { "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "base" },
+      { "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "cycle" },
+      { "asset": "exp", "value": 2, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "streak", "label": "连续签到加成" }
     ],
-    "total": { "exp": 16, "integral": 10 },
+    "total": { "exp": 5, "integral": 4 },
     "chance_items": [
-      { "asset": "integral", "value": 20, "chance": 10, "label": "幸运奖励", "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "random" }
+      { "asset": "integral", "value": 5, "chance": 10, "label": "幸运奖励", "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "random" }
     ],
-    "chance_total": { "integral": 20 },
+    "chance_total": { "integral": 5 },
     "milestones": [
       { "day": 7, "label": "连签一周", "rewards": [], "reached": false, "days_left": 4 }
     ],
     "makeup": {
       "enabled": true, "days": 7, "limit": 3, "used": 0, "remain": 3,
-      "asset": "integral", "cost": 20,
-      "dates": [{ "date": 20260926, "text": "2026-09-26", "time": 1790352000, "cost": 20 }]
+      "asset": "integral", "cost": 5,
+      "dates": [{ "date": 20260926, "text": "2026-09-26", "time": 1790352000, "cost": 5 }]
     },
     "assets": [
       { "key": "exp", "name": "经验", "unit": "经验值", "icon": "bi-star" },
@@ -423,7 +432,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 | items | array | 本次实际发放的奖励项（含 name / unit / icon） |
 | rewards | object | 按来源分组的明细 |
 | total | object | 按资产汇总 |
-| cards | array | 本次发放的卡密（`card` 为明文；池子为空降级时带 `card_missing` / `fallback_value`） |
+| cards | array | 本次发放的卡密（`card` 为明文；库存发完时为 `{ card_missing: true, reason: "库存已发完" }`） |
 | crossed | object | 本次跨越到的档位：`{ streak: [7], monthly: [20] }`，无则空数组 |
 | tips | string | 本次随机文案 |
 | milestone | array | 本次命中的里程碑奖励（无则省略） |
@@ -442,14 +451,14 @@ model.RegisterRewardAsset(model.RewardAsset{
     "cycle_day": 7,
     "month_days": 7,
     "items": [
-      { "asset": "exp", "value": 10, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "base" },
-      { "asset": "integral", "value": 5, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "base" },
-      { "asset": "integral", "value": 30, "label": "周期礼包", "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "cycle" },
-      { "asset": "exp", "value": 14, "label": "连续签到加成", "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "streak" },
-      { "asset": "exp", "value": 50, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "milestone" },
-      { "asset": "integral", "value": 20, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "milestone" }
+      { "asset": "exp", "value": 3, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "base" },
+      { "asset": "integral", "value": 2, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "base" },
+      { "asset": "integral", "value": 5, "label": "周期礼包", "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "cycle" },
+      { "asset": "exp", "value": 5, "label": "连续签到加成", "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "streak" },
+      { "asset": "exp", "value": 5, "name": "经验", "unit": "经验值", "icon": "bi-star", "group": "milestone" },
+      { "asset": "integral", "value": 3, "name": "积分", "unit": "积分", "icon": "bi-coin", "group": "milestone" }
     ],
-    "total": { "exp": 74, "integral": 55 },
+    "total": { "exp": 13, "integral": 10 },
     "tips": "坚持的人运气不会太差，明天见"
   }
 }
@@ -481,7 +490,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 
 **响应字段**：`date`、`date_text`、`days`（补签后的连签天数）、`items`、`total`、`cards`、
 `crossed`（补签跨越的里程碑 / 月档位，如 `{ streak: [7], monthly: [] }`）、
-`cost`（`{ integral: 20 }`）、`month_days`、`makeup`（剩余次数与可补签日期）。
+`cost`（`{ integral: 5 }`）、`month_days`、`makeup`（剩余次数与可补签日期）。
 
 **失败响应**（202）：
 
@@ -592,11 +601,12 @@ model.RegisterRewardAsset(model.RewardAsset{
 
 ### 6. 卡密奖励的注意事项
 
-- 卡密需要先在后台「积分 → 卡密」生成，否则会走 `fallback`（默认改发等额积分）；
-- 发放出去（已发放）的卡密不能删除，用户可以在「我的积分 → 卡密兑换」找回
-  （`GET /api/integral/card-mine` 返回自己的待兑换卡密），也可以一键兑换；
+- 卡密内容必须写在奖励项的 `codes` 里（后台签到页有对应文本框），与「积分 → 卡密」的池子无关；
+  没填或库存发完时**什么都不发**（不降级、不改发），签到本身照常成功；
+- 库存就是 `codes` 清单，存在 `inis_reward_card`（状态只有 `0 未发放` / `1 已发放`），
+  把某个码从配置里删掉它就不会再被发出去；
 - 一张卡密只会发给一个用户：发放时用「状态条件更新 + 影响行数」原子占用，并发签到不会重复发同一张；
-- 卡密有有效期时同样受有效期约束：过期的卡密不会被发放，也不会被兑换。
+- 用户侧只在「签到」页展示卡密明文并提供复制（纯卡密，无需兑换），不需要绑定账号。
 
 ### 7. 签到成功通知的文案
 
@@ -605,11 +615,11 @@ model.RegisterRewardAsset(model.RewardAsset{
 1. **同一种奖励合并成合计**：基础 2 经验 + 连签加成 2 经验 → 显示「4 经验值」，
    不会再出现「2 经验值、2 经验值」这种看着像发重的写法；
 2. **来源多于一种时写清构成**，用括号说明每一项是怎么来的；
-3. **卡密按张数展示**（它的数值是面额，不能写成「50 张」），并带上明文与兑换入口。
+3. **卡密按张数展示**，并带上明文（提示「请自行保存」；卡密与积分无关，不再提兑换）。
 
 示例（连签第 1 天：基础 2 经验 + 2 积分 + 连签加成 2 经验）：
 
 > 今日签到成功，获得：4 经验值、2 积分（基础 2 经验值 + 2 积分 · 连签加成 +2 经验值）。已连续签到 1 天。
 
 跨越里程碑时，括号里会多出「里程碑 +50 经验值 + 20 积分」这样的来源；发放卡密时会追加
-「卡密：K7M9X2P7Q1Z8B4N6（面额 50 积分），到「我的积分 → 卡密兑换」兑换」。
+「卡密：K7M9X2P7Q1Z8B4N6，请自行保存」；库存发完时则追加「（卡密库存已发完，本次未发放）」。

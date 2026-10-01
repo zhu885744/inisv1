@@ -5,32 +5,27 @@ import (
 	"inis/app/facade"
 
 	"github.com/spf13/cast"
-	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
 )
 
-// ============================== 卡密奖励资产 ==============================
+// ============================== 卡密奖励资产（纯卡密 · 库存制） ==============================
 //
-// 把「积分卡密」接进奖励引擎：任何奖励配置（签到基础奖励 / 周期奖励 / 里程碑 / 月全勤 …）
-// 里写 {"asset":"card","value":100} 就能发一张面额 100 的卡密。
+// 奖励项里自己填卡密内容，发出去的就是这些码：
 //
-// 发放语义：从卡密池取一张「未使用 + 未过期」的卡密 → 标记为「已发放」并绑定用户
-// （见 model/integral-card.go 的 GrantIntegralCardTx），卡密明文会随奖励明细一起返回，
-// 用户到「积分 → 卡密兑换」把它兑换成积分。
+//	{"asset":"card","codes":["SN2026000001","SN2026000002"]}
 //
-// 池子为空时不能把整次签到搞失败，因此在资产内部做降级：
-//
-//	{"asset":"card","value":100,"fallback":"integral"}          没卡了 → 改发 100 积分（默认策略）
-//	{"asset":"card","value":100,"fallback":"none"}              没卡了 → 不发，只在明细里标注
-//	{"asset":"card","value":100,"fallback":"integral","fallback_value":50}  改发 50 积分
-//
-// value 填 0 表示「不限面额」（取池子里任意一张）。
+// 语义：
+//   - **与积分无关**：卡密就是一张码，没有面额，也不进「积分 → 卡密」的池子；
+//     用户拿到码之后自己去用（外部渠道兑换、线下核销…），本站不做二次兑换；
+//   - **库存制**：codes 就是库存清单，每发一次消耗一张（见 reward-card-stock.go），
+//     **发完即失效** —— 没有未发放的码时这次奖励什么都不发；
+//   - **不降级**：库存不足不改发积分 / 经验，也不会让签到失败，只在奖励明细里标记
+//     card_missing（前端据此提示「卡密已发完」）；
+//   - 数值字段（value）不参与卡密逻辑，只是为了满足奖励引擎「value / min / max 全 0
+//     的奖励项会被丢弃」的规则（见 reward.go 的 parseRewardItem），后台会自动写成 1（1 张）。
 
 // RewardCardAssetKey - 卡密奖励的资产标识（各处判断「这条奖励是不是卡密」用）
 const RewardCardAssetKey = "card"
-
-// RewardCardFallbackNone - 卡密不足时「什么都不发」的降级标记
-const RewardCardFallbackNone = "none"
 
 func init() {
 	RegisterRewardAsset(RewardAsset{
@@ -38,78 +33,40 @@ func init() {
 		Name: "卡密",
 		Unit: "张",
 		Icon: "bi-ticket-perforated",
-		Desc: "数值 = 卡密面额（0 表示任意面额）；卡密池不足时按 fallback 降级发放",
+		Desc: "卡密内容在奖励项里自己填（一行一个），与积分无关；库存发完即失效，不改发别的奖励",
 		Grant: func(tx *gorm.DB, uid int, value int, meta facade.H) (facade.H, error) {
 
-			extra, err := GrantIntegralCardTx(tx, uid, value, meta)
+			codes := ParseCardCodes(asStringMap(meta["config"])["codes"])
+
+			// 没配置卡密内容 = 没有库存：什么都不发（不降级）
+			if len(codes) == 0 {
+				facade.Log.Warn(map[string]any{
+					"uid":  uid,
+					"type": cast.ToString(meta["type"]),
+				}, "卡密奖励未配置卡密内容，本次不发放")
+				return facade.H{"card_missing": true, "reason": "未配置卡密"}, nil
+			}
+
+			extra, err := GrantRewardCardTx(tx, uid, codes)
 			if err == nil {
 				return extra, nil
 			}
-			if !errors.Is(err, ErrIntegralCardEmpty) {
-				return nil, err
+
+			// 库存发完：这是正常状态，不发任何替代奖励
+			if errors.Is(err, ErrRewardCardEmpty) {
+				facade.Log.Info(map[string]any{
+					"uid":  uid,
+					"type": cast.ToString(meta["type"]),
+				}, "卡密库存已发完，本次不发放")
+				return facade.H{"card_missing": true, "reason": "库存已发完"}, nil
 			}
 
-			// 池子为空：按 fallback 降级，不让签到整体失败
-			return fallbackRewardCard(tx, uid, value, meta)
+			return nil, err
 		},
 		Balance: func(uid int) int {
-			return AvailableIntegralCardCount(0)
+			// 库存按「奖励项里填的卡密」计算，资产级没有统一余额
+			// （后台用 checkin/card-stock 按奖励项查询，见 RewardCardStock）
+			return 0
 		},
 	})
-}
-
-// fallbackRewardCard - 卡密池为空时的降级发放
-func fallbackRewardCard(tx *gorm.DB, uid int, value int, meta facade.H) (facade.H, error) {
-
-	config := asStringMap(meta["config"])
-
-	fallback := cast.ToString(config["fallback"])
-	if utils.Is.Empty(fallback) {
-		// 默认改发等额积分：对用户最友好，也最接近卡密本身的价值
-		fallback = "integral"
-	}
-
-	result := facade.H{
-		"card_missing": true,
-		"fallback":     fallback,
-	}
-
-	if fallback == RewardCardFallbackNone {
-		facade.Log.Warn(map[string]any{"uid": uid, "value": value}, "卡密池为空，本次卡密奖励已跳过（fallback=none）")
-		return result, nil
-	}
-
-	grant := RewardAssetWithGrant(fallback)
-	if grant == nil {
-		facade.Log.Error(map[string]any{"fallback": fallback, "uid": uid}, "卡密降级资产未注册，本次卡密奖励已跳过")
-		return result, nil
-	}
-
-	// 降级数量：优先 fallback_value，缺省用卡密面额；都为 0 时无法降级
-	amount := cast.ToInt(config["fallback_value"])
-	if amount <= 0 {
-		amount = value
-	}
-	if amount <= 0 {
-		facade.Log.Warn(map[string]any{"uid": uid}, "卡密池为空且未配置降级数量，本次卡密奖励已跳过")
-		return result, nil
-	}
-
-	extra, err := grant(tx, uid, amount, meta)
-	if err != nil {
-		return nil, err
-	}
-
-	result["fallback_value"] = amount
-	if len(extra) > 0 {
-		result["fallback_extra"] = extra
-	}
-
-	facade.Log.Warn(map[string]any{
-		"uid":      uid,
-		"fallback": fallback,
-		"amount":   amount,
-	}, "卡密池为空，已按降级策略发放")
-
-	return result, nil
 }

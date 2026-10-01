@@ -150,6 +150,50 @@ func (this *Attachment) verifyFileContent(headerBytes []byte, fileExt string) bo
 	}
 }
 
+// sniffFileExt - 按文件头（magic bytes）判断「内容实际是什么类型」
+//
+// 用途：内容与扩展名不符时（QQ / 微信保存的二维码、浏览器另存为的图片，经常是
+// 「文件名 .jpg、内容其实是 PNG / WebP」），把扩展名按真实内容纠回来；
+// 纠不了时也能给出「实际是 XX」的提示，而不是一句「不匹配」让人没头绪。
+//
+// 只返回**能唯一判定**的类型：doc / xls / ppt 同为 OLE2 头、docx / xlsx / pptx 与 zip
+// 同为 PK 头，光看文件头分不出来，这些返回空（仍由 verifyFileContent 按扩展名判定）。
+func (this *Attachment) sniffFileExt(headerBytes []byte) (ext string, label string) {
+	has := func(sign ...byte) bool {
+		if len(headerBytes) < len(sign) {
+			return false
+		}
+		for index, item := range sign {
+			if headerBytes[index] != item {
+				return false
+			}
+		}
+		return true
+	}
+
+	switch {
+	case has(0xFF, 0xD8, 0xFF):
+		return "jpg", "JPEG 图片"
+	case has(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A):
+		return "png", "PNG 图片"
+	case has('G', 'I', 'F', '8'):
+		return "gif", "GIF 图片"
+	case has('R', 'I', 'F', 'F') && len(headerBytes) >= 12 &&
+		headerBytes[8] == 'W' && headerBytes[9] == 'E' && headerBytes[10] == 'B' && headerBytes[11] == 'P':
+		return "webp", "WebP 图片"
+	case has('B', 'M'):
+		return "bmp", "BMP 图片"
+	case has('%', 'P', 'D', 'F'):
+		return "pdf", "PDF 文档"
+	case has('R', 'a', 'r', '!', 0x1A, 0x07, 0x00):
+		return "rar", "RAR 压缩包"
+	case has(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C):
+		return "7z", "7z 压缩包"
+	}
+
+	return "", ""
+}
+
 func (this *Attachment) sanitizeSVG(content string) string {
 	content = regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`).ReplaceAllString(content, "")
 	content = regexp.MustCompile(`(?i)<script[^>]*\/?>`).ReplaceAllString(content, "")
@@ -762,6 +806,9 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 	defer file.Close()
 
 	fileName := this.sanitizeFileName(fileHeader.Filename)
+	// suffix 始终是「原始文件名里的后缀」，fileExt 是「最终用来存储的扩展名」，
+	// 两者在下面「内容与扩展名不符」时会分叉（fileExt 按真实内容纠正，suffix 不动，
+	// 这样命名规则里的 {filename} 依旧能正确去掉原后缀）
 	suffix := ""
 	fileExt := ""
 	if lastIndex := strings.LastIndex(fileName, "."); lastIndex > 0 {
@@ -786,8 +833,28 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 	headerBytes = headerBytes[:n]
 
 	if !this.verifyFileContent(headerBytes, fileExt) {
-		result.Error = fmt.Errorf("文件内容与扩展名不匹配！")
-		return result
+		// 内容与扩展名不符：QQ / 微信保存的二维码图、浏览器「另存为」的图片常常是
+		// 「文件名 .jpg，内容其实是 PNG / WebP」，直接拒掉太不友好。
+		// 这里按文件头判断真实类型：
+		//   - 能判定且本来就在允许列表里 → 按真实内容纠正扩展名（存储与 MIME 都用真实类型，用户无感）；
+		//   - 判定不了 / 判定出的类型不被允许 → 报错时带上「实际是 XX」，方便用户改后缀后重传。
+		actual, label := this.sniffFileExt(headerBytes)
+		if actual == "" || !config.IsExtensionAllowed(actual) {
+			if label != "" {
+				result.Error = fmt.Errorf("文件内容与扩展名不匹配：内容的真实类型是 %s，请把后缀改成 .%s 后再上传", label, actual)
+			} else {
+				result.Error = fmt.Errorf("文件内容与扩展名不匹配！")
+			}
+			return result
+		}
+
+		facade.Log.Info(map[string]any{
+			"file": fileName,
+			"from": fileExt,
+			"to":   actual,
+		}, "上传文件的内容类型与扩展名不符，已按真实内容纠正扩展名")
+
+		fileExt = actual
 	}
 
 	mimeType := http.DetectContentType(headerBytes)

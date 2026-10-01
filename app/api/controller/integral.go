@@ -57,6 +57,7 @@ func (this *Integral) IPOST(ctx *gin.Context) {
 	allow := map[string]any{
 		"give":          this.give,
 		"card-generate": this.cardGenerate,
+		"card-import":   this.cardImport,
 		"card-redeem":   this.cardRedeem,
 		"card-bind":     this.cardBind,
 	}
@@ -471,6 +472,58 @@ func (this *Integral) cardGenerate(ctx *gin.Context) {
 		"cards":       cards,
 		"list":        list,
 	}, facade.Lang(ctx, "生成成功！"), 200)
+}
+
+// cardImport - 导入自定义卡密（管理员）
+//
+// 与 card-generate 的区别：卡密内容由管理员自己填写（一行一个），而不是系统随机生成，
+// 适用于「卡密来自其它系统 / 自己印制 / 指定编号」的场景；导入后的卡密与随机生成的
+// 完全等价（同一张表、同样的兑换流程）。
+//
+// 参数：codes 卡密内容（数组或整段文本）；value 积分面额；expire_time / expire 有效期（0 或留空=永久）；remark 备注
+// 返回：batch 批次号、count 成功数量、cards 明文列表、report 导入报告（含被跳过的卡密与原因）
+func (this *Integral) cardImport(ctx *gin.Context) {
+	if !this.meta.permit(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限：当前账号未被授予该权限点！"), 403)
+		return
+	}
+
+	params := this.params(ctx)
+
+	value := cast.ToInt(params["value"])
+
+	expireTime, err := integralCardExpire(params)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
+	list, batch, report, err := model.ImportIntegralCards(
+		model.ParseCardCodes(params["codes"]),
+		value,
+		expireTime,
+		cast.ToString(params["remark"]),
+	)
+	if err != nil {
+		// 失败时也把报告带上，前端能告诉管理员哪些卡密被跳过了
+		this.json(ctx, gin.H{"report": report}, err.Error(), 400)
+		return
+	}
+
+	cards := make([]string, 0, len(list))
+	for _, item := range list {
+		cards = append(cards, item.Card)
+	}
+
+	this.json(ctx, gin.H{
+		"batch":       batch,
+		"count":       len(list),
+		"value":       value,
+		"expire_time": expireTime,
+		"cards":       cards,
+		"report":      report,
+		"list":        list,
+	}, facade.Lang(ctx, "导入成功！"), 200)
 }
 
 // redeemLocked - 卡密兑换是否被锁定（超过失败次数上限）

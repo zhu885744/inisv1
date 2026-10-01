@@ -49,8 +49,9 @@ func (this *Checkin) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"sign":   this.sign,
-		"makeup": this.makeup,
+		"sign":       this.sign,
+		"makeup":     this.makeup,
+		"card-stock": this.cardStock,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -140,6 +141,28 @@ func (this *Checkin) rank(ctx *gin.Context) {
 // rules - 签到规则（公开）
 func (this *Checkin) rules(ctx *gin.Context) {
 	this.json(ctx, model.CheckinRules(), facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// cardStock - 卡密库存查询（管理员）
+//
+// 后台「签到设置」页用它显示每个卡密奖励还剩多少张：传该奖励项当前填写的卡密内容（codes），
+// 返回 { total, issued, remain }；顺带把新填的卡密补进库存（幂等），
+// 这样 total 就等于管理员填写的数量（不用自己数），remain 是还能发几张（发完即失效）。
+func (this *Checkin) cardStock(ctx *gin.Context) {
+	if !this.meta.permit(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限：当前账号未被授予该权限点！"), 403)
+		return
+	}
+
+	params := this.params(ctx)
+	codes := model.ParseCardCodes(params["codes"])
+
+	if len(codes) > model.RewardCardMaxCount {
+		this.json(ctx, nil, facade.Lang(ctx, "单个奖励最多配置 %d 张卡密！", model.RewardCardMaxCount), 400)
+		return
+	}
+
+	this.json(ctx, model.RewardCardStock(codes), facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // sign - 签到（需登录）

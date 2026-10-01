@@ -457,6 +457,7 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=sign&type=login&name=每日签到",
 				"path=makeup&type=login&name=补签",
+				"path=card-stock&type=default&name=卡密库存",
 			},
 		},
 		"integral": {
@@ -474,6 +475,7 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=give&type=default&name=调整积分",
 				"path=card-generate&type=default&name=生成卡密",
+				"path=card-import&type=default&name=导入自定义卡密",
 				"path=card-bind&type=default&name=设置卡密兑换人",
 				"path=card-redeem&type=login&name=卡密兑换积分",
 			},
