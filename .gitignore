@@ -4,6 +4,8 @@
 /runtime
 /frontend
 /dist
+# 内嵌主题产物（构建时由 Mellow/dist 拷入，见 build.bat / build.sh）
+/theme/dist
 *.exe*
 *.conf
 /SimpleBlog

@@ -37,8 +37,8 @@ func InitMoments() {
 		return
 	}
 
-	// 初始化数据
-	go initMomentsData()
+	// 初始化数据：必须同步完成，InitTable 的等待/超时才覆盖得到（见 base.go 的 InitTable 注释）
+	initMomentsData()
 }
 
 // initMomentsData - 初始化Moments表数据

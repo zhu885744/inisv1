@@ -56,6 +56,29 @@ func isCommonRoute(ruleType string) bool {
 	return ruleType == "common"
 }
 
+// publicRoutes - 无需登录即可访问的接口（与 createAuthRules 里标记 type=common 的公开接口一致）
+//
+// 为什么还要硬编码一份：规则是从 auth_rules 表查的，而刚装完（或规则尚未落库/缓存为空）时
+// 查不到这一行，中间件就会按「需要登录」处理 —— 结果是**登录接口自己要先登录**，
+// 带着旧 token 的用户永远登不进来（表现为登录接口返回 401、点「登录」毫无反应）。
+// 这里对公开接口兜一层，保证鉴权链路本身可用；权限收敛仍以 auth_rules 为准。
+var publicRoutes = map[string]bool{
+	"POST /api/comm/login":            true,
+	"POST /api/comm/register":         true,
+	"POST /api/comm/check-token":      true,
+	"POST /api/comm/reset-password":   true,
+	"POST /api/comm/logout":           true,
+	"POST /api/comm/verify-email":     true,
+	"POST /api/comm/send-verify-mail": true,
+	"DELETE /api/comm/logout":         true,
+}
+
+// isPublicRoute 判断是否为公开接口（与规则表无关的兜底）
+func isPublicRoute(ctx *gin.Context) bool {
+	key := strings.ToUpper(ctx.Request.Method) + " " + ctx.Request.URL.Path
+	return publicRoutes[key]
+}
+
 // isLoginRoute 判断是否为登录路由
 func isLoginRoute(ruleType string) bool {
 	return ruleType == "login"
@@ -86,7 +109,8 @@ func Rule() gin.HandlerFunc {
 
 		// 公共接口（type=common）：无论是否携带 token、token 是否有效，一律放行。
 		// 这是"匿名请求携带旧/跨实例 cookie 时不被 401 拖累"的关键。
-		if isCommonRoute(ruleType) {
+		// isPublicRoute 是针对「规则还没落库」窗口期的兜底（见其注释）。
+		if isCommonRoute(ruleType) || isPublicRoute(ctx) {
 			ctx.Next()
 			return
 		}
@@ -103,8 +127,13 @@ func Rule() gin.HandlerFunc {
 		}
 
 		// 2) 未登录（无 token）→ 401
+		//
+		// auth: "guest" 用于把「没登录」和「登录态异常」区分开：
+		// 两者都是 401，但前端只应对后者弹「登录状态异常，需要自行清除 cookie」，
+		// 否则刚装完还没登录、或旧 token 指向的用户已不存在时，会凭空弹一个吓人的框。
+		// 见 Mellow/src/api/request.js 的 isGuestAuth。
 		if user.Id == 0 {
-			ctx.JSON(200, gin.H{"code": 401, "msg": facade.Lang(ctx, "请先登录！"), "data": nil})
+			ctx.JSON(200, gin.H{"code": 401, "msg": facade.Lang(ctx, "请先登录！"), "data": nil, "auth": "guest"})
 			ctx.Abort()
 			return
 		}

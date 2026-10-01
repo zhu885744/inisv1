@@ -62,6 +62,11 @@ func InitAuthRules() {
 // 同时顺带纠正历史数据里非法的规则类型（type=root → default）。
 func EnsureAuthRules() {
 
+	// 未完成安装时没有数据库：直接跳过，避免空指针（定时任务也会先判断一次，这里是双保险）
+	if !facade.Installed() {
+		return
+	}
+
 	list := createAuthRules()
 	facade.Log.Info(map[string]any{"count": len(list)}, "createAuthRules生成规则数量")
 

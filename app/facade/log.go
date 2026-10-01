@@ -20,15 +20,10 @@ var LogToml *utils.ViperResponse
 // initLogToml - 初始化缓存配置文件
 func initLogToml() {
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "log",
-		Content: utils.Replace(TempLog, map[string]any{
-			"${on}":      "true",
-			"${size}":    2,
-			"${age}":     7,
-			"${backups}": 20,
-		}),
+		Path:    ConfigPath,
+		Mode:    ModeToml,
+		Name:    ConfigNameLog,
+		Content: logTomlContent(),
 	}).Read()
 
 	if item.Error != nil {

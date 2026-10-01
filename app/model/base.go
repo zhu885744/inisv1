@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"inis/app/facade"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jasonlvhit/gocron"
@@ -13,23 +14,42 @@ import (
 
 // 公共常量
 const (
-	installLockFile = "install.lock"
-	adminGroupId    = 1
+	adminGroupId = 1
 )
 
-// task - 定时任务
+// task - 定时任务（每秒一次）：安装完成的那一刻接管数据库初始化，装完不用重启服务
 func task() {
-	if !utils.File().Exist(installLockFile) {
-		gocron.Remove(task)
-		facade.WatchDB(true)
-		if cast.ToBool(facade.NewToml(facade.TomlDb).Get("mysql.migrate")) {
-			go InitTable()
-		}
+	// 未完成安装时什么都不做。以前这里只看 install.lock，只拷一个二进制的部署
+	// （既没有锁也没有数据库配置）会被判成「已安装」，立刻去连空数据库并 panic。
+	// 口径见 facade.Installed：安装锁已解除且 database.toml 已生成。
+	if !facade.Installed() {
+		return
+	}
+
+	gocron.Remove(task)
+
+	facade.WatchDB(true)
+	if cast.ToBool(facade.NewToml(facade.TomlDb).Get("mysql.migrate")) {
+		go InitTable()
 	}
 }
 
+// initTableMutex - 初始化数据库表的进程内串行锁
+//
+// 有两路会触发初始化：包 init()（已安装时随启动即跑）与 gocron 的 task()（安装完成那一刻跑）。
+// 两者可能在同一秒内先后触发，而各表的数据初始化都是「先查数量、再插入」的形式，
+// 并发执行会插出重复的默认数据（典型症状：后台出现两条一模一样的「默认分类」）。
+// 这里把整轮初始化串起来，第二个调用者会等前一轮跑完，从而看到刚插进去的数据。
+var initTableMutex sync.Mutex
+
 // InitTable - 初始化数据库表
+//
+// 注意：各 Init* 里的「数据初始化」必须同步完成（不要另起 go），
+// 否则下面的等待与超时覆盖不到，别的初始化流程仍可能与它重复插入。
 func InitTable() {
+	initTableMutex.Lock()
+	defer initTableMutex.Unlock()
+
 	allow := []struct {
 		name string
 		fn   func()
@@ -100,8 +120,9 @@ func init() {
 	}
 	gocron.Start()
 
-	// 未安装（存在安装锁）时跳过数据库初始化，避免空配置导致连接失败 panic
-	if utils.File().Exist(installLockFile) {
+	// 尚未完成安装时跳过数据库初始化，避免空 DSN 直接 panic（连安装向导都打不开）。
+	// 判定口径见 facade.Installed：安装锁已解除且数据库配置已生成才算装好。
+	if !facade.Installed() {
 		return
 	}
 

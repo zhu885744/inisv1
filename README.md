@@ -40,7 +40,8 @@ inis 是一款基于 Go 语言开发的高性能内容管理系统（CMS），�
 go run main.go
 ```
 
-> 访问地址：http://localhost:8642 后会显示图形化安装程序操作页面根据提示进行安装
+> 访问地址：http://localhost:8642 —— 未安装时首页会自动 302 到图形化安装向导（`/install`），按提示完成即可
+> 安装向导：检查环境 → 填写数据库 → 初始化数据 → 完成安装（装完自动解除安装锁）
 > 默认管理员账号：admin
 > 默认管理员密码：admin123456
 
@@ -49,7 +50,48 @@ go run main.go
 #### 使用 build.bat 脚本（推荐）
 1. 在项目根目录下双击 `build.bat` 文件
 2. 根据提示选择编译平台（Windows/Linux/macOS）
-3. 等待编译完成，生成的可执行文件会放在 `dist` 目录
+3. 询问「是否把前端（Mellow）构建产物打包进二进制？」时选 `y`（默认），
+   脚本会自动 `npm install`（首次）→ `npm run build` → 把产物拷到 `theme/dist` → 带 `-tags embed` 编译
+4. 等待编译完成，生成的可执行文件会放在 `dist` 目录
+
+#### 使用 build.sh 脚本（Linux / macOS）
+```bash
+bash build.sh                 # 当前系统/架构，内嵌前端
+bash build.sh linux amd64     # 交叉编译到 Linux x86_64
+bash build.sh linux arm64     # 交叉编译到 Linux ARM64
+bash build.sh linux amd64 skip  # 不构建/不内嵌前端
+```
+
+#### 单文件部署（把主题打进二进制）
+
+选择打包前端后，编译出来的可执行文件**自带主题与安装向导**，部署只需要：
+
+```
+inis_linux_amd64     # 可执行文件（内含 Mellow 的前端产物 + 安装向导 + 语言包）
+```
+
+**连 config 目录都不用准备**：首次启动会自动创建 `config/`、`config/i18n/`、`runtime/`、`storage/` 等目录，
+并用内置模板生成 `app.toml`、`cache.toml`、`log.toml`、`sms.toml`、`storage.toml`、`crypt.toml`
+（`crypt.toml` 里是随机生成的 JWT 密钥，会持久化；`database.toml` 留给安装向导写），
+同时把内置语言包释放到 `config/i18n/`。启动后访问首页会被 302 到 `/install` 完成安装：
+
+```
+填数据库 → 初始化数据 → 完成安装（解除安装锁）
+```
+
+> 全新部署的判定口径是「安装锁已解除 **且** database.toml 已生成」，
+> 所以只拷一个二进制（既没有 install.lock、也没有 database.toml）也会被正确识别为「未安装」，
+> 不会带着空数据库配置启动报错。
+
+不必再把主题文件（`index.html`、`static/**`）分发到 `public` 目录，也不用为静态资源单独配 nginx。
+运行时主题文件优先从二进制内读取，二进制里没有的（`public/assets` 的表情包与占位图、上传附件等）
+照旧读磁盘；想换主题内容又不想重新编译，则不带 `-tags embed` 编译即可（与老版本行为一致）。
+
+> 安装向导已经内置在 Mellow 里（`/install`，代码见 `Mellow/src/views/install/Index.vue`），
+> 所以**全新安装也不需要额外的 install.html**：未安装时首页会自动 302 到安装向导。
+
+> 提示：入口 HTML 与 `runtime-config.js` 会带 `no-cache`，`/static/**` 带内容 hash 的资源长缓存，
+> 所以发新版不会有「用户停在旧页面 / 旧 JS」的问题。
 
 #### 手动打包
 
@@ -66,6 +108,11 @@ go build -ldflags -H=windowsgui -o inis.exe main.go
 ```bash
 # 编译为可执行文件
 go build -o inis main.go
+
+# 内嵌主题（单文件部署）：先把 Mellow 的构建产物放到 theme/dist，再带 embed 标签编译
+cd Mellow && npm run build && cd ..
+rm -rf theme/dist && mkdir -p theme/dist && cp -R Mellow/dist/. theme/dist/
+go build -tags embed -o inis main.go
 
 # 设置可执行权限
 chmod +x inis
@@ -96,7 +143,7 @@ bee pack -ba="-ldflags -s -w"
 |------|------|----------|
 | 端口被占用 | 8642 端口已被其他服务占用 | 修改 `config/app.toml` 中的端口配置 |
 | 数据库连接失败 | 数据库配置错误 | 检查数据库连接信息和权限 |
-| 404 错误 | 主题文件未部署 | 确保主题文件已正确部署到 `public` 目录 |
+| 404 错误 | 主题文件未部署 | 确保主题文件已正确部署到 `public` 目录；或打包时选「内嵌前端产物」（`go build -tags embed`），主题随二进制自带 |
 | 502 错误 | 应用未运行或端口错误 | 检查应用运行状态和 Nginx 配置 |
 
 ## 系统架构
@@ -299,7 +346,11 @@ inisv1/
 ├── .gitignore              # Git 忽略文件配置
 ├── LICENSE                 # 项目许可证（MIT）
 ├── README.md               # 项目说明文档（功能、运行、规划等）
-├── build.bat               # 编译脚本（生成可执行文件）
+├── build.bat               # 编译脚本（生成可执行文件；可把前端产物一起打进二进制）
+├── build.sh                # 编译脚本（Linux / macOS 版，同样支持内嵌前端）
+├── theme/                  # 内嵌主题：dist 为构建时拷入的前端产物（-tags embed 时打进二进制）
+│   ├── theme.go            # 内嵌主题的查找与响应元信息（默认构建为空实现）
+│   └── theme_embed.go      # //go:embed all:dist（仅在 -tags embed 时编译）
 ├── go.mod                  # Go 模块依赖配置
 ├── go.sum                  # 依赖校验文件
 ├── inis.sh                 # Linux 安装脚本
@@ -362,8 +413,7 @@ inisv1/
 │   └── 项目规划.md          # 项目规划文档
 │
 ├── public/                 # 静态资源目录
-│   ├── index.html          # 首页 HTML
-│   ├── install.html        # 安装引导页 HTML
+│   ├── index.html          # 首页 HTML（未部署主题时的占位提示页）
 │   └── assets/             # 静态资源
 │       ├── emoji/          # 表情包资源
 │       │   ├── bilibili/   # B站表情包（webp 格式）

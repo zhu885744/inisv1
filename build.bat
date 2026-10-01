@@ -1,4 +1,8 @@
 @echo off
+:: 本脚本为 GBK（ANSI / 936）编码，与下面的 chcp 936 必须保持一致。
+:: 不要改成 UTF-8：cmd.exe 解析含中文的 UTF-8 批处理并不可靠，
+:: 会把长行拆错（表现为注释被当成命令执行、set 赋值失败、脚本卡住等）。
+:: 用编辑器保存时请选择「GBK / ANSI」编码。
 chcp 936 > nul 2>&1
 setlocal enabledelayedexpansion
 
@@ -117,10 +121,49 @@ go mod tidy > nul 2>&1
 echo [成功] 依赖下载完成
 echo.
 
+:: ======================== 前端打包（可选：内嵌主题） ========================
+:: 把 Mellow 的前端产物打进二进制（go build -tags embed），部署就只剩
+:: 「一个可执行文件 + config 目录」，不用再单独分发主题文件到 public 目录。
+:: 跳过时行为与以前完全一致（主题文件仍需自行部署到 public）。
+set "EMBED_TAGS="
+set "EMBED_INPUT="
+echo [询问] 是否把前端（Mellow）构建产物打包进二进制？打包后部署更省事（单文件）。
+set /p "EMBED_INPUT=请输入（y/n，默认：y）："
+if "!EMBED_INPUT!"=="" set "EMBED_INPUT=y"
+echo.
+
+if /i "!EMBED_INPUT!"=="y" (
+    node -v > nul 2>&1
+    if errorlevel 1 (
+        echo [警告] 未安装 Node.js，跳过前端打包（本次编译不内嵌主题）。
+    ) else (
+        if not exist "%~dp0Mellow\node_modules" (
+            echo [下载] 前端依赖（首次较慢，请耐心等待）...
+            call npm --prefix "%~dp0Mellow" install --no-fund --no-audit
+        )
+        echo [构建] 前端产物...
+        call npm --prefix "%~dp0Mellow" run build
+
+        if not exist "%~dp0Mellow\dist\index.html" (
+            echo [警告] 前端未产出 dist\index.html，跳过内嵌（请检查上面的构建输出）。
+        ) else (
+            echo [打包] 拷贝产物到 theme\dist ...
+            if exist "%~dp0theme\dist" rmdir /s /q "%~dp0theme\dist"
+            xcopy /e /i /q /y "%~dp0Mellow\dist" "%~dp0theme\dist" > nul
+            set "EMBED_TAGS=-tags embed"
+            echo [成功] 前端产物已就绪，编译时会打进二进制。
+        )
+    )
+) else (
+    echo [信息] 已跳过前端打包（编译出的二进制需自行把主题文件部署到 public 目录）。
+)
+echo.
+
 :: ======================== 编译逻辑 ========================
 if "!sel!"=="7" (
     :: ======================== 批量编译所有平台 ========================
     echo ======================== 开始批量编译所有平台 ========================
+    echo [提示] 内嵌前端时每个平台首次编译较慢，期间没有输出属正常，请耐心等待。
     echo.
     
     set "total_success=0"
@@ -135,7 +178,7 @@ if "!sel!"=="7" (
         
         echo [%%i/!PLATFORM_COUNT!] 正在编译：!desc!
         set CGO_ENABLED=0
-        go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
+        go build !EMBED_TAGS! -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
         
         if errorlevel 1 (
             echo [失败] 编译失败：!desc!
@@ -196,8 +239,9 @@ if "!sel!"=="7" (
     set "output_file=!OUTPUT_DIR!\!out!"
 
     echo 编译目标：!desc!
+    echo [提示] 编译中（内嵌前端时首次较慢，期间没有输出属正常，请耐心等待）...
     set CGO_ENABLED=0
-    go build -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
+    go build !EMBED_TAGS! -ldflags "-s -w -buildid= -extldflags '-static -s -w'" -trimpath -o "!output_file!" main.go
 
     if errorlevel 1 (
         echo [失败] 编译失败！

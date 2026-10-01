@@ -71,6 +71,15 @@ func Params() gin.HandlerFunc {
 			switch {
 			case strings.Contains(contentType, contentTypeJSON):
 				item = cast.ToStringMap(utils.Json.Decode(string(body)))
+				// 兜底：有些客户端会把表单体配上 JSON 头发出来
+				// （axios 对 URLSearchParams 用的是「不覆盖实例默认头」，而实例默认头恰好是 application/json），
+				// 此时 JSON 解不出来，若直接放过会导致「全部参数静默丢失」，表现为「xxx 不能为空！」。
+				// 解不出 JSON 就退一步按表单解析。
+				if utils.Is.Empty(item) {
+					if values, err := url.ParseQuery(string(body)); err == nil {
+						item = utils.Parse.Params(utils.Parse.ParamsBefore(values))
+					}
+				}
 				if !utils.Is.Empty(item) {
 					for key, val := range item {
 						params[key] = val

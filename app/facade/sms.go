@@ -196,45 +196,11 @@ func NewSMS(mode any) SMSInterface {
 
 // initSMSToml - 初始化SMS配置文件
 func initSMSToml() {
-	opts := map[string]any{
-		"${drive.sms}":                              "email",
-		"${drive.email}":                            "aliyun",
-		"${drive.default}":                          "email",
-		"${email.host}":                             "smtp.qq.com",
-		"${email.port}":                             465,
-		"${email.account}":                          "xxx@qq.com",
-		"${email.password}":                         "",
-		"${email.nickname}":                         "inis",
-		"${email.sign_name}":                        "inis",
-		"${aliyun.access_key_id}":                   "",
-		"${aliyun.access_key_secret}":               "",
-		"${aliyun.endpoint}":                        "dysmsapi.aliyuncs.com",
-		"${aliyun.sign_name}":                       "",
-		"${aliyun.verify_code}":                     "",
-		"${aliyun_number_verify.access_key_id}":     "",
-		"${aliyun_number_verify.access_key_secret}": "",
-		"${aliyun_number_verify.endpoint}":          "dypnsapi.aliyuncs.com",
-		"${aliyun_number_verify.sign_name}":         "",
-		"${aliyun_number_verify.template_code}":     "100001", // 号码验证专用模板
-		"${tencent.secret_id}":                      "",
-		"${tencent.secret_key}":                     "",
-		"${tencent.endpoint}":                       "sms.tencentcloudapi.com",
-		"${tencent.sms_sdk_app_id}":                 "",
-		"${tencent.sign_name}":                      "",
-		"${tencent.verify_code}":                    "",
-		"${tencent.region}":                         "ap-guangzhou",
-	}
-
-	// 发件队列参数（[email] 段）：模板里是占位符，这里补上默认值
-	for key, val := range MailQueueDefaultValues() {
-		opts["${email."+key+"}"] = val
-	}
-
 	item := utils.Viper(utils.ViperModel{
-		Path:    "config",
-		Mode:    "toml",
-		Name:    "sms",
-		Content: utils.Replace(TempSMS, opts),
+		Path:    ConfigPath,
+		Mode:    ModeToml,
+		Name:    ConfigNameSMS,
+		Content: smsTomlContent(),
 	}).Read()
 
 	if item.Error != nil {

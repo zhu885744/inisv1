@@ -39,8 +39,8 @@ func InitLinks() {
 		return
 	}
 
-	// 初始化数据
-	go initLinksData()
+	// 初始化数据：必须同步完成，InitTable 的等待/超时才覆盖得到（见 base.go 的 InitTable 注释）
+	initLinksData()
 }
 
 // AfterFind - 查询Hook

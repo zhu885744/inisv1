@@ -69,30 +69,10 @@ var StorageToml *utils.ViperResponse
 // initStorageToml - 初始化存储配置文件
 func initStorageToml() {
 	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "storage",
-		Content: utils.Replace(TempStorage, map[string]any{
-			"${default}": "local",
-			// 本地域名留空：full_url 存相对路径 /storage/xxx，直接由站点静态服务提供；
-			// 之前默认成 "storage" 会拼出 storage/storage/xxx 这种无效地址
-			"${local.domain}":                "",
-			"${local.path}":                  "storage",
-			"${local.dir_rule}":              DefaultStorageDirRule,
-			"${local.file_rule}":             DefaultStorageFileRule,
-			"${cos.app_id}":                  "",
-			"${cos.secret_id}":               "",
-			"${cos.secret_key}":              "",
-			"${cos.bucket}":                  "inis-cos",
-			"${cos.region}":                  "ap-guangzhou",
-			"${cos.domain}":                  "",
-			"${cos.path}":                    "inis",
-			"${cos.dir_rule}":                DefaultStorageDirRule,
-			"${cos.file_rule}":               DefaultStorageFileRule,
-			"${attachment.allow_extensions}": "jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md",
-			"${attachment.max_file_size}":    51200,
-			"${attachment.concurrent_limit}": 5,
-		}),
+		Path:    "config",
+		Mode:    "toml",
+		Name:    "storage",
+		Content: storageTomlContent(),
 	}).Read()
 
 	if item.Error != nil {

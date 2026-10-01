@@ -25,7 +25,7 @@ func initAppToml() {
 		Path:    ConfigPath,
 		Mode:    ModeToml,
 		Name:    ConfigNameApp,
-		Content: utils.Replace(TempApp, nil),
+		Content: appTomlContent(),
 	}).Read()
 
 	if item.Error != nil {
@@ -42,6 +42,10 @@ func initAppToml() {
 
 // init - 初始化函数
 func init() {
+	// 最先执行：config 目录可能整份不存在（只发一个二进制的部署方式），
+	// 这里先把目录与缺失的配置文件补齐，见 bootstrap.go
+	ensureBootstrap()
+
 	// 本文件是包内最早执行的 init（文件名字典序），而 log.go 的初始化排在其后；
 	// 这里在配置异常时会输出日志，故先确保日志组件就绪
 	ensureLogReady()

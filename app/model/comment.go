@@ -39,8 +39,8 @@ func InitComment() {
 		return
 	}
 
-	// 初始化数据
-	go initCommentData()
+	// 初始化数据：必须同步完成，InitTable 的等待/超时才覆盖得到（见 base.go 的 InitTable 注释）
+	initCommentData()
 }
 
 // initCommentData - 初始化Comment表数据

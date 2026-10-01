@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
-	"inis/app/validator"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -45,7 +44,6 @@ func (this *Install) IPOST(ctx *gin.Context) {
 		"lock":       this.lock,
 		"init-db":    this.initDB,
 		"connect-db": this.connectDB,
-		"create-admin": this.createAdmin,
 	}
 	this.handleHTTPMethod(ctx, allow)
 }
@@ -173,85 +171,6 @@ func (this *Install) createDefaultAdmin() {
 	}
 }
 
-// createAdmin - 创建管理员
-func (this *Install) createAdmin(ctx *gin.Context) {
-	table := model.Users{}
-	params := this.params(ctx)
-
-	// 验证器
-	if err := validator.NewValid("users", params); err != nil {
-		this.json(ctx, nil, err.Error(), DefaultErrorCode)
-		return
-	}
-
-	// 验证必填参数
-	params, ok := this.validateRequiredParams(ctx, "account", "email", "password")
-	if !ok {
-		return
-	}
-
-	exist, _ := facade.DB.Model(&table).Where("account", params["account"]).Exist()
-	if exist {
-		this.json(ctx, nil, facade.Lang(ctx, "该账号已经注册"), DefaultErrorCode)
-		return
-	}
-
-	exist, _ = facade.DB.Model(&table).Where("email", params["email"]).Exist()
-	if exist {
-		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已经注册"), DefaultErrorCode)
-		return
-	}
-
-	// 允许存储的字段
-	allow := []string{"account", "password", "email", "nickname", "avatar", "description"}
-	for key, val := range params {
-		// 加密密码
-		if key == "password" {
-			val = utils.Password.Create(cast.ToString(val))
-		}
-		// 防止恶意传入字段
-		if utils.InArray(key, allow) {
-			utils.Struct.Set(&table, key, val)
-		}
-	}
-	utils.Struct.Set(&table, "pages", "all")
-
-	// 创建用户
-	facade.DB.Model(&table).Create(&table)
-
-	jwt := facade.Jwt().Create(facade.H{
-		"uid": table.Id,
-	})
-
-	// 删除密码
-	table.Password = ""
-
-	result := map[string]any{
-		"user":  table,
-		"token": jwt.Text,
-	}
-
-	// 往客户端写入 cookie
-	this.setToken(ctx, jwt.Text)
-
-	// 异步添加到管理员组
-	go func(uid string) {
-		uids := []string{uid}
-		group, _ := facade.DB.Model(&model.AuthGroup{}).Find(1)
-		if !utils.Is.Empty(group) {
-			uids = append(uids, strings.Split(cast.ToString(group["uids"]), "|")...)
-		}
-
-		// 去重去空
-		uids = cast.ToStringSlice(utils.ArrayUnique(utils.ArrayEmpty(uids)))
-		facade.DB.Model(&model.AuthGroup{}).Where("id", 1).Update(&model.AuthGroup{
-			Uids: fmt.Sprintf("|%s|", strings.Join(uids, "|")),
-		})
-	}(cast.ToString(table.Id))
-
-	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), DefaultSuccessCode)
-}
-
 // lock - 上锁（安装锁）
 func (this *Install) lock(ctx *gin.Context) {
 	if ok := utils.File().Exist(databaseConfigFile); !ok {
@@ -269,7 +188,9 @@ func (this *Install) lock(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }
 
-// check - 安装锁状态
+// check - 安装状态
+//
+// data 为 true 表示已完成安装（口径见 facade.Installed：安装锁已解除且数据库配置已生成）。
 func (this *Install) check(ctx *gin.Context) {
-	this.json(ctx, !utils.File().Exist(installLockFile), facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
+	this.json(ctx, facade.Installed(), facade.Lang(ctx, defaultResponseMsg), DefaultSuccessCode)
 }

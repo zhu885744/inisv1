@@ -6,6 +6,7 @@ import (
 	"image"
 	"inis/app/facade"
 	"inis/app/middleware"
+	"inis/theme"
 	"io"
 	"net/http"
 	"regexp"
@@ -60,9 +61,18 @@ var AppToml *utils.ViperResponse
 var Server *http.Server
 
 func init() {
+	// 内置语言包：config/i18n 缺失时从二进制里释放一份（见 i18n-assets.go）
+	releaseI18n()
+
 	initAppToml()
 	loadThemeRouteIgnore()
 	InitApp()
+
+	// 内嵌主题状态：打包时（go build -tags embed）前端产物已在二进制内，
+	// 部署不再需要单独分发 public 目录里的主题文件
+	if theme.Ready() {
+		facade.Log.Info(map[string]any{"source": "theme/dist（内嵌）"}, "已启用内嵌主题，前端产物从二进制内读取")
+	}
 }
 
 // initAppToml - 初始化APP配置文件
@@ -134,8 +144,6 @@ func notRoute(Gin *gin.Engine) {
 			}
 		}()
 
-		ctx.Status(HTTPStatusOK)
-
 		path := ctx.Request.URL.Path
 
 		// 路径安全校验：拒绝目录穿越（../），防止读取 public 目录之外的任意文件
@@ -143,6 +151,15 @@ func notRoute(Gin *gin.Engine) {
 			ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": RouteNotDefined, "data": nil})
 			return
 		}
+
+		// 内嵌主题（go build -tags embed 时才有内容）：命中就直接返回。
+		// 放在写状态码之前，这样命中浏览器缓存时还能回 304；
+		// 没打包（默认构建）或没命中时，继续走下面原有的「读 public 目录」逻辑。
+		if theme.Serve(ctx, path) {
+			return
+		}
+
+		ctx.Status(HTTPStatusOK)
 
 		// 使用 LastIndex 前先判断，避免 path 中无 "/" 时切片越界 panic
 		lastSlash := strings.LastIndex(path, "/")
@@ -283,9 +300,11 @@ func loadThemeRouteIgnore() {
 
 // handleThemeRoute 主题前端路由回退（history 模式 SPA）
 // 语义对齐 nginx 的 try_files $uri $uri/ /index.html：
-// 1. public/<path>/index.html（部署在子目录的应用，如 public/admin/index.html）
-// 2. public/index.html（主题首页，交给前端路由接管，如 /goods、/user/profile）
-// 命中忽略前缀或主题未部署时返回 false，交回调用方处理
+// 1. <path>/index.html（部署在子目录的应用，如 admin/index.html）
+// 2. index.html（主题首页，交给前端路由接管，如 /goods、/user/profile）
+//
+// 每一步都先看内嵌主题（go build -tags embed 打包进二进制的产物）、再看磁盘 public 目录，
+// 都命中不了就返回 false，交回调用方处理（保持原有「路由未定义」提示）
 func handleThemeRoute(ctx *gin.Context, path string) bool {
 	for _, prefix := range themeRouteIgnore {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
@@ -293,14 +312,20 @@ func handleThemeRoute(ctx *gin.Context, path string) bool {
 		}
 	}
 
-	// 1. 目录形式：public/<path>/index.html
+	// 1. 目录形式：<path>/index.html
 	if dir := strings.Trim(path, "/"); dir != "" {
+		if theme.Serve(ctx, "/"+dir+"/index.html") {
+			return true
+		}
 		if target := "public/" + dir + "/index.html"; utils.File().Exist(target) {
 			return writeThemePage(ctx, target, path)
 		}
 	}
 
-	// 2. 兜底：主题首页，未部署时不回退，保持原有提示
+	// 2. 兜底：主题首页（先内嵌，再磁盘），都没有时不回退，保持原有提示
+	if theme.Serve(ctx, "/index.html") {
+		return true
+	}
 	if !utils.File().Exist("public/index.html") {
 		return false
 	}

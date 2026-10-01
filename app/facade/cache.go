@@ -89,24 +89,10 @@ func init() {
 // initCacheToml - 初始化缓存配置文件
 func initCacheToml() {
 	item := utils.Viper(utils.ViperModel{
-		Path: ConfigPath,
-		Mode: ModeToml,
-		Name: ConfigNameCache,
-		Content: utils.Replace(TempCache, map[string]any{
-			"${open}":           "false",
-			"${default}":        DefaultCacheDriver,
-			"${local.expire}":   300,
-			"${redis.host}":     "localhost",
-			"${redis.port}":     "6379",
-			"${redis.password}": "",
-			"${redis.expire}":   "2 * 60 * 60",
-			"${redis.prefix}":   "inis:",
-			"${redis.database}": 0,
-			"${file.expire}":    "2 * 60 * 60",
-			"${file.path}":      "runtime/cache",
-			"${file.prefix}":    "inis_",
-			"${ram.expire}":     "2 * 60 * 60",
-		}),
+		Path:    ConfigPath,
+		Mode:    ModeToml,
+		Name:    ConfigNameCache,
+		Content: cacheTomlContent(),
 	}).Read()
 
 	if item.Error != nil {

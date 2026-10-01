@@ -2,6 +2,8 @@ package model
 
 import (
 	"errors"
+	"sync"
+
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"gorm.io/gorm"
@@ -33,8 +35,8 @@ func InitArticleGroup() {
 		return
 	}
 
-	// 初始化数据
-	go initArticleGroupData()
+	// 初始化数据：必须同步完成，InitTable 的等待/超时才覆盖得到（见 base.go 的 InitTable 注释）
+	initArticleGroupData()
 }
 
 // initArticleGroupData - 初始化ArticleGroup表数据
@@ -45,6 +47,31 @@ func initArticleGroupData() {
 		return
 	}
 
+	// 建默认分类统一走 EnsureDefaultArticleGroup（带锁 + 按 key 幂等）
+	EnsureDefaultArticleGroup()
+}
+
+// defaultArticleGroupMutex - 默认分类的创建锁（见 EnsureDefaultArticleGroup）
+var defaultArticleGroupMutex sync.Mutex
+
+// EnsureDefaultArticleGroup - 确保默认分类存在，并返回它的 id（幂等 + 进程内并发安全）
+//
+// 默认分类原本有**两个**创建点：
+//   - 本文件的 initArticleGroupData：分类表为空时创建；
+//   - article.go 的 initArticleData：给默认文章准备分类时按 key 创建。
+//
+// 两者都在后台 goroutine 里「先查后插」，同一秒并发执行就会各插一条 ——
+// 后台「文章分类」里于是出现两条内容一致、create_time 相同的「默认分类」（id 不同）。
+// 现在两个调用点都收敛到这里：先按 key 查，查不到才插。
+func EnsureDefaultArticleGroup() int {
+	defaultArticleGroupMutex.Lock()
+	defer defaultArticleGroupMutex.Unlock()
+
+	if exist, _ := facade.DB.Model(&ArticleGroup{}).Where("key", "Default-Category").Exist(); exist {
+		item, _ := facade.DB.Model(&ArticleGroup{}).Where("key", "Default-Category").Find()
+		return cast.ToInt(item["id"])
+	}
+
 	item := ArticleGroup{
 		Pid:         0,
 		Key:         "Default-Category",
@@ -52,7 +79,11 @@ func initArticleGroupData() {
 		Description: "默认分类",
 	}
 
-	facade.DB.Model(&item).Create(&item)
+	if _, err := facade.DB.Model(&item).Create(&item); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "创建默认分类失败")
+	}
+
+	return item.Id
 }
 
 // AfterSave - 保存后的Hook（包括 create update）
