@@ -111,7 +111,10 @@ func (this *Comment) syncResult() (result map[string]any) {
 
 func (this *Comment) authorSync(result *any) {
 	user, _ := facade.DB.Model(&Users{}).Find(this.Uid)
-	*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "title", "description", "json", "result"})
+	author := utils.Map.WithField(user, []string{"id", "nickname", "avatar", "title", "description", "json", "result"})
+	// 公开内容里内嵌的作者：清洗 result.auth（权限组）与封禁记录里的管理侧字段
+	SanitizeAuthor(author)
+	*result = author
 }
 
 func (this *Comment) articleSync(result *any) {

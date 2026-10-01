@@ -390,14 +390,16 @@ func (this *Pages) create(ctx *gin.Context) {
 		PublishTime: publishTime,
 	}
 
-	allow := pagesAllowFieldsSlice
+	// 先复制一份再追加：直接 append 到全局字段表可能复用其底层数组
+	allow := append([]any{}, pagesAllowFieldsSlice...)
 	if this.meta.root(ctx) {
 		// reason（驳回原因）与 audit 一样只允许管理员写
 		allow = append(allow, "audit", "reason")
 	}
 
-	audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-	utils.Struct.Set(&table, "audit", cast.ToInt(!audit))
+	// 独立页面没有草稿概念，直接按审核开关判定（口径见 audit.go）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
 
 	for key, val := range params {
 		if utils.In.Array(key, allow) {
@@ -447,7 +449,8 @@ func (this *Pages) update(ctx *gin.Context) {
 	table := model.Pages{}
 	async := utils.Async[map[string]any]()
 
-	allow := pagesAllowFieldsSlice
+	// 先复制一份再追加：直接 append 到全局字段表可能复用其底层数组
+	allow := append([]any{}, pagesAllowFieldsSlice...)
 	if this.meta.root(ctx) {
 		// reason（驳回原因）与 audit 一样只允许管理员写
 		allow = append(allow, "audit", "reason")
@@ -457,19 +460,16 @@ func (this *Pages) update(ctx *gin.Context) {
 		async.Set("publish_time", cast.ToInt64(pt))
 	}
 
-	// 审核规则与文章 / 动态对齐：未开启审核 → 直接通过；
-	// 开启审核时，只有「首次发布」（尚未审核过）才进入待审核，
-	// 已审核过的页面再次编辑保存不会重置审核状态（此前无条件重设，会把已通过的页面打回待审核）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-
 	// 先取原记录：审核规则与「审核状态变化通知」都要用到 audit / uid
 	prev, _ := facade.DB.Model(&model.Pages{}).WithTrashed().Where("id", params["id"]).Find()
 	prevAudit := cast.ToInt(prev["audit"])
 
-	if !auditSwitch {
-		async.Set("audit", 1)
-	} else if prevAudit == 0 {
-		async.Set("audit", 0)
+	// 审核判定与文章 / 动态对齐（口径见 audit.go）：未开启审核 → 直接通过；
+	// 开启审核时只有「首次发布」（尚未审核过）进入待审核，
+	// 已审核过的页面再次编辑保存不会重置审核状态
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	if audit, auditSet := auditForUpdate(auditSwitch, false, false, prevAudit); auditSet {
+		async.Set("audit", audit)
 	}
 
 	for key, val := range params {

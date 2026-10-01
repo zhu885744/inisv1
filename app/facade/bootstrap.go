@@ -173,8 +173,8 @@ func smsTomlContent() string {
 // smsTomlOptions - sms.toml 的默认占位符取值
 func smsTomlOptions() map[string]any {
 	opts := map[string]any{
-		"${drive.sms}":                              "email",
-		"${drive.email}":                            "aliyun",
+		"${drive.sms}":                              "aliyun",
+		"${drive.email}":                            "email",
 		"${drive.default}":                          "email",
 		"${email.host}":                             "smtp.qq.com",
 		"${email.port}":                             465,

@@ -64,12 +64,11 @@ func isCommonRoute(ruleType string) bool {
 // 这里对公开接口兜一层，保证鉴权链路本身可用；权限收敛仍以 auth_rules 为准。
 var publicRoutes = map[string]bool{
 	"POST /api/comm/login":            true,
+	"POST /api/comm/sign-code":        true, // 验证码登录（邮箱/手机号 + 验证码）
 	"POST /api/comm/register":         true,
 	"POST /api/comm/check-token":      true,
 	"POST /api/comm/reset-password":   true,
 	"POST /api/comm/logout":           true,
-	"POST /api/comm/verify-email":     true,
-	"POST /api/comm/send-verify-mail": true,
 	"DELETE /api/comm/logout":         true,
 }
 

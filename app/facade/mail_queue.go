@@ -10,7 +10,7 @@ package facade
  *
  * 规则：
  * 1. 非阻塞：调用方只入队（enqueue）后立即返回，真正的发送由独立 worker 协程完成；
- * 2. 优先级：MailUrgent（验证码 / 注册验证邮件）高于 MailNormal（通知 / 自定义邮件），
+ * 2. 优先级：MailUrgent（验证码）高于 MailNormal（通知 / 自定义邮件），
  *    urgent 任务不占用批量窗口额度，入队后立即发送；
  * 3. 分批：每个窗口最多发送 batch_size 封 normal 邮件，发满后等 batch_interval 秒再开新窗口
  *    （默认 10 封 / 10 分钟，可改 config/sms.toml 的 [email] 段）；
@@ -35,7 +35,7 @@ import (
 
 // 邮件任务优先级（数值越小越优先）
 const (
-	MailUrgent = 0 // 验证码 / 注册验证邮件：立即发送，不占用批量窗口
+	MailUrgent = 0 // 验证码：立即发送，不占用批量窗口
 	MailNormal = 1 // 通知 / 自定义邮件：受批量窗口限制
 )
 
@@ -252,7 +252,7 @@ func (this *mailQueueStruct) enqueue(task *MailTask) bool {
 	return true
 }
 
-// enqueueUrgent 入队到优先通道（验证码 / 注册验证邮件）并等待首轮发送结果
+// enqueueUrgent 入队到优先通道（验证码）并等待首轮发送结果
 //
 // 返回值：
 //   - nil：等待超时（任务仍在队列中，后续由队列重试 / 发送）

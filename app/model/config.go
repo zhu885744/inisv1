@@ -51,7 +51,7 @@ func InitConfig() {
 			"email_domain_mode": "off",
 			"email_whitelist":   []string{},
 			"email_blacklist":   []string{},
-			// 注册验证方式：none 直接注册 / email 邮箱验证 / manual 人工审核
+			// 注册验证方式：none 直接注册 / manual 人工审核（历史配置里的 email 已废弃）
 			"verify_mode": "none",
 			// 注册成功后是否发送站内欢迎消息 / 欢迎邮件
 			"welcome_message": 0,

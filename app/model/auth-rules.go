@@ -59,7 +59,8 @@ func InitAuthRules() {
 // （需要权限点），匿名请求会直接 401。而 saveAuthRules 只在 hash 不存在时插入，
 // 因此新增接口的规则在**已安装**的库里不会自动出现——启动时补录一次即可解决。
 //
-// 同时顺带纠正历史数据里非法的规则类型（type=root → default）。
+// 同时顺带纠正历史数据里非法的规则类型（type=root → default），
+// 并清理已下线接口残留的规则（见 PruneAuthRules）。
 func EnsureAuthRules() {
 
 	// 未完成安装时没有数据库：直接跳过，避免空指针（定时任务也会先判断一次，这里是双保险）
@@ -93,6 +94,7 @@ func EnsureAuthRules() {
 	}
 
 	NormalizeAuthRuleTypes()
+	PruneAuthRules()
 }
 
 // NormalizeAuthRuleTypes - 纠正历史数据中非法的规则类型
@@ -136,6 +138,56 @@ func NormalizeAuthRuleTypes() {
 	facade.Cache.DelTags([]any{"rule"})
 }
 
+// deprecatedAuthRules - 已下线接口的权限规则清单，启动时按 method + route 从库里清掉
+//
+// 格式：[请求方法, 路由]。将来下线别的接口时，往这里追加一行即可。
+var deprecatedAuthRules = [][2]string{
+	{"POST", "/api/comm/verify-email"},     // 注册邮箱验证（注册已用邮箱/短信验证码，功能已移除）
+	{"POST", "/api/comm/send-verify-mail"}, // 重发注册验证邮件
+}
+
+// PruneAuthRules - 清理已下线接口残留的权限规则
+//
+// 为什么需要它：EnsureAuthRules 只补不删（见其注释），接口下线后老库里对应的规则记录
+// 会一直留着 —— 后台「权限组」页出现两个点了也没用的开关，且规则缓存（rule[METHOD][path]，
+// 无过期时间）里可能还存着它们。这里按 method + route 精确定位、软删除，并清空规则缓存。
+//
+// 调用时机：与 EnsureAuthRules 一致（InitAuthRules / timer.Run），先补录后清理。
+func PruneAuthRules() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "清理已下线权限规则时发生panic")
+		}
+	}()
+
+	// 未完成安装时没有数据库
+	if !facade.Installed() {
+		return
+	}
+
+	total := int64(0)
+	for _, item := range deprecatedAuthRules {
+		hash := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", item[0], item[1]))
+		tx, err := facade.DB.Model(&AuthRules{}).Where("hash", hash).Delete()
+		if err != nil {
+			facade.Log.Warn(map[string]any{"error": err.Error(), "route": item[1]}, "清理已下线权限规则失败")
+			continue
+		}
+		if tx != nil {
+			total += tx.RowsAffected
+		}
+	}
+
+	if total <= 0 {
+		return
+	}
+
+	facade.Log.Info(map[string]any{"rows": total}, "已清理下线接口的权限规则")
+	facade.Cache.DelTags([]any{"rule"})
+}
+
 // createAuthRules - 生成规则
 func createAuthRules() (result []AuthRules) {
 
@@ -150,12 +202,11 @@ func createAuthRules() (result []AuthRules) {
 		"comm": {
 			"POST": {
 				"path=login&name=传统和加密登录&type=common",
+				"path=sign-code&name=验证码登录&type=common",
 				"path=register&name=注册账户&type=common",
 				"path=check-token&name=校验登录&type=common",
 				"path=reset-password&name=重置密码&type=common",
 				"path=logout&name=退出登录&type=common",
-				"path=verify-email&name=验证注册邮箱&type=common",
-				"path=send-verify-mail&name=重发注册验证邮件&type=common",
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
@@ -582,6 +633,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=column&type=common&name=列查询",
 				"path=list&type=login&name=获取我的附件",
 				"path=emoji&type=common&name=获取表情列表",
+				"path=storage&type=common&name=获取当前存储方式",
 			},
 			"POST": {
 				"path=save&type=login&name=保存数据",

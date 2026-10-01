@@ -190,9 +190,10 @@ func (this *Article) one(ctx *gin.Context) {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
 
-		// 非管理员只能看到已审核通过的文章，但作者本人可查看自己的全部状态
+		// 非管理员只能看到「已发布且已审核通过」的文章；作者本人可查看自己的全部状态
+		// （草稿 status=0 在写库时 audit 被记为 1，必须额外按 status 过滤，否则会外泄）
 		if !this.meta.root(ctx) && !self {
-			query = query.Where("audit", 1)
+			query = query.Where("audit", 1).Where("status", 1)
 		}
 
 		item, _ := query.Where(table).Find()
@@ -233,11 +234,12 @@ func (this *Article) all(ctx *gin.Context) {
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
 
-	// 非管理员默认只返回「已审核通过」的文章；
+	// 非管理员默认只返回「已发布且已审核通过」的文章；
 	// 但查询条件已限定为本人文章时不过滤审核状态，
-	// 这样作者能在「我的文章」里看到自己的待审核 / 未通过内容
+	// 这样作者能在「我的文章」里看到自己的草稿与待审核 / 未通过内容
+	// （草稿 status=0 的 audit 为 1，只筛 audit 会把草稿一并带出，故同时加 status=1）
 	if !this.meta.root(ctx) && !this.isSelfQuery(ctx, params) {
-		query = query.Where("audit", 1)
+		query = query.Where("audit", 1).Where("status", 1)
 	}
 
 	count, _ := query.Where(table).Count()
@@ -277,7 +279,8 @@ func (this *Article) rand(ctx *gin.Context) {
 	}
 
 	if !this.meta.root(ctx) {
-		query = query.Where("audit", 1)
+		// 随机推荐同样只取已发布且已审核通过的文章，避免把草稿随机推给访客
+		query = query.Where("audit", 1).Where("status", 1)
 	}
 
 	ids := utils.Rand.Slice(utils.Unity.Ids(query.Column("id")), limit)
@@ -333,15 +336,17 @@ func (this *Article) create(ctx *gin.Context) {
 	// 获取状态：0-草稿，1-发布
 	status := cast.ToInt(params["status"])
 
+	// 是否开启了审核（判定口径见 audit.go）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+
 	// 如果是草稿，跳过审核检查，不设置发布时间
 	if status == 0 {
-		utils.Struct.Set(&table, "Audit", 1)
+		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, true))
 		utils.Struct.Set(&table, "Status", 0)
 		utils.Struct.Set(&table, "PublishTime", 0)
 	} else {
-		// 是否开启了审核
-		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-		utils.Struct.Set(&table, "Audit", cast.ToInt(!audit))
+		// 关闭审核 → 直接通过；开启审核 → 待审核
+		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
 		utils.Struct.Set(&table, "Status", 1)
 
 		// 处理 publish_time，若未传则默认使用当前时间
@@ -434,27 +439,32 @@ func (this *Article) update(ctx *gin.Context) {
 		return
 	}
 
-	// 获取状态：0-草稿，1-发布
-	status := cast.ToInt(params["status"])
 	// 原文状态：用于判断是否「首次发布」，避免每次编辑都把审核状态重置为待审核
 	prevStatus := cast.ToInt(findResult["status"])
 	prevAudit := cast.ToInt(findResult["audit"])
 
+	// 获取状态：0-草稿，1-发布；未传 status 时沿用原文状态，
+	// 避免调用方漏传导致已发布的文章被降级成草稿
+	status := cast.ToInt(params["status"])
+	if _, ok := params["status"]; !ok {
+		status = prevStatus
+	}
+
+	// 是否开启了审核（判定口径见 audit.go）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 审核状态：关闭审核 → 通过；开启审核 → 只有「首次发布」进入待审核，
+	// 已审核过的文章再次编辑保存不会重置审核状态（管理员可在编辑页显式指定）
+	audit, auditSet := auditForUpdate(auditSwitch, status == 0, prevStatus == 0, prevAudit)
+
 	if status == 0 {
 		// 草稿：跳过审核，不设置发布时间
-		async.Set("audit", 1)
+		async.Set("audit", audit)
 		async.Set("status", 0)
 	} else {
 		async.Set("status", 1)
-
-		// 审核规则：未开启审核 → 直接通过；
-		// 开启审核时，只有「首次发布」（原状态为草稿 / 尚未审核过）才进入待审核，
-		// 已审核过的文章再次编辑保存不会重置审核状态（审核状态可由管理员在编辑页修改）
-		auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-		if !auditSwitch {
-			async.Set("audit", 1)
-		} else if prevStatus == 0 || prevAudit == 0 {
-			async.Set("audit", 0)
+		// auditSet 为 false 表示沿用原审核状态（已通过 / 未通过）
+		if auditSet {
+			async.Set("audit", audit)
 		}
 
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
@@ -628,7 +638,8 @@ func (this *Article) column(ctx *gin.Context) {
 	query = this.buildQuery(query, params).Order(params["order"])
 
 	if !this.meta.root(ctx) {
-		query = query.Where("audit", 1)
+		// column 也可能被公开调用，同样需要排除草稿
+		query = query.Where("audit", 1).Where("status", 1)
 	}
 
 	ids := utils.Unity.Keys(params["ids"])

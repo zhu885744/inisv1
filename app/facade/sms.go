@@ -326,6 +326,10 @@ func (this *GoMailRequest) check(recipient string) error {
 }
 
 // sendVerifyCode 渲染并发送验证码邮件（由邮件队列 worker 调用，code 已在上游生成）
+//
+// 模板与评论通知 / 回复通知保持一致（同一套 mail-header + 卡片 + mail-footer 视觉），
+// 正文突出验证码本身，并附带有效期与安全提示。
+// 调用方可通过 GoMail.Template 覆盖正文（支持 ${code} / ${site} 占位符）。
 func (this *GoMailRequest) sendVerifyCode(recipient, code string) (response *SMSResponse) {
 	response = &SMSResponse{}
 
@@ -335,24 +339,78 @@ func (this *GoMailRequest) sendVerifyCode(recipient, code string) (response *SMS
 		return
 	}
 
-	if utils.Is.Empty(this.Template) {
-		this.Template = "您的验证码是：${code}，有效期5分钟。（打死也不要把验证码告诉别人）"
+	site := cast.ToString(SMSToml.Get("email.sign_name"))
+	if utils.Is.Empty(site) {
+		site = cast.ToString(SMSToml.Get("email.nickname"))
+	}
+	// 站点名来自配置，做最小化转义，避免破坏排版
+	site = html.EscapeString(site)
+
+	var body string
+	if !utils.Is.Empty(this.Template) {
+		body = utils.Replace(this.Template, map[string]any{
+			"${code}": code,
+			"${site}": site,
+		})
+	} else {
+		template := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta charset="UTF-8">
+	<title>邮箱验证码</title>
+	<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { line-height: 1.7; color: #444; background-color: #f8f9fa; padding: 20px 0; }
+	.container { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); overflow: hidden; }
+	.mail-header { background: #165DFF; padding: 24px 30px; color: #fff; }
+	.brand { display: flex; align-items: center; gap: 12px; }
+	.brand-name { font-size: 18px; font-weight: 600; }
+	.mail-content { padding: 30px; }
+	.subtitle { color: #666; margin-bottom: 24px; font-size: 15px; }
+	.code-card { background: #f9fafb; border-radius: 8px; padding: 24px; margin: 20px 0 30px; border-left: 4px solid #165DFF;}
+	.code-text { font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #165DFF; font-family: Consolas, Monaco, "Courier New", monospace; word-break: break-all; }
+	.code-tip { margin-top: 12px; font-size: 13px; color: #888; letter-spacing: 0; }
+	.notice { font-size: 13px; color: #888; line-height: 1.8; }
+	.mail-footer { padding: 20px 30px; background: #f9fafb; border-top: 1px solid #f0f0f0; font-size: 14px; color: #888; }
+	.footer-note { margin-bottom: 0; }
+	@media (max-width: 600px) {
+		.container { width: 95%; margin: 0 auto; }
+		.mail-header, .mail-content, .mail-footer { padding: 20px 15px; }
+		.code-text { font-size: 26px; letter-spacing: 5px; }
+	}
+	</style>
+	</head>
+	<body>
+	<div class="container">
+	<div class="mail-header">
+		<div class="brand"><div class="brand-name">「${site}」邮箱验证码</div></div>
+	</div>
+	<div class="mail-content">
+		<div class="code-card">您的验证码是：「${code}」5 分钟内有效</div>
+		<p class="notice">为保障账号安全，请勿将验证码转发或告知任何人；如非本人操作，忽略本邮件即可。</p>
+	</div>
+	<div class="mail-footer">
+		<p class="footer-note">这是自动发送的通知邮件，如有疑问可通过站点内的联系方式找到我</p>
+	</div>
+	</div>
+	</body>
+	</html>
+	`
+
+		body = utils.Replace(template, map[string]any{
+			"${site}": site,
+			"${code}": code,
+		})
 	}
 
 	item := gomail.NewMessage()
 	nickname := cast.ToString(SMSToml.Get("email.nickname"))
 	account := cast.ToString(SMSToml.Get("email.account"))
 	item.SetHeader("From", nickname+"<"+account+">")
-	// 发送给多个用户
 	item.SetHeader("To", recipient)
-	// 设置邮件主题
-	item.SetHeader("Subject", cast.ToString(SMSToml.Get("email.sign_name")))
-	// 替换验证码
-	temp := utils.Replace(this.Template, map[string]any{
-		"${code}": code,
-	})
-	// 设置邮件正文
-	item.SetBody("text/html", temp)
+	item.SetHeader("Subject", "邮箱验证码 - "+site)
+	item.SetBody("text/html", body)
 
 	// 发送邮件
 	err := this.Client.DialAndSend(item)
@@ -748,7 +806,7 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 // SendMail - 发送自定义内容的邮件（主题 + 纯文本正文，正文换行会转成 HTML 换行）
 //
 // 用于欢迎邮件等不属于「评论通知」模板自身的场景；入队发送（分批限流 + 失败延迟重试，非阻塞）。
-// 需要「调用方立刻知道发送结果」的关键邮件（如注册验证链接）请用 SendMailUrgent。
+// 需要「调用方立刻知道发送结果」的关键邮件（如验证码）请用 SendMailUrgent。
 func (this *GoMailRequest) SendMail(recipient string, subject string, content string) (response *SMSResponse) {
 	response = &SMSResponse{}
 
@@ -777,7 +835,7 @@ func (this *GoMailRequest) SendMail(recipient string, subject string, content st
 //
 // 与 SendMail 的区别：走队列的优先通道（不占批量窗口，立即发送），
 // 并等待首轮发送结果（默认 10 秒，见 sms.toml 的 email.verify_wait；超时视为已受理）。
-// 适用于注册验证邮件这类「调用方需要给用户明确提示」的邮件。
+// 适用于验证码这类「调用方需要给用户明确提示」的邮件。
 func (this *GoMailRequest) SendMailUrgent(recipient string, subject string, content string) (response *SMSResponse) {
 	response = &SMSResponse{}
 
@@ -905,7 +963,7 @@ func SendReplyNotify(recipient string, commentInfo map[string]any) (response *SM
 
 // SendMailUrgent - 发送自定义邮件（优先通道，等待首轮结果）
 //
-// 用于注册验证邮件这类关键邮件：不占用批量窗口、立即发送，并在超时时间内返回首轮结果。
+// 用于验证码这类关键邮件：不占用批量窗口、立即发送，并在超时时间内返回首轮结果。
 func SendMailUrgent(recipient string, subject string, content string) (response *SMSResponse) {
 
 	if GoMail == nil {

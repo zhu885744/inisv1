@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"inis/app/facade"
 
@@ -21,6 +20,9 @@ import (
  * - json ：本文件定义的扩展设置（邮箱域名限制 / 注册验证方式 / 欢迎消息开关）
  *
  * 前端入口：/admin/system?tab=register
+ *
+ * 关于「邮箱验证」：本站注册本身就要求邮箱/手机验证码（见 comm/register），
+ * 邮箱所有权在注册那一步已经证明，因此不再提供「注册后再点邮件链接验证」的二次验证。
  */
 
 // 邮箱域名限制模式
@@ -32,18 +34,8 @@ const (
 
 // 注册验证方式
 const (
-	RegisterVerifyNone   = "none"   // 无：直接注册成功
-	RegisterVerifyEmail  = "email"  // Email 验证：发验证邮件，验证通过后才能登录
+	RegisterVerifyNone   = "none"   // 无：注册完成即登录
 	RegisterVerifyManual = "manual" // 人工审核：账号先进入待审核，管理员通过后才能登录
-)
-
-// 邮箱验证邮件有效期
-const RegisterMailTokenExpire = 24 * time.Hour
-
-// 邮箱验证相关缓存键
-const (
-	registerMailTokenKey = "[register][email-verify][%v]" // token → uid
-	registerMailLimitKey = "[register][email-verify-limit][%v]"
 )
 
 // RegisterSetting - 注册扩展设置
@@ -54,7 +46,8 @@ type RegisterSetting struct {
 	EmailWhitelist []string `json:"email_whitelist"`
 	// 禁止注册的邮箱域名
 	EmailBlacklist []string `json:"email_blacklist"`
-	// 注册验证方式：none / email / manual
+	// 注册验证方式：none / manual
+	// 历史配置里可能残留 "email"（已废弃），RegisterSettings 会将其降级为 none
 	VerifyMode string `json:"verify_mode"`
 	// 注册成功后发送站内欢迎消息
 	WelcomeMessage bool `json:"welcome_message"`
@@ -83,8 +76,8 @@ func RegisterSettings() RegisterSetting {
 	case RegisterDomainWhitelist, RegisterDomainBlacklist:
 		setting.EmailDomainMode = mode
 	}
-	switch mode := cast.ToString(jsonMap["verify_mode"]); mode {
-	case RegisterVerifyEmail, RegisterVerifyManual:
+	// 只认 manual：历史配置里残留的 "email"（已废弃的邮箱验证模式）会被降级为 none
+	if mode := cast.ToString(jsonMap["verify_mode"]); mode == RegisterVerifyManual {
 		setting.VerifyMode = mode
 	}
 
@@ -206,77 +199,6 @@ func CheckEmailDomain(setting RegisterSetting, email string) error {
 	return nil
 }
 
-// MarkEmailUnverified - 标记邮箱未验证（注册时按「Email 验证」模式写入）
-func MarkEmailUnverified(uid any) error {
-	return UpdateUserJson(uid, map[string]any{UserJsonEmailVerified: 0})
-}
-
-// MarkEmailVerified - 标记邮箱已验证
-func MarkEmailVerified(uid any) error {
-	return UpdateUserJson(uid, map[string]any{UserJsonEmailVerified: 1})
-}
-
-// CreateMailToken - 生成邮箱验证 token（24 小时有效，可重发覆盖）
-func CreateMailToken(uid int) string {
-	token := utils.Rand.String(32, "abcdefghijklmnopqrstuvwxyz0123456789")
-	facade.Cache.Set(fmt.Sprintf(registerMailTokenKey, token), uid, RegisterMailTokenExpire)
-	return token
-}
-
-// ConsumeMailToken - 消费邮箱验证 token：有效则返回 uid 并立即失效（一次性）
-func ConsumeMailToken(token string) int {
-	if utils.Is.Empty(token) {
-		return 0
-	}
-	key := fmt.Sprintf(registerMailTokenKey, token)
-	uid := cast.ToInt(facade.Cache.Get(key))
-	if uid > 0 {
-		facade.Cache.Del(key)
-	}
-	return uid
-}
-
-// mailLimit - 发信频控：同一账号 60 秒内只允许发送一次验证邮件
-func mailLimit(uid int) error {
-	key := fmt.Sprintf(registerMailLimitKey, uid)
-	if !utils.Is.Empty(facade.Cache.Get(key)) {
-		return errors.New("验证邮件发送过于频繁，请稍后再试！")
-	}
-	facade.Cache.Set(key, 1, time.Minute)
-	return nil
-}
-
-// SendRegisterVerifyMail - 发送注册邮箱验证邮件（链接指向前台 /auth/verify?token=xxx）
-func SendRegisterVerifyMail(uid int, email string, baseURL string) error {
-
-	if !utils.Is.Email(email) {
-		return errors.New("邮箱格式不正确，无法发送验证邮件！")
-	}
-
-	if err := mailLimit(uid); err != nil {
-		return err
-	}
-
-	token := CreateMailToken(uid)
-	site := SiteTitle()
-	link := fmt.Sprintf("%v/auth/verify?token=%v", strings.TrimRight(baseURL, "/"), token)
-
-	subject := fmt.Sprintf("%v：请验证您的注册邮箱", site)
-	content := fmt.Sprintf(
-		"您好：\n\n感谢注册 %v，请点击下面的链接完成邮箱验证：\n%v\n\n链接 24 小时内有效；如果不是您本人的操作，忽略本邮件即可。",
-		site, link,
-	)
-
-	// 注册验证邮件属于关键邮件：走队列的优先通道（不占用批量窗口、立即发送）
-	// 并等待首轮结果，失败时如实返回错误（任务仍会在队列里异步重试）
-	if response := facade.SendMailUrgent(email, subject, content); response != nil && response.Error != nil {
-		facade.Log.Error(map[string]any{"error": response.Error.Error(), "uid": uid}, "发送注册验证邮件失败")
-		return errors.New("验证邮件发送失败，请稍后重试；若持续失败请联系管理员检查邮件服务配置！")
-	}
-
-	return nil
-}
-
 // SiteTitle - 站点标题（取前台「网站设置」中的 title，缺省用「本站」）
 func SiteTitle() string {
 	item, _ := facade.DB.Model(&Config{}).Where("key", "Mellow_functions").Find()
@@ -290,7 +212,7 @@ func SiteTitle() string {
 	return title
 }
 
-// SendWelcome - 注册成功（或审核通过 / 邮箱验证通过）后发送欢迎消息与欢迎邮件
+// SendWelcome - 注册成功（或人工审核通过）后发送欢迎消息与欢迎邮件
 // 两个开关都关闭时不产生任何请求
 //
 // account / nickname 会写进正文：涉及用户的邮件统一带上「账号 / 昵称」，

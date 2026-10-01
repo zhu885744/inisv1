@@ -68,6 +68,9 @@ func (this *UserFollows) followUser(wg *sync.WaitGroup, result *any, uid int) {
 		user = utils.Map.WithField(item, allow)
 	}
 
+	// 公开接口内嵌的用户信息：清洗 result.auth（权限组）与封禁记录里的管理侧字段
+	SanitizeAuthor(user)
+
 	*result = user
 }
 

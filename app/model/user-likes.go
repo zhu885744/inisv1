@@ -79,7 +79,10 @@ func (this *UserLikes) author(wg *sync.WaitGroup, result *any) {
 
 	if uid > 0 {
 		user, _ := facade.DB.Model(&Users{}).Find(uid)
-		*result = utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "json"})
+		author := utils.Map.WithField(user, []string{"id", "nickname", "avatar", "description", "json"})
+		// 公开接口内嵌的用户信息：统一清洗授权/封禁管理侧字段
+		SanitizeAuthor(author)
+		*result = author
 	}
 }
 

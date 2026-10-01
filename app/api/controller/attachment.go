@@ -305,8 +305,9 @@ func (this *Attachment) IGET(ctx *gin.Context) {
 		"rand":   this.rand,
 		"count":  this.count,
 		"column": this.column,
-		"list":   this.list,
-		"emoji":  this.emoji,
+		"list":    this.list,
+		"emoji":   this.emoji,
+		"storage": this.storage,
 	}
 	err := this.call(allow, method, ctx)
 	if err != nil {
@@ -514,6 +515,13 @@ func (this *Attachment) all(ctx *gin.Context) {
 	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
+	// 缓存名只由请求参数决定（不含调用者身份），而非管理员的列表是按 uploader_id
+	// 过滤后的「自己的数据」（含 uploader_account），必须带上用户标识做隔离，
+	// 否则另一个用户用相同参数就会命中同一个缓存 key 看到别人的附件与账号
+	if !this.meta.root(ctx) {
+		cacheName = fmt.Sprintf("%s&uid=%v", cacheName, this.meta.user(ctx).Id)
+	}
+
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
@@ -591,6 +599,34 @@ func (this *Attachment) rand(ctx *gin.Context) {
 	}
 
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
+}
+
+// storage - 当前启用的存储方式
+//
+// 附件表里的 storage_driver 记录的是**每个附件上传时**用的驱动（历史数据里可能还残留已下线的
+// oss / kodo），这里返回的是配置（config/storage.toml 的 default）当前实际生效的驱动，
+// 后台附件概览用它告诉管理员「新上传的文件会存到哪儿」。
+//
+// 未知值一律回退本地存储，与 facade.NewStorage / getStorageDriver 的口径保持一致。
+func (this *Attachment) storage(ctx *gin.Context) {
+
+	driver := strings.ToLower(strings.TrimSpace(cast.ToString(facade.StorageToml.Get("default"))))
+	if driver != facade.StorageModeCOS {
+		driver = facade.StorageModeLocal
+	}
+
+	this.json(ctx, gin.H{
+		"driver": driver,
+		"name":   storageDriverLabel(driver),
+	}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// storageDriverLabel - 存储驱动的展示名（与前端「系统设置 → 存储」的选项文案一致）
+func storageDriverLabel(driver string) string {
+	if driver == facade.StorageModeCOS {
+		return "腾讯云 COS"
+	}
+	return "本地存储"
 }
 
 func (this *Attachment) count(ctx *gin.Context) {

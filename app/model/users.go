@@ -22,13 +22,6 @@ const (
 	UserStatusAudit = 2
 )
 
-// 用户 json 字段里与注册验证相关的键
-const (
-	// UserJsonEmailVerified 邮箱是否已验证：0 未验证 / 1 已验证
-	// 注意：键不存在视为「已验证」，避免开启邮箱验证后把历史用户全部拦在门外
-	UserJsonEmailVerified = "email_verified"
-)
-
 type Users struct {
 	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Account     string `gorm:"size:32; comment:帐号; default:Null; uniqueIndex:idx_account" json:"account"`
@@ -363,8 +356,22 @@ func (this *Users) level(wg *sync.WaitGroup, result *any) {
 	}
 }
 
-// Destroy - 注销后，清空用户数据
+// Destroy - 注销后，清空用户数据（非事务版本，仅记日志不返回错误）
 func (this *Users) Destroy(uid any) {
+	if err := this.DestroyTx(facade.DB.Drive(), uid); err != nil {
+		facade.Log.Error(map[string]any{"uid": uid, "error": err.Error()}, "注销清理用户数据失败")
+	}
+}
+
+// DestroyTx - 在指定事务中清空用户关联数据（注销接口使用，与「用户行物理删除」同事务）
+//
+// 任何一步失败都直接返回错误、由外层事务回滚：注销要么全删干净，要么什么都不动，
+// 避免出现「内容已删、账号还在」或「账号已删、内容残留」的半成品状态。
+func (this *Users) DestroyTx(tx *gorm.DB, uid any) error {
+
+	if tx == nil {
+		return errors.New("事务对象不能为空")
+	}
 
 	ids, _ := facade.DB.Model(&[]AuthGroup{}).WithTrashed().Like("uids", "|"+cast.ToString(uid)+"|").Column("id")
 	if !utils.Is.Empty(ids) {
@@ -372,21 +379,37 @@ func (this *Users) Destroy(uid any) {
 	}
 
 	// 表名
+	//
+	// 与 ban 接口删除用户内容时的范围保持一致（Article/Moments/Comment/
+	// UserLikes/UserCollects），否则注销后其动态、点赞、收藏仍留在库里，
+	// 不满足「注销即删除」的合规要求。
 	tables := []any{
-		Article{}, // 文章
-		Comment{}, // 评论
-		EXP{},     // 经验值
-		Links{},   // 友链
-		Pages{},   // 页面
-		Banner{},  // 轮播
+		Article{},      // 文章
+		Comment{},      // 评论
+		Moments{},      // 动态
+		UserLikes{},    // 点赞
+		UserCollects{}, // 收藏
+		EXP{},          // 经验值
+		Links{},        // 友链
+		Pages{},        // 页面
+		Banner{},       // 轮播
 	}
 
-	// 同步删除并检查错误，避免异步 goroutine 脱离事务导致的失败无感知
+	// 真实删除（Unscoped）：软删除的数据也要一并清掉
 	for _, table := range tables {
-		if _, err := facade.DB.Model(&table).WithTrashed().Where("uid", uid).Delete(); err != nil {
-			facade.Log.Error(map[string]any{"uid": uid, "error": err}, "注销清理用户数据失败")
+		if err := tx.Unscoped().Model(&table).Where("uid", uid).Delete(nil).Error; err != nil {
+			return err
 		}
 	}
+
+	// 封禁记录：保留记录本体（封禁原因 / 证据 / 操作人 / 违规次数属于管理侧留痕，
+	// 删除会破坏后台的封禁审计），但清空其中属于用户本人的申诉原文 ——
+	// 账号已注销，用户提交的申诉内容不应继续留存（个保法「删除权」）。
+	if err := tx.Unscoped().Model(&UserBanRecords{}).Where("uid", uid).UpdateColumn("appeal_content", "").Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // banInfo - 解析用户封禁信息
@@ -475,23 +498,9 @@ func GetUserPrivacy(uid any) UserPrivacySetting {
 	return privacy
 }
 
-// IsEmailVerified - 判断 users.json 里的邮箱验证标记
-// 约定：键不存在视为已验证（兼容未开启邮箱验证时期注册的历史用户），值为 0/缺省键才表示未验证
-func IsEmailVerified(jsonValue any) bool {
-	jsonMap := cast.ToStringMap(jsonValue)
-	raw, ok := jsonMap[UserJsonEmailVerified]
-	if !ok || raw == nil {
-		return true
-	}
-	return cast.ToBool(raw)
-}
-
-// EmailVerified - 当前用户邮箱是否已验证
-func (this *Users) EmailVerified() bool {
-	return IsEmailVerified(this.Json)
-}
-
 // GetUserJson - 读取指定用户的 json 字段（已解析为 map）
+//
+// 通用工具：users.json 用于承载随版本增长的扩展标记，读写都保留未涉及的键。
 func GetUserJson(uid any) map[string]any {
 	rows, _ := facade.DB.Model(&Users{}).Where("id", uid).Column("json")
 

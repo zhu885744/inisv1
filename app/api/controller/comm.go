@@ -42,11 +42,10 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 	allow := map[string]any{
 		"login":            this.login,
 		"register":         this.register,
+		"sign-code":        this.signCode, // 验证码登录（邮箱/手机号 + 验证码）
 		"check-token":      this.checkToken,
 		"reset-password":   this.resetPassword,
 		"logout":           this.logout,
-		"verify-email":     this.verifyEmail,    // 邮箱验证（注册验证方式为 email 时使用）
-		"send-verify-mail": this.sendVerifyMail, // 重发注册验证邮件
 	}
 	err := this.call(allow, method, ctx)
 
@@ -189,64 +188,10 @@ func (this *Comm) login(ctx *gin.Context) {
 		return
 	}
 
-	// 检查账号是否被冻结（使用 status 字段，0为正常，1为冻结）
-	if table.Status == model.UserStatusFrozen {
-		this.json(ctx, nil, facade.Lang(ctx, "当前账号已被冻结，请联系管理员！"), 403)
+	// 登录前置校验（冻结 / 待审核 / 限制登录）
+	// 与验证码登录共用同一套拦截口径，见 assertLoginAllowed，避免出现绕过
+	if !this.assertLoginAllowed(ctx, table) {
 		return
-	}
-
-	// 检查账号是否处于「注册待审核」状态（开启人工审核注册的后台才会出现）
-	if table.Status == model.UserStatusAudit {
-		this.json(ctx, nil, facade.Lang(ctx, "账号正在审核中，请等待管理员审核通过后再登录！"), 403)
-		return
-	}
-
-	// 检查邮箱是否完成验证（仅对「注册时写入 email_verified=0」的账号生效，
-	// 未写入该标记的历史账号不受影响，避免开启邮箱验证后把老用户全部拦在门外）
-	if setting := model.RegisterSettings(); setting.VerifyMode == model.RegisterVerifyEmail {
-		if !table.EmailVerified() {
-			this.json(ctx, nil, facade.Lang(ctx, "请先完成邮箱验证（验证邮件已发送至您的注册邮箱）！"), 403)
-			return
-		}
-	}
-
-	// 检查账号是否处于封禁状态（限制登录）
-	// 申诉中 / 申诉驳回期间封禁继续生效 —— 申诉不等于解封，只有真正解封才放行
-	if table.Restrictions&model.BanTypeLogin != 0 && table.CurrentBanId > 0 {
-		banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(table.CurrentBanId)
-		if !utils.Is.Empty(banRecord) {
-			banMap := cast.ToStringMap(banRecord)
-			status := cast.ToInt(banMap["status"])
-			if model.BanStatusRestricted(status) {
-				reason := cast.ToString(banMap["reason"])
-				duration := cast.ToInt(banMap["duration"])
-				expiresAt := cast.ToInt64(banMap["expires_at"])
-
-				// 申诉相关状态单独说明，避免用户误以为申诉后就能登录了
-				if status == model.BanStatusAppealed {
-					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉审核中）！原因：%s", reason), 403)
-					return
-				}
-				if status == model.BanStatusAppealRejected {
-					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉未通过）！原因：%s", reason), 403)
-					return
-				}
-
-				msg := fmt.Sprintf("您的账号已被封禁！原因：%s", reason)
-				if duration > 0 {
-					remainingDays := (expiresAt - time.Now().Unix()) / 86400
-					if remainingDays > 0 {
-						msg += fmt.Sprintf("，剩余 %d 天", remainingDays)
-					} else {
-						msg += "，将于今日解封"
-					}
-				} else {
-					msg = fmt.Sprintf("您的账号已被永久封禁！原因：%s", reason)
-				}
-				this.json(ctx, nil, facade.Lang(ctx, msg), 403)
-				return
-			}
-		}
 	}
 
 	if utils.Is.Empty(table.Password) {
@@ -265,8 +210,10 @@ func (this *Comm) login(ctx *gin.Context) {
 		"hash": utils.Hash.Sum32(table.Password),
 	})
 
-	// 删除 item 中的密码
-	delete(item, "password")
+	// 分级脱敏：登录返回的是「本人」数据 —— 保留自己的账号/邮箱/手机号，
+	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
+	// （操作人 IP/UA、封禁证据、申诉原文等，见 privacy.go）
+	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
 	// 更新用户登录时间
 	item["login_time"] = time.Now().Unix()
 	facade.DB.Model(&table).Where("id", table.Id).Update(map[string]any{
@@ -291,6 +238,279 @@ func (this *Comm) login(ctx *gin.Context) {
 			facade.Log.Error(map[string]any{"error": e.Error(), "uid": uid}, "发送账号登录通知失败")
 		}
 	}(cast.ToInt(item["id"]), cast.ToString(params["account"]), cast.ToString(item["nickname"]), ctx.ClientIP(), ctx.Request.UserAgent())
+
+	this.json(ctx, result, facade.Lang(ctx, "登录成功！"), 200)
+}
+
+// assertLoginAllowed - 登录前置校验（冻结 / 待审核 / 限制登录）
+//
+// 密码登录与验证码登录共用：不通过时已经把响应写出去了，调用方直接 return 即可。
+// 抽出来是为了让两种登录方式的拦截口径（含文案）保持一处维护，避免出现
+// 「密码登录被拦、验证码登录能进」这类绕过。
+func (this *Comm) assertLoginAllowed(ctx *gin.Context, table model.Users) bool {
+
+	// 检查账号是否被冻结（使用 status 字段，0为正常，1为冻结）
+	if table.Status == model.UserStatusFrozen {
+		this.json(ctx, nil, facade.Lang(ctx, "当前账号已被冻结，请联系管理员！"), 403)
+		return false
+	}
+
+	// 检查账号是否处于「注册待审核」状态（开启人工审核注册的后台才会出现）
+	if table.Status == model.UserStatusAudit {
+		this.json(ctx, nil, facade.Lang(ctx, "账号正在审核中，请等待管理员审核通过后再登录！"), 403)
+		return false
+	}
+
+	// 检查账号是否处于封禁状态（限制登录）
+	// 申诉中 / 申诉驳回期间封禁继续生效 —— 申诉不等于解封，只有真正解封才放行
+	if table.Restrictions&model.BanTypeLogin != 0 && table.CurrentBanId > 0 {
+		banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(table.CurrentBanId)
+		if !utils.Is.Empty(banRecord) {
+			banMap := cast.ToStringMap(banRecord)
+			status := cast.ToInt(banMap["status"])
+			if model.BanStatusRestricted(status) {
+				reason := cast.ToString(banMap["reason"])
+				duration := cast.ToInt(banMap["duration"])
+				expiresAt := cast.ToInt64(banMap["expires_at"])
+
+				// 申诉相关状态单独说明，避免用户误以为申诉后就能登录了
+				if status == model.BanStatusAppealed {
+					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉审核中）！原因：%s", reason), 403)
+					return false
+				}
+				if status == model.BanStatusAppealRejected {
+					this.json(ctx, nil, facade.Lang(ctx, "您的账号仍处于封禁状态（申诉未通过）！原因：%s", reason), 403)
+					return false
+				}
+
+				msg := fmt.Sprintf("您的账号已被封禁！原因：%s", reason)
+				if duration > 0 {
+					remainingDays := (expiresAt - time.Now().Unix()) / 86400
+					if remainingDays > 0 {
+						msg += fmt.Sprintf("，剩余 %d 天", remainingDays)
+					} else {
+						msg += "，将于今日解封"
+					}
+				} else {
+					msg = fmt.Sprintf("您的账号已被永久封禁！原因：%s", reason)
+				}
+				this.json(ctx, nil, facade.Lang(ctx, msg), 403)
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// 验证码登录
+//
+// 与密码登录的区别：不校验密码，改校验「邮箱/手机号 + 验证码」。
+// code 为空时走「发送验证码」分支（返回 201），非空时校验并直接登录。
+//
+// 几个刻意的设计取舍：
+//   - 发送阶段不区分账号是否注册：未注册的号码同样返回「验证码发送成功」，
+//     只是不真正发短信。否则本接口就成了「该手机号/邮箱是否注册」的枚举器；
+//   - 账号状态（冻结 / 待审核 / 限制登录）一律在**验证码校验通过后**
+//     才提示，未持有验证码的人无法借此探测账号状态；
+//   - 除了账号维度的 60 秒 + 每日 10 次，额外加一层 IP 维度限流，
+//     防止攻击者不停更换号码绕过账号频控来刷短信；
+//   - 验证码错误累计 5 次即停（需重新发送），避免 6 位验证码被暴力枚举。
+func (this *Comm) signCode(ctx *gin.Context) {
+
+	// 请求参数（不限定 source：账号可能由其它来源注册，见 login 的 source 回退说明）
+	params := this.params(ctx)
+
+	social := cast.ToString(params["social"])
+
+	if utils.Is.Empty(social) {
+		this.json(ctx, nil, facade.Lang(ctx, "请提交手机号或邮箱！"), 400)
+		return
+	}
+
+	// 检查类型，邮箱或者手机号
+	var mode string
+	if utils.Is.Email(social) {
+		mode = "email"
+	} else if utils.Is.Phone(social) {
+		mode = "phone"
+	} else {
+		this.json(ctx, nil, facade.Lang(ctx, "请输入正确的手机号或邮箱！"), 400)
+		return
+	}
+
+	// 确定驱动（邮箱 / 短信）
+	drives := cast.ToStringMap(facade.SMSToml.Get("drive"))
+	drive := cast.ToString(drives["sms"])
+	if mode == "email" {
+		drive = cast.ToString(drives["email"])
+	}
+
+	// 驱动不可用
+	if utils.Is.Empty(drive) {
+		if mode == "email" {
+			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启邮箱服务，无法发送验证码！"), 400)
+		} else {
+			this.json(ctx, nil, facade.Lang(ctx, "管理员未开启短信服务，无法发送验证码！"), 400)
+		}
+		return
+	}
+
+	clientIP := ctx.ClientIP()
+
+	// 缓存名称 - 验证码用 mode 而非具体驱动名，确保发送和验证时 key 一致
+	cacheName := fmt.Sprintf("[sign-code][%v=%v]", mode, social)
+	codeErrKey := fmt.Sprintf("sign-code-code-err-%v-%v", mode, social)
+	freqAccount := fmt.Sprintf("sign-code-freq-account-%v-%v", mode, social)
+	freqIP := fmt.Sprintf("sign-code-freq-ip-%v", clientIP)
+	dailyAccount := fmt.Sprintf("sign-code-daily-account-%v-%v", mode, social)
+	dailyIP := fmt.Sprintf("sign-code-daily-ip-%v", clientIP)
+
+	// ========== 阶段一：发送验证码（不传 code）==========
+	if utils.Is.Empty(params["code"]) {
+
+		// 账号维度发送间隔（60秒）
+		if lastSend := facade.Cache.Get(freqAccount); !utils.Is.Empty(lastSend) {
+			if time.Now().Unix()-cast.ToInt64(lastSend) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// IP 维度发送间隔（60秒）—— 防止更换号码绕过账号维度限流刷短信
+		if lastSend := facade.Cache.Get(freqIP); !utils.Is.Empty(lastSend) {
+			if time.Now().Unix()-cast.ToInt64(lastSend) < 60 {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
+				return
+			}
+		}
+
+		// 账号维度每日发送上限（10次）
+		if cast.ToInt(facade.Cache.Get(dailyAccount)) >= 10 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
+		// IP 维度每日发送上限（20次）
+		if cast.ToInt(facade.Cache.Get(dailyIP)) >= 20 {
+			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
+			return
+		}
+
+		// 先记频控再判断账号是否存在：无论存在与否都计数，
+		// 否则「同一号码第二次请求被限流 / 不被限流」会成为探测账号是否注册的信号
+		go facade.Cache.Set(freqAccount, time.Now().Unix(), time.Second*60)
+		go facade.Cache.Set(freqIP, time.Now().Unix(), time.Second*60)
+		go facade.Cache.Set(dailyAccount, cast.ToInt(facade.Cache.Get(dailyAccount))+1, time.Hour*24)
+		go facade.Cache.Set(dailyIP, cast.ToInt(facade.Cache.Get(dailyIP))+1, time.Hour*24)
+
+		// 账号不存在时不发短信，但响应与存在时完全一致（防枚举）
+		table := model.Users{}
+		user, _ := facade.DB.Model(&table).Where(mode, social).Find()
+
+		if utils.Is.Empty(user) {
+			facade.Log.Info(map[string]any{
+				"social": social,
+				"ip":     clientIP,
+			}, "验证码登录：账号不存在，已静默跳过验证码发送")
+			this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
+			return
+		}
+
+		sms := facade.NewSMS(drive).VerifyCode(social)
+		if sms.Error != nil {
+			// 处理阿里云频控错误
+			if drive == "sms" && (strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL")) {
+				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
+				return
+			}
+			this.json(ctx, nil, sms.Error.Error(), 400)
+			return
+		}
+
+		// 缓存验证码 - 5分钟
+		facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
+		// 重新发送后重置错误计数
+		go facade.Cache.Del(codeErrKey)
+
+		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
+		return
+	}
+
+	// ========== 阶段二：校验验证码并登录 ==========
+
+	// 验证码错误次数上限（5次后需重新发送）
+	if cast.ToInt(facade.Cache.Get(codeErrKey)) >= 5 {
+		this.json(ctx, nil, facade.Lang(ctx, "验证码错误次数过多，请重新发送验证码！"), 400)
+		return
+	}
+
+	// 校验验证码
+	cacheCode := facade.Cache.Get(cacheName)
+
+	if utils.Is.Empty(cacheCode) {
+		this.json(ctx, nil, facade.Lang(ctx, "验证码已过期，请重新获取！"), 400)
+		return
+	}
+
+	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
+		go facade.Cache.Set(codeErrKey, cast.ToInt(facade.Cache.Get(codeErrKey))+1, 5*time.Minute)
+		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+		return
+	}
+
+	// 验证码一次性使用，通过后立即作废，防止重放
+	go facade.Cache.Del(cacheName)
+	go facade.Cache.Del(codeErrKey)
+
+	// 查询用户
+	table := model.Users{}
+	item, _ := facade.DB.Model(&table).Where(mode, social).Find()
+
+	// 未注册的号码拿不到验证码，正常不会走到这里；保底给同样的提示，不额外泄露状态
+	if utils.Is.Empty(item) {
+		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+		return
+	}
+
+	// 登录前置校验（冻结 / 待审核 / 限制登录）
+	if !this.assertLoginAllowed(ctx, table) {
+		return
+	}
+
+	jwt := facade.Jwt().Create(facade.H{
+		"uid":  table.Id,
+		"hash": utils.Hash.Sum32(table.Password),
+	})
+
+	// 分级脱敏：登录返回的是「本人」数据 —— 保留自己的账号/邮箱/手机号，
+	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
+	// （操作人 IP/UA、封禁证据、申诉原文等，见 privacy.go）
+	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
+	// 更新用户登录时间
+	item["login_time"] = time.Now().Unix()
+	facade.DB.Model(&table).Where("id", table.Id).Update(map[string]any{
+		"login_time": item["login_time"],
+	})
+
+	result := map[string]any{
+		"user":       item,
+		"token":      jwt.Text,
+		"valid_time": jwt.Valid, // 登录会话有效期（秒）
+	}
+
+	// 往客户端写入cookie - 存储登录token
+	setToken(ctx, jwt.Text)
+	// 登录增加经验
+	go this.loginExp(item["id"])
+
+	// 登录成功后，异步创建“账号登录通知”，记录账号/昵称/时间/IP/设备
+	go func(uid int, account, nickname, ip, ua string) {
+		notification := new(model.Notification)
+		if _, e := notification.CreateLoginNotification(uid, account, nickname, ip, ua); e != nil {
+			facade.Log.Error(map[string]any{"error": e.Error(), "uid": uid}, "发送账号登录通知失败")
+		}
+	}(cast.ToInt(item["id"]), cast.ToString(item["account"]), cast.ToString(item["nickname"]), ctx.ClientIP(), ctx.Request.UserAgent())
 
 	this.json(ctx, result, facade.Lang(ctx, "登录成功！"), 200)
 }
@@ -342,12 +562,6 @@ func (this *Comm) register(ctx *gin.Context) {
 			this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
 			return
 		}
-	}
-
-	// 开启「Email 验证」后必须用邮箱注册（手机号没有可验证的邮箱地址）
-	if setting.VerifyMode == model.RegisterVerifyEmail && social != "email" {
-		this.json(ctx, nil, facade.Lang(ctx, "本站已开启邮箱验证，请使用邮箱注册！"), 400)
-		return
 	}
 
 	// 判断是否已经注册
@@ -530,10 +744,11 @@ func (this *Comm) register(ctx *gin.Context) {
 	// 删除密码
 	table.Password = ""
 
-	// ===== 注册验证方式分流 =====
-	switch setting.VerifyMode {
-	case model.RegisterVerifyManual:
-		// 人工审核：账号置为「待审核」，管理员在后台通过后才能登录
+	// ===== 注册验证方式：人工审核 =====
+	// 账号置为「待审核」，管理员在后台通过后才能登录；
+	// 未开启人工审核（none）时直接落到下面的「注册即登录」逻辑
+	if setting.VerifyMode == model.RegisterVerifyManual {
+
 		if _, err := facade.DB.Model(&model.Users{}).Where("id", table.Id).
 			UpdateColumn("status", model.UserStatusAudit); err != nil {
 			facade.Log.Error(map[string]any{"error": err.Error(), "uid": table.Id}, "写入待审核状态失败")
@@ -552,29 +767,6 @@ func (this *Comm) register(ctx *gin.Context) {
 			"user":       table,
 			"need_audit": true,
 		}, facade.Lang(ctx, "注册成功，请等待管理员审核通过后再登录！"), 200)
-		return
-
-	case model.RegisterVerifyEmail:
-		// 邮箱验证：标记未验证并发送验证邮件，验证通过后才能登录
-		if err := model.MarkEmailUnverified(table.Id); err != nil {
-			facade.Log.Error(map[string]any{"error": err.Error(), "uid": table.Id}, "写入邮箱未验证标记失败")
-		}
-		if err := model.SendRegisterVerifyMail(table.Id, cast.ToString(table.Email), this.baseURL(ctx)); err != nil {
-			// 邮件发送失败不阻断注册（账号已创建），但要把原因告知前端，便于用户重发
-			this.json(ctx, gin.H{
-				"user":        table,
-				"need_verify": true,
-				"email":       table.Email,
-				"mail_error":  err.Error(),
-			}, facade.Lang(ctx, "注册成功，但验证邮件发送失败，请稍后在登录页重新发送！"), 200)
-			return
-		}
-
-		this.json(ctx, gin.H{
-			"user":        table,
-			"need_verify": true,
-			"email":       table.Email,
-		}, facade.Lang(ctx, "注册成功，请前往邮箱完成验证后登录！"), 200)
 		return
 	}
 
@@ -597,92 +789,6 @@ func (this *Comm) register(ctx *gin.Context) {
 	model.SendWelcome(table.Id, table.Account, table.Nickname, cast.ToString(table.Email))
 
 	this.json(ctx, result, facade.Lang(ctx, "注册成功！"), 200)
-}
-
-// baseURL - 拼出前台站点根地址，用于邮件里的验证链接
-// 优先取 config/app.toml 的 app.domain（反向代理场景），否则回退到当前请求的 scheme + host
-func (this *Comm) baseURL(ctx *gin.Context) string {
-
-	domain := strings.TrimSpace(cast.ToString(facade.AppToml.Get("app.domain", "")))
-	if !utils.Is.Empty(domain) {
-		if !strings.HasPrefix(domain, "http://") && !strings.HasPrefix(domain, "https://") {
-			domain = "https://" + domain
-		}
-		return strings.TrimRight(domain, "/")
-	}
-
-	scheme := "http"
-	if ctx.Request.TLS != nil || strings.EqualFold(ctx.GetHeader("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-
-	return fmt.Sprintf("%v://%v", scheme, ctx.Request.Host)
-}
-
-// verifyEmail - 邮箱验证（注册验证方式为 email 时，用户点击邮件链接后调用）
-// 参数：token（邮件里的验证 token）
-func (this *Comm) verifyEmail(ctx *gin.Context) {
-
-	params := this.params(ctx)
-	token := cast.ToString(params["token"])
-
-	uid := model.ConsumeMailToken(token)
-	if uid <= 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "验证链接无效或已过期，请重新发送验证邮件！"), 400)
-		return
-	}
-
-	if err := model.MarkEmailVerified(uid); err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "邮箱验证失败，请稍后重试！"), 400)
-		return
-	}
-
-	// 验证通过后补发注册欢迎消息 / 欢迎邮件
-	user, _ := facade.DB.Model(&model.Users{}).Find(uid)
-	if !utils.Is.Empty(user) {
-		model.SendWelcome(uid, cast.ToString(user["account"]), cast.ToString(user["nickname"]), cast.ToString(user["email"]))
-	}
-
-	this.json(ctx, gin.H{"uid": uid}, facade.Lang(ctx, "邮箱验证成功，请登录！"), 200)
-}
-
-// sendVerifyMail - 重发注册验证邮件
-// 参数：email（注册邮箱）；仅对「已注册且邮箱未验证」的账号发送，避免被当作探测接口
-func (this *Comm) sendVerifyMail(ctx *gin.Context) {
-
-	params := this.params(ctx)
-	email := strings.TrimSpace(cast.ToString(params["email"]))
-
-	if !utils.Is.Email(email) {
-		this.json(ctx, nil, facade.Lang(ctx, "邮箱格式不正确！"), 400)
-		return
-	}
-
-	setting := model.RegisterSettings()
-	if setting.VerifyMode != model.RegisterVerifyEmail {
-		this.json(ctx, nil, facade.Lang(ctx, "当前未开启邮箱验证！"), 400)
-		return
-	}
-
-	user, _ := facade.DB.Model(&model.Users{}).Where("email", email).Find()
-	if utils.Is.Empty(user) {
-		// 不暴露账号是否存在，统一提示「已发送」
-		this.json(ctx, nil, facade.Lang(ctx, "如果该邮箱已注册，验证邮件将发送到您的邮箱！"), 200)
-		return
-	}
-
-	uid := cast.ToInt(user["id"])
-	if model.IsEmailVerified(user["json"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "该邮箱已完成验证，请直接登录！"), 400)
-		return
-	}
-
-	if err := model.SendRegisterVerifyMail(uid, email, this.baseURL(ctx)); err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
-		return
-	}
-
-	this.json(ctx, nil, facade.Lang(ctx, "验证邮件已发送，请注意查收！"), 200)
 }
 
 // 忘记密码
@@ -777,7 +883,7 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 	if utils.Is.Empty(params["code"]) {
 
 		// 本地频控检查（仅短信模式）
-		if drive == "sms" {
+		if mode == "sms" {
 			frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, social)
 			dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, social)
 
@@ -910,7 +1016,9 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 		setToken(ctx, token)
 	}
 
-	delete(item, "password")
+	// 分级脱敏：本人数据保留账号/邮箱/手机号，但移除密码与管理员备注，
+	// 并清理封禁记录里的管理侧数据（见 privacy.go）
+	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
 
 	this.json(ctx, gin.H{
 		"user":       item,

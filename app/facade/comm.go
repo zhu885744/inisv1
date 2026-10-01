@@ -159,6 +159,28 @@ func (c *CommStruct) MaskPhone(phone string) string {
 	return phone[:3] + "****" + phone[7:]
 }
 
+// strictEmailRegex - 严格邮箱格式（HTML5 标准的一个子集，锚定完整匹配）
+//
+// 为什么不能直接用 utils.Is.Email：go-utils 的邮箱规则是「非锚定」正则，
+// 只要串里任意位置出现 a@b.com 就算通过，所以
+// "a@b.com<script>alert(1)</script>"、"<img src=x onerror=alert(1)>y@qq.com"
+// 这类拼接串都能通过校验并被原样入库，前端渲染时即构成存储型 XSS。
+var strictEmailRegex = regexp.MustCompile(`^[A-Za-z0-9.!#$%&'*+/=?^_{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
+
+// ValidEmail 严格邮箱校验（空值视为不合法；需要「可选」语义请先自行判空）
+func (c *CommStruct) ValidEmail(email any) bool {
+	value := cast.ToString(email)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	return strictEmailRegex.MatchString(value)
+}
+
+// ValidPhone 手机号校验（与短信通道、前端保持一致：中国大陆 11 位）
+func (c *CommStruct) ValidPhone(phone any) bool {
+	return utils.Is.Phone(cast.ToString(phone))
+}
+
 // MaskIP IP地址脱敏处理
 func (c *CommStruct) MaskIP(ip string) string {
 	if ip == "" {

@@ -773,7 +773,11 @@ func (this *EXP) active(ctx *gin.Context) {
 	list := cast.ToSlice(total)
 
 	cacheName := this.cache.name(ctx)
-	if cached, ok := this.getFromCache(ctx, cacheName); ok {
+	// 管理员能看到更完整的用户字段（权限组、封禁记录等），而缓存名只由请求参数决定，
+	// 管理员响应一旦写入共享缓存，其他访客命中后就会拿到这些字段
+	cacheEnable := this.cache.enable(ctx) && !this.meta.permit(ctx)
+
+	if cached, ok := this.getFromCache(ctx, cacheName); cacheEnable && ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
@@ -786,9 +790,13 @@ func (this *EXP) active(ctx *gin.Context) {
 			go func(key int, val any) {
 				defer wg.Done()
 				value := cast.ToStringMap(val)
-				field := []string{"id", "nickname", "avatar", "description", "login_time", "title", "gender", "result"}
+				field := []string{"id", "nickname", "avatar", "description", "title", "gender", "result"}
 				author, _ := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
 				item := facade.Comm.WithField(author, field)
+				// 分级脱敏（见 privacy.go）：排行榜会被写入共享缓存，因此不区分「本人」，
+				// 一律按他人规则处理 —— 非管理员看不到他人的登录时间（login_time）、
+				// 权限组（result.auth）与封禁记录里的操作人 IP/UA 等管理侧数据
+				this.meta.privacyUserList(ctx, item)
 				item["exp"] = cast.ToInt(value["total"])
 				item["count"] = value["number"]
 				result[key] = item
@@ -798,7 +806,9 @@ func (this *EXP) active(ctx *gin.Context) {
 		wg.Wait()
 
 		data = result
-		this.setCache(ctx, cacheName, data)
+		if cacheEnable {
+			this.setCache(ctx, cacheName, data)
+		}
 	}
 
 	if !utils.Is.Empty(data) {

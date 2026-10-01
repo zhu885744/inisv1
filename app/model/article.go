@@ -191,6 +191,9 @@ func (this *Article) author(wg *sync.WaitGroup, result *any) {
 		author = utils.Map.WithField(user, allow)
 	}
 
+	// 公开内容里内嵌的作者：清洗 result.auth（权限组）与封禁记录里的管理侧字段
+	SanitizeAuthor(author)
+
 	*result = author
 }
 

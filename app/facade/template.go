@@ -14,7 +14,7 @@ token_name  = "INIS_LOGIN_TOKEN"
 # 主题路由回退（history 模式 SPA）时忽略的路径前缀，多个用英文逗号分隔
 # /assets 为后端静态资源（表情、随机头像等），/static 为主题构建产物的静态目录
 theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
-# 站点地址（用于注册验证邮件等邮件里的链接，如 https://blog.example.com）
+# 站点地址（用于邮件通知正文里的链接等，如 https://blog.example.com）
 # 留空则用当前请求的 Host 自动推导；前端与接口不同域时必须显式配置
 domain      = ""
 
@@ -173,7 +173,7 @@ sign_name = "${email.sign_name}"
 
 # ===== 发件队列（分批 + 重试，见 app/facade/mail_queue.go）=====
 # 后台可在「系统设置 → 邮件通知 → 发件队列」修改（PUT /api/toml/sms-email-queue）
-# 每批最多发送多少封通知类邮件（验证码 / 注册验证邮件不受分批限制，入队即发）
+# 每批最多发送多少封通知类邮件（验证码不受分批限制，入队即发）
 batch_size     = ${email.batch_size}
 # 批次间隔（秒）：一批发满后等待多久再发下一批（10 分钟 = 600）
 batch_interval = ${email.batch_interval}
@@ -183,7 +183,7 @@ retry_delay    = ${email.retry_delay}
 max_attempts   = ${email.max_attempts}
 # 单封发送超时（秒）：超时按失败处理，避免 SMTP 卡住整个队列
 send_timeout   = ${email.send_timeout}
-# 验证码 / 注册验证邮件等待首轮发送结果的超时（秒），0 = 不等待（纯异步）
+# 验证码等待首轮发送结果的超时（秒），0 = 不等待（纯异步）
 verify_wait    = ${email.verify_wait}
 # 队列最大长度（仅限制通知类邮件，超出直接丢弃并记日志）
 queue_size     = ${email.queue_size}

@@ -351,16 +351,16 @@ func (this *Moments) create(ctx *gin.Context) {
 
 	status := cast.ToInt(params["status"])
 
+	// 是否开启审核：配置存放在 config.json.audit（与文章 / 页面口径一致，判定见 audit.go）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+
 	if status == 0 {
-		utils.Struct.Set(&table, "Audit", 1)
+		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, true))
 		utils.Struct.Set(&table, "Status", 0)
 		utils.Struct.Set(&table, "PublishTime", 0)
 	} else {
-		// 是否开启审核：配置存放在 config.json.audit（与文章/页面口径一致）。
-		// 此前误读顶层 config["audit"]（该列不存在，恒为 false），导致审核开关永远失效、
-		// 发布即通过审核，后台「待审核」自然没有任何数据。
-		audit := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-		utils.Struct.Set(&table, "Audit", cast.ToInt(!audit))
+		// 关闭审核 → 发布即通过；开启审核 → 待审核
+		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
 		// 状态固定为「已发布」：待审核 ≠ 草稿（原来复用 !audit，会把待审核动态写成草稿，混进草稿筛选）
 		utils.Struct.Set(&table, "Status", 1)
 
@@ -426,23 +426,29 @@ func (this *Moments) update(ctx *gin.Context) {
 		allowFields = append(allowFields, "audit", "top", "reason")
 	}
 
-	status := cast.ToInt(params["status"])
-
 	// 原文状态：用于判断是否「首次发布」，避免每次编辑都把审核状态重置为待审核
 	prev, _ := facade.DB.Model(&model.Moments{}).WithTrashed().Where("id", params["id"]).Find()
+	prevStatus := cast.ToInt(prev["status"])
+	prevAudit := cast.ToInt(prev["audit"])
+
+	// 未传 status 时沿用原文状态，避免调用方漏传导致已发布的动态被降级成草稿
+	status := cast.ToInt(params["status"])
+	if _, ok := params["status"]; !ok {
+		status = prevStatus
+	}
+
+	// 是否开启审核：读取 config.json.audit（与文章 / 页面口径一致，判定见 audit.go）
+	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 关闭审核 → 通过；开启审核 → 仅「首次发布」进入待审核，已审核过的编辑不再打回
+	audit, auditSet := auditForUpdate(auditSwitch, status == 0, prevStatus == 0, prevAudit)
 
 	if status == 0 {
-		async.Set("audit", 1)
+		async.Set("audit", audit)
 		async.Set("status", 0)
 	} else {
 		async.Set("status", 1)
-		// 审核开关读取 config.json.audit（与文章/页面口径一致，此前误读顶层 audit 恒为 false）
-		auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-		if !auditSwitch {
-			async.Set("audit", 1)
-		} else if cast.ToInt(prev["status"]) == 0 || cast.ToInt(prev["audit"]) == 0 {
-			// 仅「首次发布」（原为草稿 / 尚未审核）进入待审核，已审核过的编辑不再打回
-			async.Set("audit", 0)
+		if auditSet {
+			async.Set("audit", audit)
 		}
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
 			async.Set("publish_time", cast.ToInt64(publishTime))

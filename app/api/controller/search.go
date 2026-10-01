@@ -151,28 +151,50 @@ func (this *Search) highlightResult(data []map[string]any, keyword string) []map
 	return data
 }
 
-// maskEmail 邮箱脱敏
-func (this *Search) maskEmail(email string) string {
-	if email == "" {
-		return ""
+// searchFieldsWhitelist - 各搜索类型允许被检索的字段白名单
+//
+// fields 参数来自客户端（如 ?fields=nickname,email），历史上被直接拼进 SQL 的列名位置，
+// 既可以用于布尔盲注（如 fields=id），也能探测未授权列（如 fields=password），
+// 因此这里只放行白名单内的列，其余一律忽略并回退默认字段。
+var searchFieldsWhitelist = map[string][]string{
+	"article": {"title", "content", "abstract", "tags"},
+	"pages":   {"title", "content", "key"},
+	"tags":    {"name", "description"},
+	"users":   {"nickname", "email", "description", "title"},
+	"links":   {"nickname", "description", "url"},
+	"moments": {"content", "location"},
+}
+
+// pickSearchFields - 从客户端入参中过滤出白名单内的检索字段；结果为空时回退默认字段
+func (this *Search) pickSearchFields(kind string, fields []string, def []string) []string {
+	if len(fields) == 0 || fields[0] == "" {
+		return def
 	}
 
-	// 按 @ 分割邮箱
-	parts := strings.Split(email, "@")
-	if len(parts) != 2 {
-		return email
+	allow := searchFieldsWhitelist[kind]
+	if len(allow) == 0 {
+		return def
 	}
 
-	username := parts[0]
-	domain := parts[1]
-
-	// 如果用户名长度 <= 3，只保留第一位
-	if len(username) <= 3 {
-		return username[:1] + "***@" + domain
+	var picked []string
+	for _, item := range strings.Split(fields[0], ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		for _, ok := range allow {
+			if item == ok {
+				picked = append(picked, item)
+				break
+			}
+		}
 	}
 
-	// 保留前两位和最后一位，中间用 *** 替换
-	return username[:2] + "***" + username[len(username)-1:] + "@" + domain
+	if len(picked) == 0 {
+		return def
+	}
+
+	return picked
 }
 
 // processSearchResult 处理搜索结果
@@ -230,7 +252,7 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 				"avatar":      user.Avatar,
 				"description": user.Description,
 				"title":       user.Title,
-				"email":       this.maskEmail(user.Email),
+				"email":       model.HideContact(user.Email),
 			})
 		}
 	case []model.Links:
@@ -534,11 +556,8 @@ func (this *Search) searchArticle(keyword string, page, limit int, fields ...str
 	// 使用数据库级别的 LIKE 查询，提高性能
 	db := facade.DB.Drive()
 
-	// 构建搜索字段
-	searchFields := []string{"title", "content", "abstract", "tags"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 构建搜索字段（只允许白名单内的列，防止 fields 参数被用于注入或探测敏感列）
+	searchFields := this.pickSearchFields("article", fields, []string{"title", "content", "abstract", "tags"})
 
 	// 构建搜索查询
 	var conditions []string
@@ -569,10 +588,8 @@ func (this *Search) searchPages(keyword string, page, limit int, fields ...strin
 
 	db := facade.DB.Drive()
 
-	searchFields := []string{"title", "content", "key"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 检索字段只允许白名单内的列
+	searchFields := this.pickSearchFields("pages", fields, []string{"title", "content", "key"})
 
 	var conditions []string
 	var args []any
@@ -604,10 +621,8 @@ func (this *Search) searchTags(keyword string, page, limit int, fields ...string
 
 	db := facade.DB.Drive()
 
-	searchFields := []string{"name", "description"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 检索字段只允许白名单内的列
+	searchFields := this.pickSearchFields("tags", fields, []string{"name", "description"})
 
 	var conditions []string
 	var args []any
@@ -634,10 +649,8 @@ func (this *Search) searchUsers(keyword string, page, limit int, fields ...strin
 
 	db := facade.DB.Drive()
 
-	searchFields := []string{"nickname", "email", "description", "title"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 检索字段只允许白名单内的列（email 命中结果在输出侧仍做脱敏）
+	searchFields := this.pickSearchFields("users", fields, []string{"nickname", "email", "description", "title"})
 
 	var conditions []string
 	var args []any
@@ -665,10 +678,8 @@ func (this *Search) searchLinks(keyword string, page, limit int, fields ...strin
 
 	db := facade.DB.Drive()
 
-	searchFields := []string{"nickname", "description", "url"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 检索字段只允许白名单内的列
+	searchFields := this.pickSearchFields("links", fields, []string{"nickname", "description", "url"})
 
 	var conditions []string
 	var args []any
@@ -696,10 +707,8 @@ func (this *Search) searchMoments(keyword string, page, limit int, fields ...str
 
 	db := facade.DB.Drive()
 
-	searchFields := []string{"content", "location"}
-	if len(fields) > 0 && fields[0] != "" {
-		searchFields = strings.Split(fields[0], ",")
-	}
+	// 检索字段只允许白名单内的列
+	searchFields := this.pickSearchFields("moments", fields, []string{"content", "location"})
 
 	var conditions []string
 	var args []any
