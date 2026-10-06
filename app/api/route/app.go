@@ -19,6 +19,9 @@ var defaultMiddleware = []gin.HandlerFunc{
 	middle.Rule(),
 	middle.ApiKey(),
 	middle.Restriction(),
+	// 滑块验证闸门：发送验证码防刷 + 登录/注册/改密等敏感操作（后台可配）
+	// （需要读 params 与登录用户，因此放在链尾）
+	middle.CaptchaGuard(),
 }
 
 // 所有可用的控制器
@@ -58,6 +61,7 @@ var controllers = map[string]controller.ApiInterface{
 	"notification":  &controller.Notification{},
 	"integral":      &controller.Integral{},
 	"goods":         &controller.Goods{},
+	"decoration":    &controller.Decoration{},
 }
 
 // registerRoutes 注册路由

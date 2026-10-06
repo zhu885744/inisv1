@@ -100,6 +100,8 @@ func InitConfig() {
 		}), Remark: "积分规则配置"},
 		// 签到配置（独立于经验 / 积分规则）：奖励项由奖励引擎统一发放，见 model/checkin.go
 		{Key: CheckinCacheKey, Json: utils.Json.Encode(defaultCheckinConfig()), Remark: "每日签到配置"},
+		// 装扮配置（头像框 / 头衔商城，见 model/decoration.go）
+		{Key: DecorationConfigKey, Json: utils.Json.Encode(defaultDecorationConfig()), Remark: "装扮商城配置"},
 	}
 
 	for _, item := range configs {

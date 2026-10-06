@@ -85,6 +85,8 @@ func InitTable() {
 		{"NotificationRead", InitNotificationRead},
 		{"Integral", InitIntegral},
 		{"Goods", InitGoods},
+		// Decoration 必须排在 Goods 之后：首次运行会为默认装扮生成关联的商品记录
+		{"Decoration", InitDecoration},
 		{"IntegralCard", InitIntegralCard},
 		{"RewardCard", InitRewardCard},
 	}

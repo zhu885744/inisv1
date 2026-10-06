@@ -34,6 +34,7 @@ func Run() {
 	Device.Run()
 	Ban.Run()
 	Notification.Run()
+	Decoration.Run()
 
 	go func() {
 		<- Timer.Start()

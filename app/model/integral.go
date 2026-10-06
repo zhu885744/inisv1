@@ -25,6 +25,7 @@ const (
 	IntegralTypeMoments       = "moments"        // 发布动态
 	IntegralTypeShare         = "share"          // 分享内容
 	IntegralTypeBuy           = "buy"            // 商城兑换（消耗）
+	IntegralTypeDecoration    = "decoration"     // 装扮商城兑换（消耗，与普通商品区分统计）
 	IntegralTypeRefund        = "refund"         // 订单取消/退款返还（获得）
 	IntegralTypeGive          = "give"           // 管理员调整
 	IntegralTypeCard          = "card"           // 卡密兑换（获得）

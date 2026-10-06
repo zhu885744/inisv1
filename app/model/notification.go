@@ -25,13 +25,16 @@ const (
 	NotificationTypeArticle = "article" // 文章（待审核 / 审核通过 / 审核未通过）
 	NotificationTypePage    = "page"    // 独立页面（待审核 / 审核通过 / 审核未通过）
 	NotificationTypeLinks   = "links"   // 友链（待审核 / 审核通过 / 审核未通过）
+	// 装扮（获得 / 续期 / 被回收 / 即将过期 / 已过期）
+	// bind_type=decoration，前台「消息」页据此显示装扮图标并跳到「我的装扮」
+	NotificationTypeDecoration = "decoration"
 )
 
 type Notification struct {
 	Id       int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	Uid      int    `gorm:"type:int(32); comment:接收用户ID 0表示广播通知(推送给全体用户);" json:"uid"`
 	FromUid  int    `gorm:"type:int(32); comment:触发用户ID;" json:"from_uid"`
-	Type     string `gorm:"type:varchar(32); comment:通知类型(comment/like/collect/follow/system/moments);" json:"type"`
+	Type     string `gorm:"type:varchar(32); comment:通知类型(comment/like/collect/follow/system/moments/article/page/links/decoration);" json:"type"`
 	Title    string `gorm:"type:varchar(256); comment:通知标题;" json:"title"`
 	Content  string `gorm:"type:varchar(1024); comment:通知内容;" json:"content"`
 	BindId   int    `gorm:"type:int(32); comment:关联实体ID; default:0;" json:"bind_id"`

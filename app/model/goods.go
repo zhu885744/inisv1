@@ -34,8 +34,9 @@ const (
 
 // 虚拟商品发货方式常量
 const (
-	DeliverText = "text" // 文本发货
-	DeliverCard = "card" // 卡密发货
+	DeliverText       = "text"       // 文本发货
+	DeliverCard       = "card"       // 卡密发货
+	DeliverDecoration = "decoration" // 装扮发货（头像框 / 头衔等，见 decoration.go）
 )
 
 // Goods - 商品表
@@ -48,7 +49,9 @@ type Goods struct {
 	Stock       int    `gorm:"type:int(32); comment:库存; default:0;" json:"stock"`
 	Status      int    `gorm:"tinyint; default:1; comment:状态（0下架 1上架）;" json:"status"`
 	Type        string `gorm:"size:16; comment:商品类型（virtual虚拟 physical实物）; default:'virtual';" json:"type"`
-	DeliverType string `gorm:"size:16; comment:发货方式（text文本 card卡密，仅虚拟商品）; default:'';" json:"deliver_type"`
+	DeliverType string `gorm:"size:16; comment:发货方式（text文本 card卡密 decoration装扮，仅虚拟商品）; default:'';" json:"deliver_type"`
+	// DecorationId 关联装扮ID（>0 且 DeliverType=decoration 时，购买后发放对应装扮）
+	DecorationId int `gorm:"type:int(32); index; comment:关联装扮ID（0=非装扮商品）; default:0;" json:"decoration_id"`
 	// 商城增强字段
 	Category     string `gorm:"size:32; index; comment:商品分类（自由字符串，用于前台分组）; default:Null;" json:"category"`
 	LimitPerUser int    `gorm:"type:int(32); comment:每人限购数量（0=不限购）; default:0;" json:"limit_per_user"`
@@ -248,7 +251,9 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		if goods.LimitPerUser > 0 {
 			var bought int64
 			if err := tx.Model(&GoodsOrder{}).
-				Where("uid = ? AND goods_id = ? AND status != ?", uid, goodsId, OrderStatusCanceled).
+				Where("uid", uid).
+				Where("goods_id", goodsId).
+				Where("status", "!=", OrderStatusCanceled).
 				Count(&bought).Error; err != nil {
 				return err
 			}
@@ -258,7 +263,9 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		}
 
 		// 6. 校验并扣减库存（原子操作，防止超卖）
-		result := tx.Model(&Goods{}).Where("id = ? AND stock > 0", goodsId).
+		result := tx.Model(&Goods{}).
+			Where("id", goodsId).
+			Where("stock", ">", 0).
 			UpdateColumn("stock", gorm.Expr("stock - 1"))
 		if result.Error != nil {
 			return result.Error
@@ -284,11 +291,18 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		}
 
 		// 9. 写入积分流水（含余额快照）
+		// 装扮商品单独记一种流水类型，便于后台区分「商品消费」与「装扮消费」
+		integralType := IntegralTypeBuy
+		integralDesc := "兑换商品：" + goods.Title
+		if goods.DeliverType == DeliverDecoration {
+			integralType = IntegralTypeDecoration
+			integralDesc = "兑换装扮：" + goods.Title
+		}
 		if err := tx.Create(&Integral{
 			Uid:         uid,
 			Value:       -goods.Price,
-			Type:        IntegralTypeBuy,
-			Description: "兑换商品：" + goods.Title,
+			Type:        integralType,
+			Description: integralDesc,
 			Json: utils.Json.Encode(map[string]any{
 				"goods_id":      goodsId,
 				"balance_after": user.Integral - goods.Price,
@@ -321,6 +335,9 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 					return err
 				}
 				order.DeliverContent = card
+			case DeliverDecoration:
+				// 装扮商品：外观由 decoration 表定义，订单落库后再发放（见步骤 12）
+				order.DeliverContent = "装扮已发放，请前往「我的装扮」佩戴"
 			default:
 				// 文本发货（含未设置发货方式的虚拟商品）
 				order.DeliverContent = goods.DeliverContent
@@ -331,6 +348,16 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 
 		if err := tx.Create(&order).Error; err != nil {
 			return err
+		}
+
+		// 12. 装扮商品：订单落库后在同一事务内发放装扮（失败则整体回滚，积分一并退回）
+		if goods.Type == GoodsTypeVirtual && goods.DeliverType == DeliverDecoration {
+			if goods.DecorationId <= 0 {
+				return errors.New("该装扮商品未关联装扮！")
+			}
+			if _, err := GrantDecorationTx(tx, uid, goods.DecorationId, DecorationSourceShop, 0, order.Id); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -400,7 +427,9 @@ func (this *GoodsOrder) CancelOrder(uid int, orderId int, isRoot bool) (order Go
 		}
 
 		// 2. 销量回滚（不小于 0）
-		if err := tx.Model(&Goods{}).Where("id = ? AND sold > 0", order.GoodsId).
+		if err := tx.Model(&Goods{}).
+			Where("id", order.GoodsId).
+			Where("sold", ">", 0).
 			UpdateColumn("sold", gorm.Expr("sold - 1")).Error; err != nil {
 			return err
 		}

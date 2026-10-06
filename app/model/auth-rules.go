@@ -91,6 +91,12 @@ func EnsureAuthRules() {
 
 	if created > 0 {
 		facade.Log.Info(map[string]any{"created": created}, "已补齐缺失的权限规则")
+
+		// 补录了规则说明权限集合变了，必须让「用户权限列表」缓存失效。
+		// 该缓存 key 形如 user[uid][rule-group]、无过期时间（见 model/users.go 的 Rules），
+		// 且不会因为 rule 缓存被清而失效 —— 老管理员会一直拿着「不含新接口」的旧列表，
+		// 访问新后台页面持续 403（表现为「新功能页面打开是空的 / 无权限」）。
+		facade.Cache.DelTags([]any{"user["})
 	}
 
 	NormalizeAuthRuleTypes()
@@ -200,6 +206,10 @@ func createAuthRules() (result []AuthRules) {
 			"DELETE": {"path=&name=代理 DELETE 请求&type=login"},
 		},
 		"comm": {
+			"GET": {
+				// 滑块验证题：发送验证码被判定为频繁时前端弹窗用（公开接口）
+				"path=captcha&name=滑块验证&type=common",
+			},
 			"POST": {
 				"path=login&name=传统和加密登录&type=common",
 				"path=sign-code&name=验证码登录&type=common",
@@ -570,6 +580,39 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=default&name=清空回收站",
 			},
 		},
+		// 装扮（头像框 / 头衔等）：shop/types/config 是前台匿名可见的公开接口，
+		// mine/wearing/wear/unwear/buy 是登录用户的个人装扮操作，其余为管理端权限点。
+		"decoration": {
+			"GET": {
+				"path=one&type=common&name=装扮详情",
+				"path=all&type=common&name=装扮列表",
+				"path=shop&type=common&name=装扮商城",
+				"path=types&type=common&name=装扮类型",
+				"path=config&type=common&name=装扮配置",
+				"path=mine&type=login&name=我的装扮",
+				"path=wearing&type=login&name=我佩戴的装扮",
+				"path=user-decorations&type=default&name=查看用户装扮",
+				"path=count&type=default&name=装扮统计",
+			},
+			"POST": {
+				"path=wear&type=login&name=佩戴装扮",
+				"path=unwear&type=login&name=卸下装扮",
+				"path=buy&type=login&name=兑换装扮",
+				"path=save&type=default&name=保存装扮",
+				"path=create&type=default&name=新增装扮",
+			},
+			"PUT": {
+				"path=update&type=default&name=更新装扮",
+				"path=restore&type=default&name=恢复装扮",
+				"path=grant&type=default&name=发放装扮",
+				"path=revoke&type=default&name=回收装扮",
+			},
+			"DELETE": {
+				"path=remove&type=default&name=删除装扮",
+				"path=delete&type=default&name=彻底删除装扮",
+				"path=clear&type=default&name=清空回收站",
+			},
+		},
 		"qps-warn": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
 			"PUT":    {"update", "restore"},
@@ -813,6 +856,7 @@ func createAuthRules() (result []AuthRules) {
 		"notification":  "【消息通知 API】",
 		"integral":      "【积分 API】",
 		"goods":         "【商品 API】",
+		"decoration":    "【装扮 API】",
 		"checkin":       "【签到 API】",
 	}
 

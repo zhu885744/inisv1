@@ -70,6 +70,7 @@ var publicRoutes = map[string]bool{
 	"POST /api/comm/reset-password":   true,
 	"POST /api/comm/logout":           true,
 	"DELETE /api/comm/logout":         true,
+	"GET /api/comm/captcha":           true, // 滑块验证题（发送验证码防刷用）
 }
 
 // isPublicRoute 判断是否为公开接口（与规则表无关的兜底）

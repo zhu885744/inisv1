@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
@@ -14,13 +15,31 @@ import (
 )
 
 const (
-	goodsAllowFields = "title,description,cover,price,stock,status,type,deliver_type,deliver_content,cards,category,limit_per_user,min_exp,start_time,end_time,sort,json,text"
+	goodsAllowFields = "title,description,cover,price,stock,status,type,deliver_type,deliver_content,cards,decoration_id,category,limit_per_user,min_exp,start_time,end_time,sort,json,text"
 	goodsAllowQuery  = "id"
 )
 
 var goodsAllowFieldsSlice = []any{
 	"title", "description", "cover", "price", "stock", "status", "type", "deliver_type", "deliver_content", "cards",
-	"category", "limit_per_user", "min_exp", "start_time", "end_time", "sort", "json", "text",
+	"decoration_id", "category", "limit_per_user", "min_exp", "start_time", "end_time", "sort", "json", "text",
+}
+
+// checkDecoration - 装扮发货商品必须关联一个真实存在的装扮
+//
+// 只在 deliver_type = decoration 时校验；其他发货方式忽略 decoration_id，
+// 避免脏数据让用户下单后无法发放。
+func (this *Goods) checkDecoration(deliverType string, decorationId int) error {
+	if deliverType != model.DeliverDecoration {
+		return nil
+	}
+	if decorationId <= 0 {
+		return errors.New("装扮发货必须选择关联的装扮！")
+	}
+	exist, _ := facade.DB.Model(&model.Decoration{}).Where("id", decorationId).Exist()
+	if !exist {
+		return errors.New("关联的装扮不存在或已被删除！")
+	}
+	return nil
 }
 var goodsAllowQuerySlice = []any{"id"}
 
@@ -242,6 +261,24 @@ func (this *Goods) decorateBuyState(ctx *gin.Context, items []map[string]any) {
 
 	now := time.Now().Unix()
 
+	// 装扮发货的商品：补充关联装扮的有效期（0=永久），前台据此展示「有效期」标签
+	decoMap := map[int]map[string]any{}
+	decoIds := make([]int, 0, len(items))
+	for _, item := range items {
+		if cast.ToString(item["deliver_type"]) != model.DeliverDecoration {
+			continue
+		}
+		if id := cast.ToInt(item["decoration_id"]); id > 0 {
+			decoIds = append(decoIds, id)
+		}
+	}
+	if len(decoIds) > 0 {
+		rows, _ := facade.DB.Model(&model.Decoration{}).Where("id", "in", decoIds).Select()
+		for _, row := range rows {
+			decoMap[cast.ToInt(row["id"])] = row
+		}
+	}
+
 	for _, item := range items {
 		price := cast.ToInt(item["price"])
 		stock := cast.ToInt(item["stock"])
@@ -283,6 +320,16 @@ func (this *Goods) decorateBuyState(ctx *gin.Context, items []map[string]any) {
 		item["limit_remain"] = remain
 		item["can_buy"] = canBuy
 		item["buy_reason"] = reason
+
+		if cast.ToString(item["deliver_type"]) == model.DeliverDecoration {
+			if deco, ok := decoMap[cast.ToInt(item["decoration_id"])]; ok {
+				duration := cast.ToInt64(deco["duration"])
+				item["decoration_duration"] = duration
+				item["decoration_permanent"] = duration <= 0
+				item["decoration_name"] = cast.ToString(deco["name"])
+				item["decoration_type"] = cast.ToString(deco["type"])
+			}
+		}
 	}
 }
 
@@ -345,6 +392,11 @@ func (this *Goods) all(ctx *gin.Context) {
 		}
 	} else {
 		query = query.Where("status", model.GoodsStatusOn)
+		// 装扮类商品（deliver_type=decoration）由「装扮」分区独立承接，
+		// 不在积分商城重复上架：同一件装扮只在装扮区展示与兑换。
+		// 商品记录本身保留（它是下单 / 库存 / 限购 / 订单的载体），仅对普通用户不可见；
+		// 管理员不受限制（后台商品管理仍需维护这类商品）。
+		query = query.Where("deliver_type", "!=", model.DeliverDecoration)
 	}
 
 	// 分类筛选
@@ -382,12 +434,21 @@ func (this *Goods) all(ctx *gin.Context) {
 func (this *Goods) categories(ctx *gin.Context) {
 	params := this.params(ctx)
 
+	// 装扮类商品不进积分商城的分类条（与 all 的口径保持一致），
+	// 否则点进去会是空列表；管理员保留完整分类，便于后台按分类筛选维护。
+	where := "status = ? AND (delete_time IS NULL OR delete_time = 0)"
+	args := []any{model.GoodsStatusOn}
+	if !this.meta.permit(ctx) {
+		where += " AND (deliver_type IS NULL OR deliver_type != ?)"
+		args = append(args, model.DeliverDecoration)
+	}
+
 	var rows []map[string]any
 	if err := facade.DB.Drive().Raw(
 		"SELECT category, COUNT(id) AS count FROM inis_goods "+
-			"WHERE status = ? AND (delete_time IS NULL OR delete_time = 0) AND category IS NOT NULL AND category != '' "+
+			"WHERE "+where+" AND category IS NOT NULL AND category != '' "+
 			"GROUP BY category ORDER BY count DESC",
-		model.GoodsStatusOn,
+		args...,
 	).Scan(&rows).Error; err != nil {
 		facade.Log.Error(map[string]any{"error": err.Error()}, "商品分类聚合失败")
 	}
@@ -396,8 +457,8 @@ func (this *Goods) categories(ctx *gin.Context) {
 	// 首个为「全部」（count 为上架商品总数）
 	var totalRows []map[string]any
 	if err := facade.DB.Drive().Raw(
-		"SELECT COUNT(id) AS total FROM inis_goods WHERE status = ? AND (delete_time IS NULL OR delete_time = 0)",
-		model.GoodsStatusOn,
+		"SELECT COUNT(id) AS total FROM inis_goods WHERE "+where,
+		args...,
 	).Scan(&totalRows).Error; err != nil {
 		facade.Log.Error(map[string]any{"error": err.Error()}, "商品总数统计失败")
 	}
@@ -868,6 +929,11 @@ func (this *Goods) create(ctx *gin.Context) {
 		}
 	}
 
+	if err := this.checkDecoration(table.DeliverType, table.DecorationId); err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
+	}
+
 	_, err := facade.DB.Model(&table).Create(&table)
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
@@ -897,6 +963,11 @@ func (this *Goods) update(ctx *gin.Context) {
 		if utils.In.Array(key, goodsAllowFieldsSlice) {
 			async.Set(key, this.processFieldValue(val))
 		}
+	}
+
+	if err := this.checkDecoration(cast.ToString(params["deliver_type"]), cast.ToInt(params["decoration_id"])); err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return
 	}
 
 	_, err := facade.DB.Model(&table).WithTrashed().Where("id", params["id"]).Scan(&table).Update(async.Result())

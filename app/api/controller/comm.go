@@ -24,7 +24,9 @@ func (this *Comm) IGET(ctx *gin.Context) {
 	// 转小写
 	method := strings.ToLower(ctx.Param("method"))
 
-	allow := map[string]any{}
+	allow := map[string]any{
+		"captcha": this.captcha, // 滑块验证题（发送验证码被判定为频繁时前端弹窗用）
+	}
 	err := this.call(allow, method, ctx)
 
 	if err != nil {
@@ -1025,6 +1027,15 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 		"token":      token,
 		"valid_time": valid,
 	}, facade.Lang(ctx, facade.Lang(ctx, "合法的token！")), 200)
+}
+
+// captcha - 获取滑块验证题（公开）
+//
+// 使用场景：同一手机号 / 邮箱 5 分钟内重复请求发送验证码时，中间件要求先过滑块
+// （见 app/api/middleware/captcha.go）。正常流程中题目随 428 响应一起下发，
+// 这个接口用于「题目过期」或「校验失败次数超限作废」后主动换一题。
+func (this *Comm) captcha(ctx *gin.Context) {
+	this.json(ctx, model.IssueSliderCaptcha(ctx.ClientIP()), facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // 退出登录

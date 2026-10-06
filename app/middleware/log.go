@@ -6,7 +6,6 @@ import (
 	"inis/app/facade"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	debugs "runtime/debug"
 	"strings"
@@ -45,11 +44,12 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 					}
 				}
 
-				request, _ := httputil.DumpRequest(ctx.Request, false)
+				// 请求导出同样要脱敏：Authorization（裸 JWT）/ Cookie 不允许进日志
+				request := dumpRequestSanitized(ctx)
 				if broken {
 					facade.Log.Error(map[string]any{
 						"path":    ctx.Request.URL.Path,
-						"request": string(request),
+						"request": request,
 					}, "middleware")
 					ctx.Error(err.(error))
 					ctx.Abort()
@@ -60,7 +60,7 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 					"path":    ctx.Request.URL.Path,
 					"error":   err,
 					"stack":   string(debugs.Stack()),
-					"request": string(request),
+					"request": request,
 				}, "[Recovery from panic]")
 
 				var stack []string
@@ -101,13 +101,15 @@ func logRequest(ctx *gin.Context, start time.Time) {
 
 	if cast.ToBool(facade.LogToml.Get("on", true)) {
 		facade.Log.Info(map[string]any{
-			"path":        path,
-			"method":      method,
-			"params":      params,
-			"ip":          ctx.ClientIP(),
-			"user-agent":  ctx.Request.UserAgent(),
-			"errors":      ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
-			"cost":        time.Since(start).String(),
+			"path":   path,
+			"method": method,
+			// 脱敏后落盘：密码 / 密钥 / 验证码整值打码，手机号、邮箱、账号做掩码。
+			// 日志文件曾被明文记录「账号 + 密码」，属于可直接撞库的泄露，详见 redact.go
+			"params":     SanitizeLogParams(params),
+			"ip":         ctx.ClientIP(),
+			"user-agent": ctx.Request.UserAgent(),
+			"errors":     ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
+			"cost":       time.Since(start).String(),
 		}, "middleware")
 	}
 }
