@@ -220,6 +220,28 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"DELETE": {"path=logout&name=退出登录&type=common"},
 		},
+		"oauth": {
+			// 第三方登录（QQ / GitHub / Gitee）：
+			//   - 登录 / 注册 / 绑定到当前账号：common（换 code 发 token，本身就是身份证明）；
+			//   - 我绑定了哪些 / 绑定 / 解绑：login（必须已登录，绑定的是「当前账号」）。
+			// 注意 bind 在登录态下也用来绑定当前账号，所以标 login 而不是 common。
+			"GET": {
+				"path=config&name=获取第三方登录配置&type=common",
+				"path=mine&name=我绑定的第三方账号&type=login",
+				"path=qq&name=QQ 登录&type=common",
+				"path=github&name=GitHub 登录&type=common",
+				"path=gitee&name=Gitee 登录&type=common",
+			},
+			"POST": {
+				"path=qq&name=QQ 登录&type=common",
+				"path=github&name=GitHub 登录&type=common",
+				"path=gitee&name=Gitee 登录&type=common",
+				"path=bind&name=绑定第三方账号&type=login",
+				"path=unbind&name=解绑第三方账号&type=login",
+			},
+			"PUT":    {"path=bind&name=绑定第三方账号&type=login"},
+			"DELETE": {"path=unbind&name=解绑第三方账号&type=login"},
+		},
 		"toml": {
 			"GET": {
 				"path=sms&name=获取SMS服务配置",
@@ -829,6 +851,7 @@ func createAuthRules() (result []AuthRules) {
 		"user-likes":    "【用户点赞 API】",
 		"user-collects": "【用户收藏 API】",
 		"comm":          "【公共 API】",
+		"oauth":         "【第三方登录 API】",
 		"tags":          "【标签 API】",
 		"level":         "【等级 API】",
 		"pages":         "【独立页面 API】",

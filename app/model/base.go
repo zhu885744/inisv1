@@ -67,6 +67,7 @@ func InitTable() {
 		{"Placard", InitPlacard},
 		{"Tags", InitTags},
 		{"Users", InitUsers},
+		{"UserOauth", InitUserOauth},
 		{"AuthGroup", InitAuthGroup},
 		{"Pages", InitPages},
 		{"Level", InitLevel},

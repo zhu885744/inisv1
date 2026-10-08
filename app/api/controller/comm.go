@@ -969,6 +969,31 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 	this.json(ctx, nil, facade.Lang(ctx, "密码重置成功！"), 200)
 }
 
+// ============================== 登录流程的复用入口 ==============================
+//
+// 登录前置校验（冻结 / 待审核 / 封禁）、默认权限组分配、登录奖励这三段逻辑
+// 原先只服务「密码登录 / 验证码登录 / 注册」，现在第三方登录（oauth.go）也要走同一套口径。
+//
+// 为什么不复制一遍：这三段都是安全或数据一致性的关键点，
+// 一旦两份实现分叉，就会出现「密码登录被拦、第三方登录能进」这类绕过。
+// 这里把它们暴露成包级函数，实现仍保留在 Comm 上，仍然只有一处需要维护。
+var loginFlow = &Comm{}
+
+// assertLoginAllowed - 包级入口：登录前置校验
+func assertLoginAllowed(ctx *gin.Context, table model.Users) bool {
+	return loginFlow.assertLoginAllowed(ctx, table)
+}
+
+// assignDefaultAuthGroups - 包级入口：为新用户分配「默认权限组」
+func assignDefaultAuthGroups(uid any) {
+	loginFlow.auth(uid)
+}
+
+// loginReward - 包级入口：登录奖励（经验值 + 积分）
+func loginReward(uid any) {
+	loginFlow.loginExp(uid)
+}
+
 // 校验token
 func (this *Comm) checkToken(ctx *gin.Context) {
 

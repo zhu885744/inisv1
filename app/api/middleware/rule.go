@@ -71,6 +71,16 @@ var publicRoutes = map[string]bool{
 	"POST /api/comm/logout":           true,
 	"DELETE /api/comm/logout":         true,
 	"GET /api/comm/captcha":           true, // 滑块验证题（发送验证码防刷用）
+	// 第三方登录（QQ / GitHub / Gitee）：
+	// 换身份 + 发 token 都在这里完成，本身即身份证明，必须免登录；
+	// 与「已登录用户」相关的绑定 / 解绑 / 我的绑定不在白名单里（走 type=login 规则）
+	"GET /api/oauth/config":  true,
+	"GET /api/oauth/qq":      true,
+	"GET /api/oauth/github":  true,
+	"GET /api/oauth/gitee":   true,
+	"POST /api/oauth/qq":     true,
+	"POST /api/oauth/github": true,
+	"POST /api/oauth/gitee":  true,
 }
 
 // isPublicRoute 判断是否为公开接口（与规则表无关的兜底）
