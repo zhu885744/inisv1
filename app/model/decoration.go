@@ -160,7 +160,10 @@ func DecorationEnabled() bool {
 // 装扮商城是独立分区：不再依赖积分商城的商品记录（Goods）。
 // 兑换走 BuyDecoration，只与「用户积分」联动。
 // uid > 0 时会带上该用户的限购剩余（-1 = 不限购）。
-func ShopDecorations(typ string, uid int) []facade.H {
+//
+// typ       类型筛选（avatar_frame / title…，空=全部）
+// priceType 价格筛选（free 免费 / paid 付费 / 空=全部，见 FilterDecorationPrice）
+func ShopDecorations(typ string, priceType string, uid int) []facade.H {
 
 	// 注意：facade 的 Select() 要求 dest 是**切片**。
 	// 传单结构体（&Decoration{}）时框架内部会把结果编码成 JSON 对象，
@@ -170,6 +173,7 @@ func ShopDecorations(typ string, uid int) []facade.H {
 	if !utils.Is.Empty(typ) {
 		query = query.Where("type", typ)
 	}
+	query = FilterDecorationPrice(query, priceType)
 	list, _ := query.Order("sort desc, id asc").Select()
 
 	// 该用户已兑换过的装扮数量（限购剩余用），一次查询避免 N+1
@@ -300,10 +304,15 @@ func BuyDecoration(uid int, decorationId int) (result facade.H, err error) {
 		}
 
 		// 3. 扣库存（原子条件更新，防超卖；-1 表示不限量）
+		//
+		// 注意：这里必须写占位符形式 Where("stock > ?", 0)。
+		// 三参形式 Where("字段", ">", 值) 只有项目自封装的 facade.DB.Model(...) 支持，
+		// 原生 *gorm.DB 会把它当「主键列表」处理 —— 生成 `id IN ('stock','>',0)`，
+		// MySQL 转换非数字字符串时报 1292 (Truncated incorrect DOUBLE value)。
 		if deco.Stock > 0 {
 			res := tx.Model(&Decoration{}).
 				Where("id", decorationId).
-				Where("stock", ">", 0).
+				Where("stock > ?", 0).
 				UpdateColumn("stock", gorm.Expr("stock - 1"))
 			if res.Error != nil {
 				return res.Error
@@ -314,9 +323,14 @@ func BuyDecoration(uid int, decorationId int) (result facade.H, err error) {
 		}
 
 		// 4. 扣积分（原子条件更新：余额不足时影响 0 行，避免并发扣成负数）
+		//
+		// 同样必须用占位符：写成 Where("integral", ">=", deco.Price) 时原生 gorm
+		// 会生成 `WHERE id = ? AND id IN ('integral','>=',1000)`，
+		// 于是 MySQL 在把 'integral' 转成数字时报：
+		// Error 1292 (22007): Truncated incorrect DOUBLE value: 'integral'
 		res := tx.Model(&Users{}).
 			Where("id", uid).
-			Where("integral", ">=", deco.Price).
+			Where("integral >= ?", deco.Price).
 			UpdateColumn("integral", gorm.Expr("integral - ?", deco.Price))
 		if res.Error != nil {
 			return res.Error
@@ -544,6 +558,28 @@ const (
 	DecorationPriceFree     = "free"     // 免费
 )
 
+// DecorationPricePaid - 「付费」筛选用的伪类型：非免费（积分 / 经验）即付费。
+// 前台与后台只暴露「全部 / 免费 / 付费」三档，具体价格类型仍由 price_type 精确匹配兜底。
+const DecorationPricePaid = "paid"
+
+// FilterDecorationPrice - 装扮「免费 / 付费」筛选（商城列表与后台列表共用同一口径，避免两处判断不一致）
+//
+//	"" / all → 不过滤
+//	free     → 免费（price_type = free）
+//	paid     → 付费（price_type != free，含 integral / exp）
+//	其他值   → 按 price_type 精确匹配（integral / exp）
+func FilterDecorationPrice(query *facade.ModelStruct, value string) *facade.ModelStruct {
+	switch value {
+	case "", "all":
+		return query
+	case DecorationPriceFree:
+		return query.Where("price_type", DecorationPriceFree)
+	case DecorationPricePaid:
+		return query.Where("price_type", "!=", DecorationPriceFree)
+	}
+	return query.Where("price_type", value)
+}
+
 // 用户装扮状态
 const (
 	UserDecorationStatusOwned   = 0 // 已拥有（未佩戴）
@@ -677,8 +713,11 @@ func defaultTitleColors() []string {
 
 // seedDefaultDecorations - 首次运行时导入默认装扮（仅在装扮表为空时执行）
 //
-// 头像框前 5 个 / 头衔前 3 个作为「系统默认」免费提供，保持升级前用户可自由选择
-// 头像框与头衔的体验；其余转为可用积分兑换的装扮。
+// 头像框 / 头衔各只保留 1 个「系统默认」免费项（头像框 1、掌门），
+// 其余全部为积分兑换的装扮（价格见下方各自定价规则）。
+//
+// 注意：只在装扮表为空时导入 —— 已经跑起来的站点不会因为改动这里而变化，
+// 存量数据请在后台「装扮管理」里调整（取消默认标记 + 价格类型选积分 + 填价格）。
 func seedDefaultDecorations() {
 	count, _ := facade.DB.Model(&Decoration{}).Count()
 	if count > 0 {
@@ -689,7 +728,8 @@ func seedDefaultDecorations() {
 	list := make([]Decoration, 0, 30)
 
 	for index, url := range defaultAvatarFrames() {
-		free := index < 5
+		// 仅第 1 个头像框免费（系统默认），其余全部按积分定价
+		free := index == 0
 		item := Decoration{
 			Type:        DecorationTypeAvatarFrame,
 			Name:        fmt.Sprintf("头像框 %d", index+1),
@@ -714,7 +754,8 @@ func seedDefaultDecorations() {
 	titles := defaultTitles()
 	colors := defaultTitleColors()
 	for index, text := range titles {
-		free := index < 3
+		// 同样只保留第 1 个头衔（掌门）免费，其余全部按积分定价
+		free := index == 0
 		color := "#8a8a82"
 		if index < len(colors) {
 			color = colors[index]
@@ -1265,7 +1306,10 @@ func WearDecoration(uid int, decorationId int, text string) (facade.H, error) {
 				"type":      deco.Type,
 			}
 			if !utils.Is.Empty(customText) {
-				updates["custom_text"] = customText
+				// 注意：map 形式的更新用的是**数据库列名**（Go 字段是 Text → 列 text），
+				// 而不是 json tag。写成 custom_text 会导致
+				// Error 1054: Unknown column 'custom_text' in 'field list'。
+				updates["text"] = customText
 			}
 			return tx.Model(&UserDecoration{}).
 				Where("uid", uid).
@@ -1351,12 +1395,32 @@ func WearingDecorations(uid int) facade.H {
 
 	var decoList []Decoration
 	list, _ := facade.DB.Model(&decoList).Where("id", "in", ids).Select()
+
+	// 自填文字（如纯样式类头衔）：把用户保存的文本一并带回。
+	// 前端「当前佩戴」行读的是 custom_text（Select() 的结果按 json tag 命名），
+	// 不带上它时样式类头衔会渲染成空徽章。
+	textMap := map[int]string{}
+	var ownList []UserDecoration
+	if owns, err := facade.DB.Model(&ownList).
+		Where("uid", uid).
+		Where("decoration_id", "in", ids).
+		Select(); err == nil {
+		for _, own := range owns {
+			if text := cast.ToString(own["custom_text"]); !utils.Is.Empty(text) {
+				textMap[cast.ToInt(own["decoration_id"])] = text
+			}
+		}
+	}
+
 	for _, item := range list {
 		typ := cast.ToString(item["type"])
 		if utils.Is.Empty(typ) {
 			continue
 		}
 		item["payload"] = decorationPayloadMap(item["payload"])
+		if text, exist := textMap[cast.ToInt(item["id"])]; exist {
+			item["custom_text"] = text
+		}
 		result[typ] = item
 	}
 	return result

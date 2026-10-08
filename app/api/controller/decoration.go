@@ -173,7 +173,12 @@ func (this *Decoration) shop(ctx *gin.Context) {
 	}
 
 	// 带登录态时顺带返回该用户的限购剩余
-	list := model.ShopDecorations(cast.ToString(params["type"]), this.user(ctx).Id)
+	// price_type：free 只看免费 / paid 只看付费（= 非免费），空=全部
+	list := model.ShopDecorations(
+		cast.ToString(params["type"]),
+		cast.ToString(params["price_type"]),
+		this.user(ctx).Id,
+	)
 
 	this.json(ctx, gin.H{
 		"data":  list,
@@ -242,6 +247,8 @@ func (this *Decoration) all(ctx *gin.Context) {
 	if typ := cast.ToString(params["type"]); !utils.Is.Empty(typ) {
 		query = query.Where("type", typ)
 	}
+	// 价格筛选：free 只看免费 / paid 只看付费（= 非免费），空=全部
+	query = model.FilterDecorationPrice(query, cast.ToString(params["price_type"]))
 	if keyword := cast.ToString(params["keyword"]); !utils.Is.Empty(keyword) {
 		query = query.Like("name", "%"+keyword+"%")
 	}

@@ -373,6 +373,35 @@ func UserOauthList(uid int) []map[string]any {
 	return list
 }
 
+// UserOauthMap - 批量查询「一批用户」的第三方绑定（用户列表用，避免 N+1）
+//
+// 返回：uid -> [{platform, name, nickname, avatar, create_time}]
+// 说明：调用方需自行确认有权限（后台用户列表只在管理员视角附加该数据）
+func UserOauthMap(uids []int) map[int][]facade.H {
+
+	result := map[int][]facade.H{}
+	if len(uids) == 0 {
+		return result
+	}
+
+	// 注意：facade 的 Select() 要求 dest 是切片（传单结构体会恒返回空）
+	var table []UserOauth
+	list, _ := facade.DB.Model(&table).Where("uid", "in", uids).Order("id asc").Select()
+
+	for _, item := range list {
+		uid := cast.ToInt(item["uid"])
+		platform := cast.ToString(item["platform"])
+		result[uid] = append(result[uid], facade.H{
+			"platform":    platform,
+			"name":        OauthPlatformName(platform),
+			"nickname":    item["nickname"],
+			"avatar":      item["avatar"],
+			"create_time": item["create_time"],
+		})
+	}
+
+	return result
+}
 // UserOauthBoundCount - 某个用户已绑定的平台数量（判断解绑后是否还有别的登录方式）
 func UserOauthBoundCount(uid int) int {
 	return len(UserOauthList(uid))

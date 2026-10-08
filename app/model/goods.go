@@ -250,10 +250,13 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		}
 		if goods.LimitPerUser > 0 {
 			var bought int64
+			// 注意：tx 是原生 *gorm.DB，条件必须用占位符写法。
+			// 三参形式 Where("字段", "!=", 值) 会被原生 gorm 当成主键列表，
+			// 生成 `id IN ('status','!=',3)` → MySQL 报 1292。
 			if err := tx.Model(&GoodsOrder{}).
 				Where("uid", uid).
 				Where("goods_id", goodsId).
-				Where("status", "!=", OrderStatusCanceled).
+				Where("status != ?", OrderStatusCanceled).
 				Count(&bought).Error; err != nil {
 				return err
 			}
@@ -265,7 +268,7 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 		// 6. 校验并扣减库存（原子操作，防止超卖）
 		result := tx.Model(&Goods{}).
 			Where("id", goodsId).
-			Where("stock", ">", 0).
+			Where("stock > ?", 0).
 			UpdateColumn("stock", gorm.Expr("stock - 1"))
 		if result.Error != nil {
 			return result.Error
@@ -429,7 +432,7 @@ func (this *GoodsOrder) CancelOrder(uid int, orderId int, isRoot bool) (order Go
 		// 2. 销量回滚（不小于 0）
 		if err := tx.Model(&Goods{}).
 			Where("id", order.GoodsId).
-			Where("sold", ">", 0).
+			Where("sold > ?", 0).
 			UpdateColumn("sold", gorm.Expr("sold - 1")).Error; err != nil {
 			return err
 		}

@@ -202,6 +202,15 @@ func (this *OAuth) mine(ctx *gin.Context) {
 		return
 	}
 
+	// 管理员可以指定 uid 查看任意用户的绑定（后台「用户详情」弹窗用）；普通用户只能看自己
+	if target := cast.ToInt(this.params(ctx)["uid"]); target > 0 && target != uid {
+		if !this.meta.permit(ctx) {
+			this.json(ctx, nil, facade.Lang(ctx, "无权限查看其它用户的第三方绑定！"), 403)
+			return
+		}
+		uid = target
+	}
+
 	list := []facade.H{}
 	bound := map[string]bool{}
 

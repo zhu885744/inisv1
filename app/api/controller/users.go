@@ -268,6 +268,13 @@ func (this *Users) all(ctx *gin.Context) {
 		// 一律按他人规则脱敏（见 privacy.go），避免本人的未脱敏数据进缓存后被其他访客命中
 		this.meta.privacyUserList(ctx, data)
 
+		// 管理员视角：额外附上「第三方账号绑定」（QQ / GitHub / Gitee），供后台用户列表展示。
+		// 只在管理员请求时附加 —— 管理员的列表请求本来就不读写共享缓存（见 cacheEnable），
+		// 因此不会把第三方账号信息写进普通访客也能命中的缓存里。
+		if isAdmin {
+			attachUserOauth(data)
+		}
+
 		// 缓存数据（仅非管理员写入，保证缓存中始终为脱敏数据）
 		if cacheEnable {
 			go facade.Cache.Set(cacheName, data)
@@ -284,6 +291,38 @@ func (this *Users) all(ctx *gin.Context) {
 		"count": count,
 		"page":  math.Ceil(float64(count) / float64(limit)),
 	}, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// attachUserOauth - 给用户列表逐行附加第三方账号绑定（一次批量查询，避免 N+1）
+//
+// 数据来自 inis_user_oauth（见 model/oauth.go）。只在管理员视角调用：
+// 管理员的列表请求不读写共享缓存，所以这类信息不会进公共缓存；
+// 若将来要对非管理员返回，必须同时补缓存失效（见 OAuth 的 bind / unbind）。
+func attachUserOauth(data any) {
+
+	rows, ok := data.([]any)
+	if !ok || len(rows) == 0 {
+		return
+	}
+
+	uids := make([]int, 0, len(rows))
+	for _, row := range rows {
+		uids = append(uids, cast.ToInt(cast.ToStringMap(row)["id"]))
+	}
+
+	bindings := model.UserOauthMap(uids)
+	if len(bindings) == 0 {
+		return
+	}
+
+	for index, row := range rows {
+		item := cast.ToStringMap(row)
+		if list, exist := bindings[cast.ToInt(item["id"])]; exist {
+			item["oauth"] = list
+			// 万一 cast 返回的是副本，这里回写保证字段生效
+			rows[index] = item
+		}
+	}
 }
 
 // rand 随机获取
