@@ -398,7 +398,11 @@ func (this *Users) create(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Users{CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-	allow := []any{"account", "password", "nickname", "email", "phone", "avatar", "description", "source", "remark", "title", "gender", "json", "text", "status"}
+	allow := []any{"account", "password", "nickname", "email", "phone", "avatar", "description", "source", "remark", "gender", "json", "text", "status"}
+	// title 仅管理员可设：与 update 同一口径，头衔由「我的装扮」（model.WearDecoration）统一管理
+	if this.meta.root(ctx) {
+		allow = append(allow, "title")
+	}
 
 	if utils.Is.Empty(params["email"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "邮箱不能为空！"), 400)
@@ -483,7 +487,12 @@ func (this *Users) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Users{}
-	allow := []any{"id", "account", "password", "nickname", "avatar", "title", "description", "gender", "json", "text"}
+	// 注意：title 不在基础白名单里 —— 头衔由「我的装扮」统一管理（model.WearDecoration）：
+	// 它以 users.json.decorations 为唯一真相，并把渲染结果回写 users.title。
+	// 若放开给普通用户，等于绕过装扮商城的「拥有校验」，白拿任意头衔文字（含付费头衔），
+	// 还会让「佩戴记录」与「展示头衔」不一致。管理员仍可改，见下方扩展白名单
+	// （与 API 文档「普通用户无法修改 title」的说明一致）。
+	allow := []any{"id", "account", "password", "nickname", "avatar", "description", "gender", "json", "text"}
 	async := utils.Async[map[string]any]()
 
 	root := this.meta.root(ctx)
@@ -491,7 +500,8 @@ func (this *Users) update(ctx *gin.Context) {
 	if root {
 		// status 同样仅管理员可用：普通用户能改自己的 status 就能自行「解冻 / 通过审核」，
 		// 绕过冻结与人工审核；管理侧改状态走 /users/status（含校验、通知与缓存清理）
-		allow = append(allow, "source", "remark", "email", "phone", "status")
+		// title 同理仅管理员：普通用户的头衔只能在「我的装扮」里佩戴 / 更换
+		allow = append(allow, "source", "remark", "email", "phone", "status", "title")
 	}
 
 	// 邮箱严格校验：仅当调用方是管理员（email 在 allow 内）且确实传了邮箱时才校验，
