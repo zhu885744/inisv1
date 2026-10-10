@@ -34,6 +34,10 @@ func InitConfig() {
 
 	configs := []Config{
 		{Key: "SYSTEM_API_KEY", Value: "0", Remark: "API KEY验证"},
+		// 开启密钥校验后，本站来源（同源浏览器请求 / 本机·内网直连）是否免密钥 —— **默认开**：
+		// 内嵌在二进制里的 Mellow 前端不带 i-api-key，若不放行会让站内（含后台）全部 403。
+		// 判定见 app/api/middleware/api-key.go 的 isLocalRequest；关掉即「所有请求都必须带密钥」
+		{Key: "SYSTEM_API_KEY_LOCAL", Value: "1", Remark: "API KEY放行本站同源/内网请求"},
 		{Key: "SYSTEM_QPS", Value: "1", Json: utils.Json.Encode(facade.H{
 			"point": 15, "global": 50,
 		}), Remark: "接口限流器（QPS）"},

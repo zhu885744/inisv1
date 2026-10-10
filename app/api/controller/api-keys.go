@@ -15,11 +15,16 @@ import (
 )
 
 const (
-	apiKeysAllowFields = "value,remark,json,text"
+	// apiKeysAllowFields - 管理员可写字段
+	//
+	// status / expire_time 是「有效期 + 停用」能力（模型见 app/model/api-keys.go）：
+	// status 0=停用 1=启用；expire_time 为 unix 秒，0=永久。两者都由中间件
+	// app/api/middleware/api-key.go 在校验时判定（停用 → 403 该密钥已停用；过期 → 403 该密钥已过期）
+	apiKeysAllowFields = "value,remark,status,expire_time,json,text"
 	apiKeysAllowQuery  = "id"
 )
 
-var apiKeysAllowFieldsSlice = []any{"value", "remark", "json", "text"}
+var apiKeysAllowFieldsSlice = []any{"value", "remark", "status", "expire_time", "json", "text"}
 var apiKeysAllowQuerySlice = []any{"id"}
 
 type ApiKeys struct {
@@ -335,6 +340,11 @@ func (this *ApiKeys) create(ctx *gin.Context) {
 		table.Value = this.generateAPIKey()
 	}
 
+	// 状态默认启用：前端不传 status 时结构体零值会落成「停用」，与「新建即可用」的预期相反
+	if _, exist := params["status"]; !exist {
+		table.Status = model.ApiKeyStatusOn
+	}
+
 	exist, _ := facade.DB.Model(&table).Where("value", table.Value).Exist()
 	if exist {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 已经存在！", table.Value), 400)
@@ -351,6 +361,12 @@ func (this *ApiKeys) create(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
+// update - 更新密钥（管理员）
+//
+// 注意两点，前端调用时都要照做：
+//  1. value 留空 = **重新生成密钥**（等于重置，原密钥立即失效）；因此只想改状态 / 有效期 /
+//     备注时，必须把当前 value 一起提交，否则会把密钥换掉；
+//  2. 未提交的字段不会被修改（前端只传要改的字段即可）。
 func (this *ApiKeys) update(ctx *gin.Context) {
 	params := this.params(ctx)
 
