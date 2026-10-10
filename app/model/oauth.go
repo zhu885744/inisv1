@@ -109,8 +109,9 @@ func OauthRedirectRequired(platform string) bool {
 //     前端不应该出现点了也没用的登录按钮（OauthPlatformAvailable 会一并判定）；
 //   - QQ / GitHub 的默认值来自旧实现（app/api/controller/oauth.go 里硬编码的应用），
 //     这里作为默认值保留，站长在后台改成自己的应用即可；
-//   - auto_register：第三方账号未绑定时是否自动注册新账号。
-//     关闭后前端会引导用户「先登录，再在账号安全里绑定」，不会凭空建号。
+//   - auto_register：是否允许用第三方账号创建新账号。
+//     开启：未绑定时回调页会给出「创建新账号」选项（仍需用户确认，不会静默建号）；
+//     关闭：只提供「绑定已有账号」（输入账号密码），未注册的用户请走常规注册。
 func defaultOauthSettings() facade.H {
 	return facade.H{
 		OauthPlatformQQ: facade.H{
@@ -180,7 +181,7 @@ func OauthPlatformConfig(platform string) facade.H {
 	return facade.H{}
 }
 
-// OauthAutoRegister - 未绑定时是否自动注册新账号
+// OauthAutoRegister - 是否允许用第三方账号创建新账号（SYSTEM_OAUTH.auto_register）
 func OauthAutoRegister() bool {
 	return cast.ToInt(OauthSettings()["auto_register"]) == 1
 }

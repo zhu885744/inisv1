@@ -21,6 +21,14 @@ type Comment struct {
 	BindId   int    `gorm:"type:int(32); comment:绑定ID; default:0;" json:"bind_id"`
 	BindType string `gorm:"comment:绑定类型; default:'article';" json:"bind_type"`
 	Editor   string `gorm:"comment:编辑器; default:'text';" json:"editor"`
+	// Audit 审核状态（0=待审核 1=审核通过 2=审核未通过，取值见 app/api/controller/audit.go）
+	//
+	// 是否开启审核由 COMMENT 配置的 json.audit 决定（后台「系统设置 → 评论配置 → 内容审核」）：
+	// 关闭时前台提交直接记为「已通过」，开启时记为「待审核」，非管理员在接口层看不到未通过的评论。
+	// 默认值给 1（已通过）：AutoMigrate 给历史评论补这一列时按「已通过」填充，
+	// 否则开启审核后老评论会全部从列表里消失。
+	Audit  int    `gorm:"type:int(12); index; comment:审核; default:1;" json:"audit"`
+	Reason string `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -75,6 +83,7 @@ func initCommentData() {
 		BindId:   article.Id,
 		BindType: "article",
 		Editor:   "text",
+		Audit:    1, // 已通过：种子数据是站点自己的欢迎评论
 	}
 
 	facade.DB.Model(&comment).Create(&comment)

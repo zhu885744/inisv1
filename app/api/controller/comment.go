@@ -321,6 +321,12 @@ func (this *Comment) all(ctx *gin.Context) {
 
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
+
+	// 非管理员只看「审核通过」的评论（审核未通过 / 待审核的评论对前台不可见，口径同文章 / 动态）
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", AuditPassed)
+	}
+
 	count, _ := query.Where(table).Count()
 
 	cacheName := this.cache.name(ctx)
@@ -535,6 +541,11 @@ func (this *Comment) create(ctx *gin.Context) {
 		Ip:         ctx.ClientIP(),
 		CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix(),
 	}
+
+	// 审核：关闭审核 → 直接「通过」；开启审核 → 「待审核」（口径见 audit.go，开关在「系统设置 → 评论配置」）。
+	// 管理员自己发的评论直接通过（不必审核自己）；管理员在 payload 里显式指定 audit 时，
+	// 下面遍历参数时会覆盖这里的判定（allow 里 audit 只对 root 开放）。
+	utils.Struct.Set(&table, "Audit", auditForCreate(contentAuditSwitch("COMMENT") && !this.meta.root(ctx), false))
 
 	for key, val := range params {
 		if utils.In.Array(key, commentAllowFieldsSlice) {
@@ -753,7 +764,13 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}()
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+	// 返回本次写入的审核状态：前台据此决定提示语（开启审核时提示「审核通过后显示」）
+	// 并插入一条「待审核」占位 —— 待审核的评论不在列表接口的返回里（非管理员只查 audit=1）
+	this.json(ctx, gin.H{
+		"id":      table.Id,
+		"audit":   table.Audit,
+		"pending": table.Audit == AuditPending,
+	}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // commenterAccount 评论者账号（评论邮件模板里的 ${author_account}，空时用昵称 / 「—」兜底）
@@ -787,7 +804,8 @@ func (this *Comment) update(ctx *gin.Context) {
 
 	root := this.meta.root(ctx)
 	if root {
-		allow = append(allow, "pid", "bind_id", "bind_type")
+		// audit / reason 只对管理员开放：这是后台列表「通过 / 驳回」的操作入口
+		allow = append(allow, "pid", "bind_id", "bind_type", "audit", "reason")
 	}
 
 	for key, val := range params {
@@ -828,6 +846,12 @@ func (this *Comment) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.withTrashOptions(facade.DB.Model(&model.Comment{}), params)
 	query = this.buildQuery(query, params)
+
+	// 非管理员只统计「审核通过」的评论：保证前台显示的评论数与列表一致
+	if !this.meta.root(ctx) {
+		query = query.Where("audit", AuditPassed)
+	}
+
 	count, _ := query.Count()
 	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
 }

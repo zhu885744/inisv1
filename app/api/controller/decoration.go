@@ -13,13 +13,14 @@ import (
 )
 
 // decorationAllowFields - 管理员可写字段白名单
-// stock / limit_per_user / min_exp 是装扮商城自身的售卖字段（不再同步到商品记录）
-const decorationAllowFields = "type,name,description,preview,payload,price_type,price,rarity,duration,unlock,category,status,sort,is_default,stock,limit_per_user,min_exp,json,text"
+// stock / min_exp 是装扮商城自身的售卖字段（不再同步到商品记录）
+// 注：limit_per_user（每人限购）已废弃、不再生效，故不在白名单内（列与 json 字段保留兼容老数据）
+const decorationAllowFields = "type,name,description,preview,payload,price_type,price,rarity,duration,unlock,category,status,sort,is_default,stock,min_exp,json,text"
 
 var decorationAllowFieldsSlice = []any{
 	"type", "name", "description", "preview", "payload", "price_type", "price", "rarity",
 	"duration", "unlock", "category", "status", "sort", "is_default",
-	"stock", "limit_per_user", "min_exp", "json", "text",
+	"stock", "min_exp", "json", "text",
 }
 
 var decorationAllowQuerySlice = []any{"id", "type", "status"}
@@ -172,12 +173,11 @@ func (this *Decoration) shop(ctx *gin.Context) {
 		return
 	}
 
-	// 带登录态时顺带返回该用户的限购剩余
 	// price_type：free 只看免费 / paid 只看付费（= 非免费），空=全部
+	// 注：装扮已不做「每人限购」，因此这里不再需要传入当前用户
 	list := model.ShopDecorations(
 		cast.ToString(params["type"]),
 		cast.ToString(params["price_type"]),
-		this.user(ctx).Id,
 	)
 
 	this.json(ctx, gin.H{

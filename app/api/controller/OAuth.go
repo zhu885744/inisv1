@@ -17,17 +17,23 @@ import (
 
 // ============================== 第三方登录（QQ / GitHub / Gitee） ==============================
 //
-// 三种使用方式（同一个入口，靠「是否已登录 + 是否已绑定」自动分流）：
+// 分流规则（同一个入口，靠「是否已登录 + 是否已绑定」判断）：
 //
 //	1. 登录：第三方账号已绑定过本站账号 → 直接发 token 登录；
-//	2. 注册：第三方账号未绑定 + 未登录 + 后台允许自动注册 → 建号 + 绑定 + 登录；
-//	3. 绑定：第三方账号未绑定 + 已登录 → 直接绑到当前账号。
+//	2. 绑定：第三方账号未绑定 + 已登录 → 直接绑到当前账号；
+//	3. 二选一：第三方账号未绑定 + 未登录 → 发一张短票据，回调页让用户自己选：
+//	     - 创建新账号：POST /api/oauth/register（票据，受注册开关与「允许第三方建号」约束）
+//	     - 绑定已有账号：POST /api/oauth/bind-account（票据 + 账号密码，口径与密码登录一致）
 //
 // 前端拿到的结果分三种：
 //
-//	{user, token, valid_time, bind:true, register:true}  → 注册并登录成功
+//	{user, token, valid_time, bind:true, register:true}  → 新建账号并登录成功
 //	{user, token, valid_time, bind:true}                 → 登录成功 / 绑定成功
-//	{need_bind:true, ticket, ...}                        → 未登录且未绑定，需先登录再用 ticket 绑定
+//	{need_bind:true, need_choice:true, ticket, ...}      → 未登录且未绑定，需用户在回调页选择
+//
+// 关于「先登录再绑定」：旧实现在这种场景会把用户赶去登录页，登录后再用票据自动绑定
+// （票据消费见 /api/oauth/bind 的 key 分支）。新实现在回调页直接给出选择，不必绕登录页；
+// 旧路径仍然保留可用 —— 老前端、以及选择页刷新（票据已存 sessionStorage）后仍能完成绑定。
 //
 // 为什么不在这里做「浏览器整跳转发号」：token 落在 URL 上容易被 Referer / 日志带走，
 // 而且主题的前后端常常不同域。这里统一走「前端拿 code → 后端换身份 → 后端发 token」，
@@ -94,6 +100,9 @@ func (this *OAuth) IPOST(ctx *gin.Context) {
 		"gitee":  this.gitee,
 		"bind":   this.bind,
 		"unbind": this.unbind,
+		// 未绑定时回调页的两个选项（都靠票据证明第三方身份，无需登录态）
+		"register":     this.register,
+		"bind-account": this.bindAccount,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -261,7 +270,7 @@ func (this *OAuth) mine(ctx *gin.Context) {
 // bind - 绑定第三方账号（需登录）
 //
 // 两种入参：
-//   - key：未登录时尝试社交登录拿到的票据（先登录，再绑定）
+//   - key：未登录时尝试社交登录拿到的票据（选择页刷新后、或老前端引导登录后的补绑）
 //   - platform + code：在账号安全页点「绑定」跳转第三方后回调带回，属于「已登录直接绑」
 func (this *OAuth) bind(ctx *gin.Context) {
 
@@ -295,7 +304,7 @@ func (this *OAuth) bind(ctx *gin.Context) {
 			return
 		}
 
-		go facade.Cache.Del(cacheKey)
+		consumeTicket(cast.ToString(params["key"]))
 		this.json(ctx, gin.H{"bind": true, "uid": uid, "platform": item.Platform}, facade.Lang(ctx, "绑定成功！"), 200)
 		return
 	}
@@ -356,6 +365,142 @@ func (this *OAuth) unbind(ctx *gin.Context) {
 	this.json(ctx, gin.H{"bind": false, "platform": platform}, facade.Lang(ctx, "解绑成功！"), 200)
 }
 
+// register - 用票据创建新账号、绑定并登录（未绑定时用户在回调页选择「创建新账号」）
+//
+// 与「已登录用户去账号安全页绑定」不同：这里没有任何登录态，身份完全由票据证明。
+// 双开关：站点注册总开关（ALLOW_REGISTER）+ 后台「允许第三方账号创建新账号」（auto_register）。
+func (this *OAuth) register(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	identity, msg := this.ticketIdentity(ctx, params)
+	if !utils.Is.Empty(msg) {
+		this.json(ctx, nil, msg, 400)
+		return
+	}
+
+	// 管理员关了注册：不建号（否则等于绕开了注册开关）
+	if !allowRegister() {
+		this.json(ctx, nil, facade.Lang(ctx, "管理员关闭了注册功能，请先注册账号后再绑定！"), 400)
+		return
+	}
+
+	if !model.OauthAutoRegister() {
+		this.json(ctx, nil, facade.Lang(ctx, "管理员未开放「第三方账号创建新账号」，请改用已有账号绑定！"), 400)
+		return
+	}
+
+	// 票据里的第三方账号可能已被别人绑走（用户开了两个页面 / 票据被他人拿到）
+	if binding := model.FindUserOauth(identity.Platform, identity.Openid); !utils.Is.Empty(binding) && cast.ToInt(binding["delete_time"]) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "该第三方账号已绑定其它用户！"), 400)
+		return
+	}
+
+	newUid, needAudit, msg := this.registerUser(ctx, identity)
+	if !utils.Is.Empty(msg) {
+		this.json(ctx, nil, msg, 400)
+		return
+	}
+
+	// 建号即绑定：无论是否需要人工审核都先绑上，审核通过后直接点第三方登录就能进
+	if !this.bindTo(ctx, newUid, identity) {
+		return
+	}
+
+	consumeTicket(cast.ToString(params["key"]))
+
+	// 人工审核：与注册流程一致，此时不发 token
+	if needAudit {
+		table := model.Users{}
+		item, _ := facade.DB.Model(&table).Where("id", newUid).Find()
+		this.json(ctx, gin.H{
+			"user":       item,
+			"need_audit": true,
+			"bind":       true,
+			"register":   true,
+		}, facade.Lang(ctx, "注册成功，请等待管理员审核通过后再登录！"), 200)
+		return
+	}
+
+	this.loginResult(ctx, newUid, facade.H{"bind": true, "register": true, "platform": identity.Platform})
+}
+
+// bindAccount - 用「已有账号 + 密码」把未绑定的第三方账号绑上去并登录
+//
+// 未登录用户点第三方登录、而该第三方账号还没绑定时，回调页可以让用户直接输账号密码绑定，
+// 不必先跳登录页再回来。账号口径与密码登录完全一致（account / email / phone，
+// 先按 source=default 查、未命中再放开 source 回查一次），风控同样走 assertLoginAllowed。
+func (this *OAuth) bindAccount(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	identity, msg := this.ticketIdentity(ctx, params)
+	if !utils.Is.Empty(msg) {
+		this.json(ctx, nil, msg, 400)
+		return
+	}
+
+	account := strings.TrimSpace(cast.ToString(params["account"]))
+	password := cast.ToString(params["password"])
+	if utils.Is.Empty(account) || utils.Is.Empty(password) {
+		this.json(ctx, nil, facade.Lang(ctx, "请提交账号（或邮箱、手机号）和密码！"), 400)
+		return
+	}
+
+	table := model.Users{}
+	item, _ := facade.DB.Model(&table).Or([]any{
+		[]any{"email", "=", account},
+		[]any{"phone", "=", account},
+		[]any{"account", "=", account},
+	}).Where("source", "default").Find()
+
+	// 来源未命中时回退为不限定 source 再查一次（与密码登录同一处理，
+	// 否则前台注册（source=mellow）等来源的账号会「账户不存在」）
+	if utils.Is.Empty(item) {
+		item, _ = facade.DB.Model(&table).Or([]any{
+			[]any{"email", "=", account},
+			[]any{"phone", "=", account},
+			[]any{"account", "=", account},
+		}).Find()
+	}
+
+	if utils.Is.Empty(item) {
+		this.json(ctx, nil, facade.Lang(ctx, "账户不存在！"), 400)
+		return
+	}
+
+	// 登录前置校验（冻结 / 待审核 / 封禁）—— 与密码登录共用同一口径
+	if !assertLoginAllowed(ctx, table) {
+		return
+	}
+
+	if utils.Is.Empty(table.Password) {
+		this.json(ctx, nil, facade.Lang(ctx, "该帐号未设置密码，请先登录后再到「账号安全」绑定第三方账号！"), 400)
+		return
+	}
+
+	if !utils.Password.Verify(table.Password, password) {
+		this.json(ctx, nil, facade.Lang(ctx, "密码错误！"), 400)
+		return
+	}
+
+	// 该第三方账号已绑给别人 → 拒绝，不做「偷偷切账号」
+	if binding := model.FindUserOauth(identity.Platform, identity.Openid); !utils.Is.Empty(binding) && cast.ToInt(binding["delete_time"]) == 0 {
+		if boundUid := cast.ToInt(binding["uid"]); boundUid != table.Id {
+			this.json(ctx, nil, facade.Lang(ctx, "该第三方账号已绑定其它用户！"), 400)
+			return
+		}
+	}
+
+	if !this.bindTo(ctx, table.Id, identity) {
+		return
+	}
+
+	consumeTicket(cast.ToString(params["key"]))
+
+	this.loginResult(ctx, table.Id, facade.H{"bind": true, "platform": identity.Platform})
+}
+
 // ============================== 核心流程 ==============================
 
 // handle - 登录 / 注册 / 绑定 的统一入口
@@ -411,45 +556,12 @@ func (this *OAuth) handle(ctx *gin.Context, platform string) {
 		return
 	}
 
-	// 未绑定 + 未登录 → 自动注册，或引导「先登录再绑定」
-
-	// 管理员关了注册：不建号，同样走「登录后绑定」（否则等于绕开了注册开关）
-	register, _ := facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
-	if utils.Is.Empty(register) || !cast.ToBool(register["value"]) {
-		this.needBind(ctx, identity, "管理员关闭了注册功能，请先注册账号后再绑定！")
-		return
-	}
-
-	if !model.OauthAutoRegister() {
-		this.needBind(ctx, identity, "该第三方账号还未绑定本站账号，请先登录后完成绑定！")
-		return
-	}
-
-	newUid, needAudit, msg := this.registerUser(ctx, identity)
-	if !utils.Is.Empty(msg) {
-		this.json(ctx, nil, msg, 400)
-		return
-	}
-
-	// 建号即绑定：无论是否需要人工审核都先绑上，审核通过后直接点第三方登录就能进
-	if !this.bindTo(ctx, newUid, identity) {
-		return
-	}
-
-	// 人工审核：与注册流程一致，此时不发 token
-	if needAudit {
-		table := model.Users{}
-		item, _ := facade.DB.Model(&table).Where("id", newUid).Find()
-		this.json(ctx, gin.H{
-			"user":       item,
-			"need_audit": true,
-			"bind":       true,
-			"register":   true,
-		}, facade.Lang(ctx, "注册成功，请等待管理员审核通过后再登录！"), 200)
-		return
-	}
-
-	this.loginResult(ctx, newUid, facade.H{"bind": true, "register": true, "platform": platform})
+	// 未绑定 + 未登录 → 发一张短票据，由用户在回调页自己选：
+	//   - 创建新账号（POST oauth/register，受注册总开关与「允许第三方建号」约束）
+	//   - 用已有账号密码绑定（POST oauth/bind-account）
+	// 旧实现这里是「静默建号」或「提示先登录再绑定」：前者不给用户选择（已有账号的人会被建成
+	// 第二个号），后者把用户挡在门外。改成二选一后，两条路都不需要先跳登录页。
+	this.needChoice(ctx, identity)
 }
 
 // bindTo - 把第三方身份绑定到指定用户（失败时已写出响应，返回 false）
@@ -464,8 +576,32 @@ func (this *OAuth) bindTo(ctx *gin.Context, uid int, identity oauthIdentity) boo
 	return true
 }
 
-// needBind - 未登录且未绑定：发一张短票据，前端引导用户先登录再绑定
-func (this *OAuth) needBind(ctx *gin.Context, identity oauthIdentity, msg string) {
+// needChoice - 未登录且未绑定：发一张短票据，前端在回调页让用户二选一
+//
+//	创建新账号   → POST /api/oauth/register（仅传 key）
+//	绑定已有账号 → POST /api/oauth/bind-account（key + account + password）
+//
+// can_register 由「站点注册总开关」与「后台允许第三方建号（auto_register）」共同决定：
+// 为 0 时前端只展示「绑定已有账号」。
+// need_bind 保留给老前端（它会引导去登录页，登录后用同一张票据自动绑定）。
+func (this *OAuth) needChoice(ctx *gin.Context, identity oauthIdentity) {
+
+	key := oauthNewTicket(identity)
+
+	this.json(ctx, gin.H{
+		"need_bind":    true, // 兼容旧前端：未绑定、需用户处理
+		"need_choice":  true, // 新前端：展示「创建新账号 / 绑定已有账号」选择页
+		"ticket":       key,
+		"platform":     identity.Platform,
+		"name":         model.OauthPlatformName(identity.Platform),
+		"nickname":     identity.Nickname,
+		"avatar":       identity.Avatar,
+		"can_register": allowRegister() && model.OauthAutoRegister(),
+	}, facade.Lang(ctx, "该第三方账号还未绑定本站账号，请选择创建新账号或绑定已有账号"), 200)
+}
+
+// oauthNewTicket - 生成一张绑定票据（10 分钟），缓存第三方身份供后续步骤使用
+func oauthNewTicket(identity oauthIdentity) string {
 
 	key := utils.Rand.String(32, "abcdefghijklmnopqrstuvwxyz0123456789")
 
@@ -477,14 +613,47 @@ func (this *OAuth) needBind(ctx *gin.Context, identity oauthIdentity, msg string
 		"avatar":   identity.Avatar,
 	}, oauthBindTicketExpire)
 
-	this.json(ctx, gin.H{
-		"need_bind": true,
-		"ticket":    key,
-		"platform":  identity.Platform,
-		"name":      model.OauthPlatformName(identity.Platform),
-		"nickname":  identity.Nickname,
-		"avatar":    identity.Avatar,
-	}, facade.Lang(ctx, msg), 200)
+	return key
+}
+
+// ticketIdentity - 从请求参数取票据并还原第三方身份（失败时返回提示文案）
+//
+// 票据是「未登录用户」在此流程里唯一可用的身份证明：它由上一步第三方回调换取，
+// 10 分钟有效、成功后一次性作废（见 consumeTicket），因此 register / bindAccount
+// 不需要登录态也不会被伪造。
+func (this *OAuth) ticketIdentity(ctx *gin.Context, params map[string]any) (oauthIdentity, string) {
+
+	key := strings.TrimSpace(cast.ToString(params["key"]))
+	if utils.Is.Empty(key) {
+		return oauthIdentity{}, facade.Lang(ctx, "缺少绑定票据 key！")
+	}
+
+	identity := oauthCachedTicket(facade.Cache.Get(oauthBindTicketPrefix + key))
+	if identity == nil {
+		return oauthIdentity{}, facade.Lang(ctx, "绑定信息已过期，请重新发起第三方登录！")
+	}
+
+	return oauthIdentity{
+		Platform: cast.ToString(identity["platform"]),
+		Openid:   cast.ToString(identity["openid"]),
+		Unionid:  cast.ToString(identity["unionid"]),
+		Nickname: cast.ToString(identity["nickname"]),
+		Avatar:   cast.ToString(identity["avatar"]),
+	}, ""
+}
+
+// consumeTicket - 票据一次性使用：建号 / 绑定成功后立即删除，避免重放
+func consumeTicket(key string) {
+	if utils.Is.Empty(key) {
+		return
+	}
+	go facade.Cache.Del(oauthBindTicketPrefix + key)
+}
+
+// allowRegister - 站点是否开放注册（config 表 ALLOW_REGISTER，与注册流程同一处判断）
+func allowRegister() bool {
+	item, _ := facade.DB.Model(&model.Config{}).Where("key", "ALLOW_REGISTER").Find()
+	return !utils.Is.Empty(item) && cast.ToBool(item["value"])
 }
 
 // loginResult - 发号登录（与密码登录、验证码登录同一套：状态校验 + 脱敏 + 登录奖励 + 登录通知）

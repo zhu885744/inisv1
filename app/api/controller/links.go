@@ -642,6 +642,10 @@ func (this *Links) create(ctx *gin.Context) {
 		allow = append(allow, "audit", "remark", "reason")
 	}
 
+	// 审核：关闭审核 → 直接「通过」；开启审核 → 「待审核」（开关 LINKS.audit，口径见 audit.go）。
+	// 管理员不受开关影响；管理员在 payload 里显式指定 audit 时，下面的参数遍历会覆盖这里的判定
+	utils.Struct.Set(&table, "Audit", auditForCreate(contentAuditSwitch("LINKS") && !this.meta.root(ctx), false))
+
 	for key, val := range params {
 		if utils.Get.Type(val) == "string" {
 			if key == "nickname" || key == "description" || key == "url" || key == "avatar" || key == "remark" || key == "text" || key == "reason" {
@@ -741,6 +745,14 @@ func (this *Links) update(ctx *gin.Context) {
 		if cast.ToInt(itemData["uid"]) != this.user(ctx).Id {
 			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
 			return
+		}
+	}
+
+	// 非管理员编辑自己的友链：审核状态按开关重算 —— 关闭审核 → 通过；开启审核 → 沿用原状态
+	// （二次编辑不会被打回待审核，口径与文章 / 动态一致，见 audit.go）
+	if !root {
+		if audit, ok := auditForUpdate(contentAuditSwitch("LINKS"), false, false, prevAudit); ok {
+			async.Set("audit", audit)
 		}
 	}
 

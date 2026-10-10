@@ -52,6 +52,11 @@ var captchaSceneRoutes = map[string]string{
 	"PUT /api/users/email":          model.CaptchaSceneChangeContact,
 	"PUT /api/users/phone":          model.CaptchaSceneChangeContact,
 	"DELETE /api/users/destroy":     model.CaptchaSceneDestroy,
+	// 第三方登录「未绑定」时的回调页选项，同样属于敏感操作：
+	//   - bind-account：会用「账号 + 密码」校验身份并登录（等价于密码登录，防撞库）；
+	//   - register：会创建新账号（等价于注册的提交阶段）。
+	"POST /api/oauth/bind-account": model.CaptchaSceneLogin,
+	"POST /api/oauth/register":     model.CaptchaSceneRegister,
 }
 
 const (
@@ -76,7 +81,10 @@ func CaptchaGuard() gin.HandlerFunc {
 		if scene, ok := captchaSceneRoutes[routeKey]; ok {
 			// sign-code / register / reset-password / email / phone / destroy 只在提交阶段拦，
 			// 发送阶段交给下面的窗口规则（判定口径不同，不能混）
-			isSubmitStage := scene == model.CaptchaSceneLogin || hasCode
+			// oauth/register 例外：它没有「发送验证码」阶段（身份由第三方票据证明），
+			// 等价于注册的提交阶段，因此开了「注册」场景就直接校验。
+			isSubmitStage := scene == model.CaptchaSceneLogin || hasCode ||
+				routeKey == "POST /api/oauth/register"
 			if isSubmitStage && model.CaptchaSceneEnabled(scene) {
 				// 复用式校验：密码输错重试、验证码填错重试时不必反复滑
 				if !requireCaptcha(ctx, values, true) {

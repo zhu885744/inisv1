@@ -72,6 +72,8 @@ func InitConfig() {
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 		}), Remark: "动态配置"},
 		{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
+			// 评论审核开关：1 开启（前台评论进入待审核，管理员在「评论管理」里通过/驳回）0 关闭（直接通过）
+			"audit":            1,
 			"allow":            1,
 			"rate_limit":       facade.H{"enabled": 1, "max_count": 5, "time_window": 60},
 			"max_length":       500,
@@ -81,6 +83,11 @@ func InitConfig() {
 			// 注：评论 / 回复的邮件开关已并入「统一邮件通知」（SYSTEM_MAIL_NOTIFY 的
 			// comment.notify / comment.reply 场景），此处不再保留 email_notify
 		}), Remark: "评论配置"},
+		// 友链配置（见 app/api/controller/links.go）：目前只有审核开关
+		{Key: "LINKS", Json: utils.Json.Encode(facade.H{
+			// 1 开启：前台「申请友链」进入待审核，管理员在「友链管理」里通过/驳回；0 关闭：申请直接通过
+			"audit": 1,
+		}), Remark: "友链配置"},
 		{Key: "SYSTEM_EXP_RULES", Json: utils.Json.Encode(facade.H{
 			"like":    facade.H{"name": "点赞", "value": 1, "daily_limit": 10},
 			"collect": facade.H{"name": "收藏", "value": 1, "daily_limit": 10},

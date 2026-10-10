@@ -1,5 +1,13 @@
 package controller
 
+import (
+	"inis/app/facade"
+	"inis/app/model"
+
+	"github.com/spf13/cast"
+	"github.com/unti-io/go-utils/utils"
+)
+
 /**
  * 内容审核（文章 / 动态 / 独立页面共用）
  *
@@ -34,6 +42,23 @@ const (
 	AuditPassed  = 1 // 审核通过
 	AuditReject  = 2 // 审核未通过
 )
+
+// contentAuditSwitch 读取某个内容模块的审核开关（config 表 json.audit）
+//
+// key 传 "ARTICLE" / "MOMENTS" / "PAGE" / "COMMENT" / "LINKS"。
+//
+// 缺省返回 true（开启审核）：老站点的配置里可能还没有 audit 字段，
+// 「缺配置就当成需要审核」比「缺配置就放开」安全，也与四份种子里的默认值（audit = 1）一致。
+func contentAuditSwitch(key string) bool {
+	item, _ := facade.DB.Model(&model.Config{}).Where("key", key).Find()
+	if utils.Is.Empty(item) {
+		return true
+	}
+	if value, exist := cast.ToStringMap(item["json"])["audit"]; exist {
+		return cast.ToBool(value)
+	}
+	return true
+}
 
 // auditForCreate 新建内容时应写入的审核状态
 //

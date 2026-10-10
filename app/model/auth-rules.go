@@ -223,6 +223,8 @@ func createAuthRules() (result []AuthRules) {
 		"oauth": {
 			// 第三方登录（QQ / GitHub / Gitee）：
 			//   - 登录 / 注册 / 绑定到当前账号：common（换 code 发 token，本身就是身份证明）；
+			//   - 未绑定时回调页的两个选项（register / bind-account）：common ——
+			//     身份由「一次性票据」证明（见 controller/OAuth.go 的 ticketIdentity），不需要登录态；
 			//   - 我绑定了哪些 / 绑定 / 解绑：login（必须已登录，绑定的是「当前账号」）。
 			// 注意 bind 在登录态下也用来绑定当前账号，所以标 login 而不是 common。
 			"GET": {
@@ -236,6 +238,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=qq&name=QQ 登录&type=common",
 				"path=github&name=GitHub 登录&type=common",
 				"path=gitee&name=Gitee 登录&type=common",
+				"path=register&name=第三方创建新账号&type=common",
+				"path=bind-account&name=第三方绑定已有账号&type=common",
 				"path=bind&name=绑定第三方账号&type=login",
 				"path=unbind&name=解绑第三方账号&type=login",
 			},

@@ -81,6 +81,9 @@ var publicRoutes = map[string]bool{
 	"POST /api/oauth/qq":     true,
 	"POST /api/oauth/github": true,
 	"POST /api/oauth/gitee":  true,
+	// 未绑定时回调页的两个选项：身份由一次性票据（key）证明，本身不需要登录态
+	"POST /api/oauth/register":     true,
+	"POST /api/oauth/bind-account": true,
 }
 
 // isPublicRoute 判断是否为公开接口（与规则表无关的兜底）

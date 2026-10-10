@@ -155,15 +155,18 @@ func DecorationEnabled() bool {
 
 // ============================== 列表 ==============================
 
-// ShopDecorations - 装扮商城列表（仅上架，价格 / 库存 / 限购全部取自装扮自身）
+// ShopDecorations - 装扮商城列表（仅上架，价格 / 库存 / 经验门槛取自装扮自身）
 //
 // 装扮商城是独立分区：不再依赖积分商城的商品记录（Goods）。
 // 兑换走 BuyDecoration，只与「用户积分」联动。
-// uid > 0 时会带上该用户的限购剩余（-1 = 不限购）。
+// 稀缺性只由**全站库存** stock 控制（-1 不限量 / 0 售罄 / >0 剩余）。
+// 「每人限购」已移除：装扮是「一件拥有、幂等续期」的模型（同一用户同一装扮永远只有一行
+// 拥有记录），限购既拦不住重复兑换（重复即续期），又会把限期装扮的续期一起挡掉，
+// 详见 Decoration.LimitPerUser 的说明。
 //
 // typ       类型筛选（avatar_frame / title…，空=全部）
 // priceType 价格筛选（free 免费 / paid 付费 / 空=全部，见 FilterDecorationPrice）
-func ShopDecorations(typ string, priceType string, uid int) []facade.H {
+func ShopDecorations(typ string, priceType string) []facade.H {
 
 	// 注意：facade 的 Select() 要求 dest 是**切片**。
 	// 传单结构体（&Decoration{}）时框架内部会把结果编码成 JSON 对象，
@@ -176,23 +179,11 @@ func ShopDecorations(typ string, priceType string, uid int) []facade.H {
 	query = FilterDecorationPrice(query, priceType)
 	list, _ := query.Order("sort desc, id asc").Select()
 
-	// 该用户已兑换过的装扮数量（限购剩余用），一次查询避免 N+1
-	boughtMap := map[int]int{}
-	if uid > 0 {
-		var ownList []UserDecoration
-		owns, _ := facade.DB.Model(&ownList).Where("uid", uid).Select()
-		for _, item := range owns {
-			boughtMap[cast.ToInt(item["decoration_id"])]++
-		}
-	}
-
 	result := make([]facade.H, 0, len(list))
 	for _, item := range list {
-		id := cast.ToInt(item["id"])
 		isDefault := cast.ToInt(item["is_default"]) == 1
 		price := cast.ToInt(item["price"])
 		stock := cast.ToInt(item["stock"])
-		limit := cast.ToInt(item["limit_per_user"])
 
 		item["payload"] = decorationPayloadMap(item["payload"])
 		item["is_default"] = isDefault
@@ -218,18 +209,6 @@ func ShopDecorations(typ string, priceType string, uid int) []facade.H {
 			canBuy, reason = false, "已售罄"
 		}
 
-		// 限购剩余（-1 表示不限购）
-		remain := -1
-		if limit > 0 {
-			remain = limit - boughtMap[id]
-			if remain <= 0 {
-				remain = 0
-				if canBuy {
-					canBuy, reason = false, "已达限购"
-				}
-			}
-		}
-		item["limit_remain"] = remain
 		item["on_sale"] = canBuy
 		item["buy_reason"] = reason
 
@@ -241,7 +220,7 @@ func ShopDecorations(typ string, priceType string, uid int) []facade.H {
 
 // BuyDecoration - 兑换装扮（事务：校验 → 扣库存 → 扣积分 → 写流水 → 发放）
 //
-// 与积分商城完全解耦：不读也不写 goods / goods_order，价格、库存、限购、经验门槛
+// 与积分商城完全解耦：不读也不写 goods / goods_order，价格、库存、经验门槛
 // 全部取自装扮自身。兑换痕迹落在两处，便于用户与后台回溯：
 //   - 积分流水（Integral.Type = decoration，含余额快照）
 //   - 用户装扮表（UserDecoration：来源 shop / 获得时间 / 过期时间）
@@ -290,18 +269,9 @@ func BuyDecoration(uid int, decorationId int) (result facade.H, err error) {
 		if deco.MinExp > 0 && user.Exp < deco.MinExp {
 			return fmt.Errorf("经验值达到 %d 才可兑换！", deco.MinExp)
 		}
-		if deco.LimitPerUser > 0 {
-			var bought int64
-			if err := tx.Model(&UserDecoration{}).
-				Where("uid", uid).
-				Where("decoration_id", decorationId).
-				Count(&bought).Error; err != nil {
-				return err
-			}
-			if bought >= int64(deco.LimitPerUser) {
-				return errors.New("已达每人限购上限！")
-			}
-		}
+		// 注：装扮不再做「每人限购」校验（原因见 Decoration.LimitPerUser 的说明）：
+		// 拥有记录是「一件一行、重复兑换即续期」，用行数做限购既拦不住重复买、
+		// 又会让限期装扮到期后无法续期。全站稀缺性请用库存 stock 控制。
 
 		// 3. 扣库存（原子条件更新，防超卖；-1 表示不限量）
 		//
@@ -629,7 +599,13 @@ type Decoration struct {
 	// Stock 库存：-1=不限量（默认）0=已售罄 >0=剩余数量
 	Stock int `gorm:"type:int(32); comment:库存（-1不限 0售罄 >0剩余）; default:-1;" json:"stock"`
 	// LimitPerUser 每人限购数量（0=不限购）
-	LimitPerUser int `gorm:"type:int(32); comment:每人限购数量（0=不限购）; default:0;" json:"limit_per_user"`
+	//
+	// 已废弃、不再生效（保留字段仅为兼容老数据的列与接口结构）：
+	// 装扮的拥有记录是「一个用户一件、幂等续期」——BuyDecoration 重复兑换只会续期并复用同一行，
+	// 因此「按拥有记录行数计数」永远只会是 0 或 1：设成 1 等于「买过一次就永远不能再买」
+	// （限期装扮到期也无法续期），设成 >=2 则永远触发不了。
+	// 需要稀缺性用全站 Stock（-1 不限量 / 0 售罄 / >0 剩余）。
+	LimitPerUser int `gorm:"type:int(32); comment:【已废弃】每人限购（0=不限购，已不再生效）; default:0;" json:"limit_per_user"`
 	// MinExp 兑换所需最低经验值（0=不限）
 	MinExp int `gorm:"type:int(32); comment:兑换所需最低经验值（0=不限）; default:0;" json:"min_exp"`
 	// IsDefault 系统默认装扮：所有用户默认拥有（无需购买，也不写入用户装扮表）
@@ -685,6 +661,102 @@ func InitDecoration() {
 		return
 	}
 	seedDefaultDecorations()
+	backfillDecorationRenderState()
+}
+
+// backfillDecorationRenderState - 补齐历史用户的展示字段（幂等，每次启动跑一次）
+//
+//   - users.json.frame_animated：头像框动效标记是后加的（前端 AvatarFrame 据此播动画），
+//     老用户记录里没有，不回填就得等他们重新佩戴一次才会生效；
+//   - users.json.title_decoration.payload：极早期数据可能只存了 id/name，
+//     补上装扮当前的样式（后台之后改过样式则以数据库当前值为准）。
+//
+// 只处理「json 里带 decorations 标记」的用户，装扮样式按 ID 批量取回，避免 N+1。
+func backfillDecorationRenderState() {
+
+	// 装扮样式：id -> {type, name, payload}
+	var decoList []Decoration
+	list, _ := facade.DB.Model(&decoList).Select()
+	if len(list) == 0 {
+		return
+	}
+	payloadMap := map[int]map[string]any{}
+	nameMap := map[int]string{}
+	for _, item := range list {
+		id := cast.ToInt(item["id"])
+		payloadMap[id] = decorationPayloadMap(item["payload"])
+		nameMap[id] = cast.ToString(item["name"])
+	}
+
+	// 粗筛：只取 json 里出现过 decorations 的用户（避免全表解析 JSON）
+	var users []Users
+	rows, _ := facade.DB.Model(&users).Where("json LIKE ?", "%decorations%").Select()
+	if len(rows) == 0 {
+		return
+	}
+
+	updated := 0
+	for _, row := range rows {
+
+		uid := cast.ToInt(row["id"])
+		jsonData := jsonMapOf(row["json"])
+		if jsonData == nil {
+			continue
+		}
+
+		wearing := jsonMapOf(jsonData["decorations"])
+		if wearing == nil {
+			continue
+		}
+
+		changed := false
+
+		// 1) 头像框动效标记
+		if frameId := cast.ToInt(wearing[DecorationTypeAvatarFrame]); frameId > 0 {
+			if payload, ok := payloadMap[frameId]; ok {
+				if _, exist := jsonData["frame_animated"]; !exist {
+					jsonData["frame_animated"] = decorationAnimated(payload)
+					changed = true
+				}
+			}
+		}
+
+		// 2) 头衔样式（只补「没有 payload」的）
+		if titleId := cast.ToInt(wearing[DecorationTypeTitle]); titleId > 0 {
+			deco := jsonMapOf(jsonData["title_decoration"])
+			if deco == nil {
+				deco = map[string]any{}
+			}
+			if len(jsonMapOf(deco["payload"])) == 0 {
+				if payload := payloadMap[titleId]; len(payload) > 0 {
+					deco["id"] = titleId
+					if utils.Is.Empty(deco["name"]) && !utils.Is.Empty(nameMap[titleId]) {
+						deco["name"] = nameMap[titleId]
+					}
+					deco["payload"] = payload
+					jsonData["title_decoration"] = deco
+					changed = true
+				}
+			}
+		}
+
+		if !changed {
+			continue
+		}
+
+		if _, err := facade.DB.Model(&Users{}).Where("id", uid).
+			UpdateColumn("json", utils.Json.Encode(jsonData)); err != nil {
+			facade.Log.Warn(map[string]any{"error": err.Error(), "uid": uid}, "补齐装扮展示字段失败")
+			continue
+		}
+		// 用户缓存里存的是旧数据
+		facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+		updated++
+	}
+
+	if updated > 0 {
+		facade.Log.Info(map[string]any{"rows": updated}, "已补齐装扮展示字段（frame_animated / title payload）")
+	}
 }
 
 // defaultAvatarFrames - 默认头像框资源（与旧前端 Profile.vue 的 PRESET_FRAMES 一致，
@@ -873,6 +945,17 @@ func UserDecorationExpired(expireTime int64) bool {
 // decorationPayloadMap - 取装扮的样式数据（兼容 AfterFind 解码后的 map 与 Select 读出的 JSON 字符串）
 func decorationPayloadMap(value any) map[string]any {
 	return jsonMapOf(value)
+}
+
+// decorationAnimated - 归一化装扮的动效开关（后台可能存 bool，也可能存 0/1），返回 0/1
+func decorationAnimated(payload map[string]any) int {
+	if flag, ok := payload["animated"].(bool); ok {
+		if flag {
+			return 1
+		}
+		return 0
+	}
+	return cast.ToInt(payload["animated"])
 }
 
 // GrantDecorationTx - 发放装扮（事务内）
@@ -1159,6 +1242,7 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 			case DecorationTypeAvatarFrame:
 				delete(jsonData, "frame")
 				delete(jsonData, "frame_scale")
+				delete(jsonData, "frame_animated")
 			case DecorationTypeTitle:
 				delete(jsonData, "title_decoration")
 				titleText = cast.ToString(jsonData["title_text"])
@@ -1172,6 +1256,10 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 				if scale := cast.ToFloat64(payload["scale"]); scale > 0 {
 					jsonData["frame_scale"] = scale
 				}
+				// 动效开关一并回写到 users.json：头衔的 payload 前端能透传拿到，
+				// 但头像框展示时用到的是 json.frame（只有图片地址），
+				// 不回写这个标记前端就无从知道该不该播动效（之前「开启动效没有用」的原因之一）
+				jsonData["frame_animated"] = decorationAnimated(payload)
 			case DecorationTypeTitle:
 				jsonData["title_decoration"] = map[string]any{
 					"id":      deco.Id,
