@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"inis/app/facade"
@@ -103,18 +104,80 @@ func init() {
 }
 
 // 启动系统状态推送任务
+//
+// 采集成本：每次 getSystemStatus() 会执行 1 条 SELECT 1 + 约 17 条 COUNT(*)（各表数据量统计）
+// + 一次缓存「写入 → 读取 → 删除」校验。原先固定每秒采集一次且无条件执行（哪怕没有任何管理员在线），
+// 属于典型的空转负载，因此这里做了两件事：
+//  1. 无管理员在线时直接跳过本轮采集（在线管理员数由 hub.adminOnline 原子计数维护）；
+//  2. 采集间隔改为可配置（socket.status_interval，默认 3 秒）。
+//
+// 另外，采集里最重的「表计数」与「缓存校验」各自带短 TTL 缓存
+// （socket.status_count_cache，默认 5 秒），所以即使把间隔调回 1 秒，也不会每秒都打数据库。
 func startStatusPushTask() {
-	// 每1秒推送一次系统状态
-	ticker := time.NewTicker(1 * time.Second)
+	interval := statusInterval()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	socketLog("系统状态推送任务已启动：间隔 %s，无管理员在线时跳过采集", interval)
+
 	for range ticker.C {
-		// 获取系统状态
-		status := getSystemStatus()
-		// 推送给所有客户端
-		pushStatusToClients(status)
+		// 没有管理员在看就跳过整轮采集（本进程内不产生任何数据库/缓存操作）
+		if Hub.adminOnline.Load() <= 0 {
+			continue
+		}
+		pushStatusToClients(getSystemStatus())
 	}
 }
+
+// statusInterval 系统状态推送间隔（秒，默认 3；小于 1 按 1 处理）
+func statusInterval() time.Duration {
+	seconds := cast.ToInt(getSocketConfig("status_interval", 3))
+	if seconds < 1 {
+		seconds = 1
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// statusCountCacheTTL 表计数与缓存校验的缓存时间（秒，默认 5）
+//
+// 这两块是每次采集里最重的部分（COUNT(*) 在 InnoDB 上是索引扫描），
+// 短 TTL 缓存后：推送给前端的资源指标仍是实时的，只有「各表数据量」最多滞后这几秒 —— 完全可以接受。
+func statusCountCacheTTL() time.Duration {
+	seconds := cast.ToInt(getSocketConfig("status_count_cache", 5))
+	if seconds < 0 {
+		seconds = 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// statusCache 带 TTL 的极简结果缓存
+// （当前只有推送任务一个调用方；加锁是为防止将来出现并发调用方时踩坑）
+type statusCache struct {
+	mu      sync.Mutex
+	value   any
+	expires time.Time
+}
+
+func (cache *statusCache) get(ttl time.Duration, build func() any) any {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	if ttl > 0 && cache.value != nil && time.Now().Before(cache.expires) {
+		return cache.value
+	}
+
+	value := build()
+	cache.value = value
+	cache.expires = time.Now().Add(ttl)
+	return value
+}
+
+var (
+	// 各表数据量统计缓存
+	statusCountsCache statusCache
+	// 缓存连通性探测结果缓存
+	statusProbeCache statusCache
+)
 
 // 获取系统状态
 func getSystemStatus() map[string]any {
@@ -170,38 +233,47 @@ func getSystemStatus() map[string]any {
 			err := db.Raw("SELECT 1").Error
 			latency := time.Since(start)
 
-			// 尝试获取统计数据，但不强制要求成功
-			counts := map[string]any{
-				"users": map[string]any{
-					"total":  int64(0),
-					"active": int64(0),
-					"normal": int64(0),
-					"frozen": int64(0),
-					"status": map[string]any{"0": int64(0), "1": int64(0)},
-				},
-				"articles": map[string]any{
-					"total":     int64(0),
-					"draft":     int64(0),
-					"published": int64(0),
-					"status":    map[string]any{"0": int64(0), "1": int64(0)},
-				},
-				"moments": map[string]any{
-					"total":     int64(0),
-					"draft":     int64(0),
-					"published": int64(0),
-					"status":    map[string]any{"0": int64(0), "1": int64(0)},
-				},
-				"comments":    int64(0),
-				"pages":       int64(0),
-				"links":       int64(0),
-				"banners":     int64(0),
-				"placards":    int64(0),
-				"tags":        int64(0),
-				"attachments": int64(0),
-			}
+			// 各表数据量统计：按 socket.status_count_cache（默认 5 秒）缓存后复用。
+			// 这里是每次采集里最重的一段（约 17 条 COUNT(*)），缓存后即使把推送间隔调回 1 秒，
+			// 数据库也只是每 5 秒被统计一次；前端展示的「各表数据量」最多滞后这几秒。
+			counts := statusCountsCache.get(statusCountCacheTTL(), func() any {
+				// 尝试获取统计数据，但不强制要求成功
+				counts := map[string]any{
+					"users": map[string]any{
+						"total":  int64(0),
+						"active": int64(0),
+						"normal": int64(0),
+						"frozen": int64(0),
+						"status": map[string]any{"0": int64(0), "1": int64(0)},
+					},
+					"articles": map[string]any{
+						"total":     int64(0),
+						"draft":     int64(0),
+						"published": int64(0),
+						"status":    map[string]any{"0": int64(0), "1": int64(0)},
+					},
+					"moments": map[string]any{
+						"total":     int64(0),
+						"draft":     int64(0),
+						"published": int64(0),
+						"status":    map[string]any{"0": int64(0), "1": int64(0)},
+					},
+					"comments":    int64(0),
+					"pages":       int64(0),
+					"links":       int64(0),
+					"banners":     int64(0),
+					"placards":    int64(0),
+					"tags":        int64(0),
+					"attachments": int64(0),
+				}
 
-			// 只有在数据库连接成功时才尝试获取统计数据
-			if err == nil {
+				// 只有在数据库连接成功时才尝试获取统计数据
+				if err != nil {
+					return counts
+				}
+
+				// panic 恢复放在闭包内：统计出错时只退化为默认值，
+				// 不再像以前那样中断整个状态采集（否则 CPU/内存/网络等一起丢失）
 				defer func() {
 					if r := recover(); r != nil {
 						facade.Log.Error(map[string]any{
@@ -272,7 +344,9 @@ func getSystemStatus() map[string]any {
 					"tags":        tagsCount,
 					"attachments": attachmentsCount,
 				}
-			}
+
+				return counts
+			})
 
 			dbStatus = map[string]any{
 				"connected": err == nil,
@@ -297,21 +371,26 @@ func getSystemStatus() map[string]any {
 	}
 
 	if facade.CacheToml != nil && facade.Cache != nil {
-		cacheConfig := facade.CacheToml.Get("open")
-		cacheType := facade.CacheToml.Get("default")
+		// 连通性探测（写入 → 读取 → 删除）按同一 TTL 缓存：
+		// 探测一次要动 3 次缓存（Redis 是网络往返），没必要每次推送都做，
+		// 缓存结果里保留检测当时的开关与驱动类型，毫秒级的实时性对这两项没有意义。
+		cacheStatus = cast.ToStringMap(statusProbeCache.get(statusCountCacheTTL(), func() any {
+			cacheConfig := facade.CacheToml.Get("open")
+			cacheType := facade.CacheToml.Get("default")
 
-		cacheKey := "status:test"
-		cacheValue := "test_value"
-		setSuccess := facade.Cache.Set(cacheKey, cacheValue, 10)
-		cachedValue := facade.Cache.Get(cacheKey)
-		facade.Cache.Del(cacheKey)
+			cacheKey := "status:test"
+			cacheValue := "test_value"
+			setSuccess := facade.Cache.Set(cacheKey, cacheValue, 10)
+			cachedValue := facade.Cache.Get(cacheKey)
+			facade.Cache.Del(cacheKey)
 
-		cacheStatus = map[string]any{
-			"enabled": cast.ToBool(cacheConfig),
-			"type":    cast.ToString(cacheType),
-			"working": setSuccess && cachedValue == cacheValue,
-			"error":   utils.Ternary(setSuccess, "", "缓存操作失败"),
-		}
+			return map[string]any{
+				"enabled": cast.ToBool(cacheConfig),
+				"type":    cast.ToString(cacheType),
+				"working": setSuccess && cachedValue == cacheValue,
+				"error":   utils.Ternary(setSuccess, "", "缓存操作失败"),
+			}
+		}))
 	}
 
 	// 系统资源

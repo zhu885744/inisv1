@@ -199,6 +199,12 @@ func (this *client) read() {
 				continue
 			}
 
+			if msgType == "kick" {
+				// 踢下线：转交 hub goroutine 处理（只有它才能安全读取 isAdmin 与操作 clients）
+				this.hub.kick <- &kickRequest{from: this, to: cast.ToString(item["to"])}
+				continue
+			}
+
 			if !this.hub.checkRateLimit(this.info.ID) {
 				socketLog("消息频率超限，丢弃消息: %s", this.info.ID)
 				continue
@@ -382,6 +388,9 @@ func (hub *hub) run() {
 		case client := <-hub.connect:
 			socketLog("客户端连接: %s", client.info.ID)
 			hub.clients[client.info.ID] = client
+			if client.isAdmin {
+				hub.adminOnline.Add(1)
+			}
 
 			if state, ok := hub.clientStates[client.info.ID]; ok {
 				socketLog("检测到重连，恢复客户端状态: %s", client.info.ID)
@@ -403,6 +412,9 @@ func (hub *hub) run() {
 			socketLog("客户端断开连接: %s", client.info.ID)
 			if _, ok := hub.clients[client.info.ID]; ok {
 				delete(hub.clients, client.info.ID)
+				if client.isAdmin {
+					hub.adminOnline.Add(-1)
+				}
 				close(client.send)
 				hub.broadcastStatus()
 				socketLog("当前在线人数: %d", len(hub.clients))
@@ -450,12 +462,22 @@ func (hub *hub) run() {
 				"admin_only": true,
 			})
 			hub.broadcastToAdmin(statusMsg)
+		case req := <-hub.kick:
+			hub.handleKick(req)
 		case up := <-hub.upgrade:
 			// 身份升级：更新用户名与管理员标记，并重新广播在线状态
 			// 注意：仅更新显示身份与权限，client_id（info.ID）保持不变，
 			// 以避免与 read goroutine 并发读写 info.ID 产生数据竞争。
+			prevAdmin := up.client.isAdmin
 			up.client.username = up.username
 			up.client.isAdmin = up.isAdmin
+			if prevAdmin != up.isAdmin {
+				if up.isAdmin {
+					hub.adminOnline.Add(1)
+				} else {
+					hub.adminOnline.Add(-1)
+				}
+			}
 			socketLog("客户端身份升级: %s (uid=%d, 管理员=%v)", up.client.info.ID, up.uid, up.isAdmin)
 			hub.broadcastStatus()
 		}
@@ -537,6 +559,58 @@ func (hub *hub) broadcastToAdmin(message []byte) {
 			close(client.send)
 			delete(hub.clients, client.info.ID)
 		}
+	}
+}
+
+// handleKick 处理管理员踢下线请求（仅管理员可发起）
+//
+// 被踢的客户端会先收到 {"type":"kicked"}（说明原因，避免前端误以为网络抖动而立刻重连），
+// 随后连接被服务端关闭；关闭后其 read() 会走统一的下线清理（hub.close），在线列表随之刷新。
+func (hub *hub) handleKick(req *kickRequest) {
+	if req == nil || req.from == nil {
+		return
+	}
+
+	// 权限判定放在 hub goroutine 里做：client.isAdmin 只由本 goroutine 写入（见 upgrade 分支）
+	if !req.from.isAdmin {
+		socketLog("非管理员尝试踢下线，已忽略: %s", req.from.info.ID)
+		hub.trySend(req.from, `{"type":"error","content":"无权限：仅管理员可执行该操作"}`)
+		return
+	}
+
+	if utils.Is.Empty(req.to) {
+		return
+	}
+
+	target, ok := hub.clients[req.to]
+	if !ok || target == nil {
+		socketLog("踢下线目标已离线: %s", req.to)
+		hub.trySend(req.from, `{"type":"kicked","content":"目标客户端已离线"}`)
+		return
+	}
+
+	socketLog("管理员 %s 踢下线客户端: %s", req.from.info.ID, target.info.ID)
+
+	hub.trySend(target, `{"type":"kicked","content":"您已被管理员断开连接"}`)
+	hub.trySend(req.from, `{"type":"kicked","content":"已断开该连接"}`)
+
+	// 稍等片刻再关闭，给上面那条消息留出写出的时间。
+	// gorilla/websocket 的 Close 允许与其它方法并发调用，所以从新 goroutine 关闭是安全的。
+	go func(client *client) {
+		time.Sleep(200 * time.Millisecond)
+		_ = client.conn.Close()
+	}(target)
+}
+
+// trySend 非阻塞投递（队列满时丢弃，绝不阻塞 hub goroutine）
+func (hub *hub) trySend(client *client, message string) {
+	if client == nil {
+		return
+	}
+	select {
+	case client.send <- []byte(message):
+	default:
+		socketLog("发送队列满，丢弃消息: %s", client.info.ID)
 	}
 }
 

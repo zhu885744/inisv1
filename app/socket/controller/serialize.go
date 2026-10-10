@@ -132,6 +132,16 @@ type messageStatus struct {
 	sentAt    time.Time
 }
 
+// kickRequest 管理员踢下线请求
+//
+// 为什么不在 read goroutine 里直接处理：判断「发起者是否管理员」要读 client.isAdmin，
+// 而它由 hub goroutine 在身份升级时写入（见 clientUpgrade），跨 goroutine 读会有数据竞争；
+// 因此统一转交给 hub.run 处理（那里的 clients 与 isAdmin 都是同步的）。
+type kickRequest struct {
+	from *client // 发起者
+	to   string  // 目标客户端 ID（user_1 / guest_xxx，见 middleware/app.go）
+}
+
 type privateMessage struct {
 	from    string
 	to      string
@@ -149,6 +159,7 @@ type hub struct {
 	close                chan *client
 	status               chan map[string]any
 	upgrade              chan *clientUpgrade
+	kick                 chan *kickRequest
 	pendingMessages      map[string]*pendingMessage
 	ackTimeout           time.Duration
 	maxRetries           int
@@ -164,6 +175,10 @@ type hub struct {
 	security             *securityConfig
 	chatSessions         map[string]*chatSession
 	messageStatuses      map[string]*messageStatus
+	// 当前在线的管理员连接数（由 hub.run 在 connect / close / upgrade 时维护）。
+	// 系统状态推送任务据此判断「是否有人在看」：无人在线就跳过采集，避免空转打数据库。
+	// 用原子计数而不是直接读 clients —— clients 只在 hub goroutine 内读写，跨 goroutine 读会产生数据竞争。
+	adminOnline atomic.Int64
 	// IP临时封禁相关
 	ipBanEnabled   bool
 	ipBanThreshold int
@@ -187,6 +202,7 @@ var Hub = func() *hub {
 		close:                make(chan *client),
 		status:               make(chan map[string]any),
 		upgrade:              make(chan *clientUpgrade),
+		kick:                 make(chan *kickRequest),
 		clients:              make(map[string]*client),
 		pendingMessages:      make(map[string]*pendingMessage),
 		clientStates:         make(map[string]*clientState),
@@ -597,4 +613,3 @@ func (hub *hub) GetChatHistory(user1, user2 string, limit int) []*privateMessage
 	var history []*privateMessage
 	return history
 }
-

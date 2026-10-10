@@ -294,7 +294,7 @@ flowchart TD
 - **互动与治理**：点赞、收藏、关注、评论（多级回复 + 审核）、站内通知、友链申请与分组审核、内容 / 评论 / 友链 / 注册四类审核、封禁与申诉（小黑屋公示）、用户隐私分级（字段可见性）、操作日志脱敏
 - **媒体与存储**：静态图片按 URL 参数实时处理（`?size=100x100&mode=fill|resize|fit`，支持 jpg / png / gif / tiff / bmp 输出并带内存缓存）、表情包与附件库、本地存储与腾讯云 COS（目录 / 文件命名规则可配，含上传大小、并发与扩展名白名单校验）
 - **消息通道**：邮件通知（场景开关 + 发件队列：分批限流、失败重试）、短信（阿里云短信 / 阿里云号码认证 / 腾讯云短信）、WebSocket 实时推送（`/socket`）
-- **系统与运维**：图形化安装向导（安装锁）、系统设置（分组导航：内容 / 评论 / 存储 / 缓存 / 短信 / 邮件 / 注册 / 账号安全 / JWT / 分页 / 通知）、缓存三驱动（本地 / 文件 / Redis，支持按标签批量清理）、QPS 限流与超限告警、定时任务（封禁到期、装扮到期、日志清理、通知清理）、多语言（中 / 英 / 韩 / 俄）、RSS 与站内搜索
+- **系统与运维**：图形化安装向导（安装锁）、系统设置（分组导航：内容 / 评论 / 存储 / 缓存 / 短信 / 邮件 / 注册 / 账号安全 / JWT / 分页 / 通知）、缓存三驱动（本地 / 文件 / Redis，支持按标签批量清理）、QPS 限流与超限告警、定时任务（封禁到期、装扮到期、日志清理、通知清理、资源采样与告警）、多语言（中 / 英 / 韩 / 俄）、RSS 与站内搜索
 - **部署友好**：前端产物可用 `-tags embed` 内嵌进单个二进制，运行时只需「二进制 + config 目录」
 
 ### 功能模块
@@ -323,12 +323,13 @@ flowchart TD
 - 数据概览、我的文章（草稿 / 待审核 / 已发布 / 编辑）、我的动态、我的友链
 
 #### 4. 后台（`/admin`）
-- 概览：站点内容、用户与互动统计
+- 概览：站点内容、用户与互动统计；数据统计（WebSocket 实时资源 / 数据库 / 缓存 / 在线用户与踢下线、资源告警阈值；间隔与节流见 `docs/socket.md`）
 - 内容：文章与分类、独立页面、动态、评论、公告、轮播（位图素材管理）、标签、附件
 - 用户：用户管理（资料、状态、封禁与申诉、经验 / 积分调整）、消息通知
 - 成长：等级、经验、积分、商品（商城）、装扮、签到
 - 互动：友链与友链分组
 - 系统：系统设置（分组导航）、缓存 / 存储 / 短信 / 邮件 / 注册 / 安全 / JWT / 分页 / 通知
+- 运维：日志解析（`runtime/` 下的系统日志与通知日志，按日期 / 文件 / 级别 / 关键字筛选，含轮转文件）
 - 安全：权限规则、权限组、后台页面、接口密钥、IP 黑白名单、QPS 预警
 
 #### 5. 后端基础设施
@@ -393,8 +394,8 @@ inisv1/
 │   ├── i18n-assets.go      # 语言包内嵌（go:embed）
 │   └── i18n/               # 国际化语言包：zh-cn / en-us / ko-kr / ru-ru
 │
-├── docs/                   # 文档（42 篇）
-│   ├── API docs/           # 接口文档（38 篇，按模块划分）
+├── docs/                   # 文档（45 篇）
+│   ├── API docs/           # 接口文档（40 篇，按模块划分）
 │   │   ├── api-keys.md                 # 接口密钥
 │   │   ├── article-group.md            # 文章分组
 │   │   ├── article.md                  # 文章
@@ -417,6 +418,7 @@ inisv1/
 │   │   ├── level.md                    # 等级
 │   │   ├── links-group.md              # 友链分组
 │   │   ├── links.md                    # 友链
+│   │   ├── log.md                      # 日志解析（系统 / 通知日志）
 │   │   ├── moments.md                  # 动态
 │   │   ├── notification.md             # 站内通知
 │   │   ├── oauth.md                    # 第三方登录
@@ -426,6 +428,7 @@ inisv1/
 │   │   ├── qps-warn.md                 # QPS 预警
 │   │   ├── rss.md                      # RSS 订阅
 │   │   ├── search.md                   # 搜索
+│   │   ├── stats.md                    # 数据统计（资源告警阈值）
 │   │   ├── tags.md                     # 标签
 │   │   ├── toml.md                     # TOML 配置读写
 │   │   ├── user-collects.md            # 用户收藏
@@ -435,6 +438,7 @@ inisv1/
 │   │   └── users.md                    # 用户
 │   ├── cache.md                        # 缓存机制说明
 │   ├── database-index.md               # 数据库索引说明
+│   ├── socket.md                       # Socket 实时通道与系统状态推送
 │   ├── 二次开发规范.md                  # 二次开发规范
 │   └── 前端主题开发及API调用规范.md      # 前端主题开发及 API 调用规范
 │
@@ -448,10 +452,10 @@ inisv1/
 │   ├── theme_embed.go      # //go:embed all:dist（仅在 -tags embed 时编译）
 │   └── dist/               # 前端构建产物：cp -R Mellow/dist/. theme/dist/
 │
-└── app/                    # 后端核心业务代码（161 个 .go）
+└── app/                    # 后端核心业务代码（165 个 .go）
     │
     ├── api/                # 接口层（控制器 / 中间件 / 路由）
-    │   ├── controller/     # 控制器（40）
+    │   ├── controller/     # 控制器（42）
     │   │   ├── OAuth.go            # 第三方登录
     │   │   ├── api-keys.go         # 接口密钥管理
     │   │   ├── article-group.go    # 文章分组
@@ -476,6 +480,7 @@ inisv1/
     │   │   ├── level.go            # 等级
     │   │   ├── links-group.go      # 友链分组
     │   │   ├── links.go            # 友链
+    │   │   ├── log.go              # 日志解析（runtime 系统 / 通知日志，后台只读查看）
     │   │   ├── mail-notify.go      # 邮件通知
     │   │   ├── moments.go          # 动态
     │   │   ├── notification.go     # 站内通知
@@ -486,6 +491,7 @@ inisv1/
     │   │   ├── qps-warn.go         # QPS 预警
     │   │   ├── rss.go              # RSS 订阅
     │   │   ├── search.go           # 搜索
+    │   │   ├── stats.go            # 数据统计（资源告警阈值）
     │   │   ├── tags.go             # 标签
     │   │   ├── toml.go             # TOML 配置读写（后台配置页）
     │   │   ├── user-collects.go    # 用户收藏
@@ -549,7 +555,7 @@ inisv1/
     │   ├── tls.go                  # TLS / HTTPS
     │   └── token.go                # Token 校验
     │
-    ├── model/              # 数据模型与业务逻辑（42）
+    ├── model/              # 数据模型与业务逻辑（43）
     │   ├── api-keys.go             # 接口密钥
     │   ├── article-group.go        # 文章分组
     │   ├── article.go              # 文章
@@ -586,6 +592,7 @@ inisv1/
     │   ├── reward-card-stock.go    # 奖励卡密库存
     │   ├── reward-card.go          # 奖励卡密
     │   ├── reward.go               # 奖励引擎（经验 / 积分 / 卡密 / 装扮统一发放）
+    │   ├── stats.go                # 资源采样与告警阈值判定（不落库）
     │   ├── tags.go                 # 标签
     │   ├── user-collects.go        # 用户收藏
     │   ├── user-follows.go         # 用户关注
@@ -605,13 +612,14 @@ inisv1/
     │   └── route/
     │       └── app.go              # WebSocket 路由注册
     │
-    ├── timer/              # 定时任务（6）
+    ├── timer/              # 定时任务（7）
     │   ├── ban.go                  # 封禁到期自动解封
     │   ├── decoration.go           # 装扮到期处理
     │   ├── device.go               # 设备信息
     │   ├── log.go                  # 日志清理
     │   ├── notification.go         # 通知清理
-    │   └── run.go                  # 定时任务入口
+    │   ├── run.go                  # 定时任务入口
+    │   └── stats.go                # 资源采样 + 告警判定（每分钟）
     │
     └── validator/          # 请求参数校验（24）
         ├── api-keys.go             # 接口密钥

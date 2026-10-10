@@ -79,6 +79,9 @@ func InitAuthPages() {
 		{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
 		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
+		{Name: "查看日志", Icon: "bi bi-journal-text", Path: "/admin/logs", Size: "14px"},
+		// 数据统计：实时资源 / 数据库 / 在线用户（数据来自 socket 推送，见 app/socket/controller/status.go）
+		{Name: "数据统计", Icon: "bi bi-graph-up-arrow", Path: "/admin/stats", Size: "14px"},
 		{Name: "独立页面", Icon: "bi bi-window", Path: "/admin/pages", Size: "14px"},
 		{Name: "撰写独立页面", Icon: "bi bi-file-earmark-plus", Path: "/admin/pages/write", Size: "14px"},
 		{Name: "友链分组", Icon: "bi bi-diagram-3", Path: "/admin/links/group", Size: "14px"},

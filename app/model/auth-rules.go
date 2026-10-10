@@ -150,6 +150,8 @@ func NormalizeAuthRuleTypes() {
 var deprecatedAuthRules = [][2]string{
 	{"POST", "/api/comm/verify-email"},     // 注册邮箱验证（注册已用邮箱/短信验证码，功能已移除）
 	{"POST", "/api/comm/send-verify-mail"}, // 重发注册验证邮件
+	{"GET", "/api/stats/history"},          // 统计数据历史趋势（功能已移除：实时趋势 + 资源告警已覆盖需求）
+	{"GET", "/api/stats/spans"},            // 统计数据跨度列表（同上）
 }
 
 // PruneAuthRules - 清理已下线接口残留的权限规则
@@ -204,6 +206,27 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"path=&name=代理 POST 请求&type=login"},
 			"PATCH":  {"path=&name=代理 PATCH 请求&type=login"},
 			"DELETE": {"path=&name=代理 DELETE 请求&type=login"},
+		},
+		"log": {
+			// 日志解析（后台运维）：
+			//   - 全部为只读接口，type=default —— 需要授予权限点才能查看；
+			//   - 只允许读 runtime/ 下白名单目录里的 .log（见 controller/log.go 的 resolvePath）。
+			"GET": {
+				"path=dates&name=日志日期列表&type=default",
+				"path=files&name=日志文件列表&type=default",
+				"path=read&name=解析并读取日志&type=default",
+			},
+		},
+		"stats": {
+			// 数据统计（后台）：只有资源告警阈值。
+			//   - 实时数据不走这里，而是 WebSocket 推送（见 app/socket/controller/status.go）；
+			//   - type=default：阈值会直接影响告警是否触发，不宜开放给普通用户。
+			"GET": {
+				"path=alert&name=统计告警阈值&type=default",
+			},
+			"POST": {
+				"path=alert&name=保存统计告警阈值&type=default",
+			},
 		},
 		"comm": {
 			"GET": {

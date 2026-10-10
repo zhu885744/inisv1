@@ -89,6 +89,9 @@ func MailNotifyScenes() []MailNotifyScene {
 		{Key: "order.paid", Label: "订单支付成功（通知管理员）", Group: "积分商城", Target: MailTargetAdmin, Default: 1, Desc: "用户下单扣除积分成功后，通知管理员（实物商品需要发货）"},
 		{Key: "order.shipped", Label: "订单已发货", Group: "积分商城", Target: MailTargetUser, Default: 1, Desc: "管理员把订单标记为已发货时通知买家"},
 		{Key: "order.canceled", Label: "订单已取消", Group: "积分商城", Target: MailTargetUser, Default: 1, Desc: "订单取消并退还积分时通知买家"},
+
+		// ---------- 系统监控 ----------
+		{Key: "stats.alert", Label: "资源告警", Group: "系统监控", Target: MailTargetAdmin, Default: 1, Desc: "CPU / 内存 / 磁盘使用率超过后台设定的阈值时通知管理员（阈值在「数据统计」页设置）"},
 	}
 }
 
@@ -272,8 +275,42 @@ func MailNotifyTime() string {
 }
 
 // MailNotifySiteURL 站点地址（用于正文里给出跳转提示，取不到时返回空）
+//
+// 取值顺序：
+//  1. app.toml 的 app.domain（显式配置，最准）；
+//  2. 最近一次请求推导出的站点地址 —— 中间件 app/middleware/params.go 的 domain()
+//     会把 scheme://host 写进缓存与进程内存（键名就是 "domain"，facade/comm.go 也这么用）；
+//  3. 缓存未开启时的进程内存兜底。
+//
+// 为什么需要 2、3：后台任务（定时采样告警、邮件队列、封禁到期解封）**没有请求上下文**，
+// 拿不到 Host 就推导不出地址。此前只读 app.domain，配置留空时邮件正文里就只剩一个「站点：」。
 func MailNotifySiteURL() string {
-	return strings.TrimRight(cast.ToString(facade.AppToml.Get("app.domain", "")), "/")
+	if domain := strings.TrimSpace(cast.ToString(facade.AppToml.Get("app.domain", ""))); !utils.Is.Empty(domain) {
+		return strings.TrimRight(domain, "/")
+	}
+
+	if facade.Cache != nil {
+		if cached := cast.ToString(facade.Cache.Get("domain")); !utils.Is.Empty(cached) {
+			return strings.TrimRight(cached, "/")
+		}
+	}
+
+	if remembered := cast.ToString(facade.Var.Get("domain")); !utils.Is.Empty(remembered) {
+		return strings.TrimRight(remembered, "/")
+	}
+
+	return ""
+}
+
+// MailNotifySiteLine 正文里的「站点：https://…」一行；取不到站点地址时返回空串。
+//
+// sendMailNotify 会跳过空行（见本文件），因此不会出现「站点：」这种只有标签的悬空行。
+func MailNotifySiteLine() string {
+	url := MailNotifySiteURL()
+	if utils.Is.Empty(url) {
+		return ""
+	}
+	return "站点：" + url
 }
 
 // SuperAdminUids 超级管理员 uid（权限组 root=1 的成员，去重后返回）

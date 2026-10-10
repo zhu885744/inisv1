@@ -35,6 +35,7 @@ func Run() {
 	Ban.Run()
 	Notification.Run()
 	Decoration.Run()
+	Stats.Run()
 
 	go func() {
 		<- Timer.Start()

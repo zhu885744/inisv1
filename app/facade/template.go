@@ -15,7 +15,8 @@ token_name  = "INIS_LOGIN_TOKEN"
 # /assets 为后端静态资源（表情、随机头像等），/static 为主题构建产物的静态目录
 theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
 # 站点地址（用于邮件通知正文里的链接等，如 https://blog.example.com）
-# 留空则用当前请求的 Host 自动推导；前端与接口不同域时必须显式配置
+# 留空则用最近一次请求的 Host 自动推导（含后台任务发出的邮件）；
+# 前端与接口不同域时必须显式配置
 domain      = ""
 
 # rss配置
@@ -31,6 +32,12 @@ max_message_size = 1048576      # 最大消息大小(字节)
 max_connections_per_ip = 10     # 每个IP最大连接数
 max_messages_per_minute = 100   # 每分钟最大消息数
 ack_timeout = 10                # ACK超时时间(秒)
+status_interval = 3             # 系统状态推送间隔(秒)；无管理员在线时跳过采集
+status_count_cache = 5          # 各表数据量与缓存探测的缓存时间(秒)
+
+# 数据统计配置（后台「数据统计」页的资源告警）
+[stats]
+sample_interval = 60            # 资源采样间隔(秒)，用于 CPU/内存/磁盘 阈值判定；不落库，无人查看时也持续采样
 max_retries = 3                 # 消息重试次数
 offline_msg_ttl = 300           # 离线消息过期时间(秒)
 max_offline_msgs = 100          # 离线消息最大数量

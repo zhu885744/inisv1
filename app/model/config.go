@@ -113,6 +113,8 @@ func InitConfig() {
 		{Key: CheckinCacheKey, Json: utils.Json.Encode(defaultCheckinConfig()), Remark: "每日签到配置"},
 		// 装扮配置（头像框 / 头衔商城，见 model/decoration.go）
 		{Key: DecorationConfigKey, Json: utils.Json.Encode(defaultDecorationConfig()), Remark: "装扮商城配置"},
+		// 资源告警阈值（后台「数据统计」页设置；采样与告警判定见 model/stats.go）
+		{Key: StatsAlertConfigKey, Value: "0", Json: utils.Json.Encode(StatsAlertDefaultConfig()), Remark: "资源告警阈值（数据统计页）"},
 	}
 
 	for _, item := range configs {
