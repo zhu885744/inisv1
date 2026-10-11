@@ -28,6 +28,9 @@ const (
 	// 装扮（获得 / 续期 / 被回收 / 即将过期 / 已过期）
 	// bind_type=decoration，前台「消息」页据此显示装扮图标并跳到「我的装扮」
 	NotificationTypeDecoration = "decoration"
+	// 被 @ 提及（文章 / 动态 / 独立页 / 评论里 @ 到了当前用户）
+	// bind_type/bind_id 指向被 @ 的内容，点击跳到该内容；@ 的解析见 app/model/mention.go
+	NotificationTypeMention = "mention"
 )
 
 type Notification struct {

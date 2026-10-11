@@ -407,6 +407,10 @@ func (this *Pages) create(ctx *gin.Context) {
 		}
 	}
 
+	// @ 提及：只匹配作者**已关注**的人（未关注的人保持普通文本，不转链接也不通知）
+	mentionTargets := []model.MentionTarget{}
+	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, this.user(ctx).Id)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -425,6 +429,11 @@ func (this *Pages) create(ctx *gin.Context) {
 		)...)
 		go model.NotifyAdmins(uid, model.NotificationTypePage, title,
 			"标题："+table.Title+" · 时间："+model.MailNotifyTime(), "page", table.Id)
+	}
+
+	// @ 提及通知：页面可展示（审核通过）时才发
+	if table.Audit == 1 {
+		go (&model.Mention{}).NotifyNew(mentionTargets, uid, "页面", "page", table.Id, table.Content, "")
 	}
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
@@ -482,6 +491,16 @@ func (this *Pages) update(ctx *gin.Context) {
 
 	// 取一次更新内容：Update 与「审核状态变化」判定共用
 	payload := async.Result()
+
+	// @ 提及：只匹配页面作者已关注的人（管理员代他人编辑时也以作者为准）
+	mentionOwnerUid := cast.ToInt(prev["uid"])
+	if mentionOwnerUid <= 0 {
+		mentionOwnerUid = this.user(ctx).Id
+	}
+	mentionTargets := []model.MentionTarget{}
+	if _, ok := payload["content"]; ok {
+		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+	}
 	// 审核通过时清空驳回原因：作者不该继续看到已经过期的原因
 	if cast.ToInt(payload["audit"]) == 1 {
 		payload["reason"] = ""
@@ -491,6 +510,15 @@ func (this *Pages) update(ctx *gin.Context) {
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
+	}
+
+	// @ 提及通知：页面没有草稿态，只通知「相比旧正文新增」的 @，避免反复打扰同一个人。
+	// 用 prevAudit（编辑前的审核状态）判断：「待审核 → 通过」的通知由审核回调补发，避免重复
+	if len(mentionTargets) > 0 && prevAudit == AuditPassed {
+		go (&model.Mention{}).NotifyNew(
+			mentionTargets, mentionOwnerUid, "页面", "page",
+			cast.ToInt(params["id"]), cast.ToString(payload["content"]), cast.ToString(prev["content"]),
+		)
 	}
 
 	// 审核状态变化时通知（邮件 + 站内信，驳回时带上原因）

@@ -475,6 +475,10 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"path=save&type=login", "path=create&type=login"},
 			"DELETE": {"path=remove&type=login", "path=delete&type=login", "path=clear&type=login"},
 		},
+		// @ 提及：候选列表只给「我关注的人」，登录即可用（写入没有独立接口 —— @ 在保存内容时解析）
+		"mention": {
+			"GET": {"path=candidates&type=login&name=@候选用户"},
+		},
 		"api-keys": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
 			"PUT":    {"update", "restore"},

@@ -377,6 +377,10 @@ func (this *Moments) create(ctx *gin.Context) {
 		}
 	}
 
+	// @ 提及：只匹配作者**已关注**的人（未关注的人保持普通文本，不转链接也不通知）
+	mentionTargets := []model.MentionTarget{}
+	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, uid)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -388,6 +392,11 @@ func (this *Moments) create(ctx *gin.Context) {
 	// audit：0 待审核 / 1 通过 / 2 未通过；草稿（status=0）audit 恒为 1，不会误发
 	if cast.ToInt(table.Audit) == 0 {
 		go notifyMomentsAudit(uid, table.Id, table.Content, cast.ToInt(table.Audit), table.Reason)
+	}
+
+	// @ 提及通知：只在动态真正可展示（已发布 + 审核通过）时发；草稿与待审核不打扰被 @ 的人
+	if cast.ToInt(table.Status) == 1 && cast.ToInt(table.Audit) == 1 {
+		go (&model.Mention{}).NotifyNew(mentionTargets, uid, "动态", "moments", table.Id, table.Content, "")
 	}
 
 	if status == 0 {
@@ -479,6 +488,18 @@ func (this *Moments) update(ctx *gin.Context) {
 	if cast.ToInt(payload["audit"]) == 1 {
 		payload["reason"] = ""
 	}
+
+	// @ 提及：编辑动态时同样要规范化（否则手动输入的 @昵称 永远变不成链接），
+	// 匹配范围仍是作者已关注的人
+	mentionOwnerUid := cast.ToInt(prev["uid"])
+	if mentionOwnerUid <= 0 {
+		mentionOwnerUid = this.user(ctx).Id
+	}
+	mentionTargets := []model.MentionTarget{}
+	if _, ok := payload["content"]; ok {
+		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+	}
+
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -501,6 +522,16 @@ func (this *Moments) update(ctx *gin.Context) {
 			}
 			go notifyMomentsAudit(cast.ToInt(prev["uid"]), table.Id, content, nowAudit, cast.ToString(payload["reason"]))
 		}
+	}
+
+	// @ 提及通知：只在「编辑前就已通过审核」的动态上通知新增的 @ ——
+	// 待审核 → 通过 的首次通知由审核回调补发（notifyMomentsAudit → model.NotifyMentionsOnApprove），
+	// 这里再发就会重复
+	if len(mentionTargets) > 0 && status == 1 && cast.ToInt(prev["audit"]) == AuditPassed {
+		go (&model.Mention{}).NotifyNew(
+			mentionTargets, mentionOwnerUid, "动态", "moments",
+			table.Id, cast.ToString(payload["content"]), cast.ToString(prev["content"]),
+		)
 	}
 
 	if status == 0 {
@@ -568,6 +599,8 @@ func notifyMomentsAudit(uid, bindId int, content string, audit int, reason strin
 		title := "您的动态「" + summary + "」审核已通过"
 		model.MailNotifyUser(uid, "moments.passed", title, lines...)
 		model.CreateUserNotify(uid, 0, model.NotificationTypeMoments, title, notifyContent, "moments", bindId)
+		// 审核通过 = 内容真正可展示：补发 @ 提及通知（与文章 / 页面同一口径）
+		go model.NotifyMentionsOnApprove("moments", bindId, uid)
 	case 2:
 		title := "您的动态「" + summary + "」审核未通过"
 		model.MailNotifyUser(uid, "moments.rejected", title, lines...)

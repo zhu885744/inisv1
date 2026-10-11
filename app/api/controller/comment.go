@@ -563,6 +563,16 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}
 
+	// @ 提及：只匹配作者**已关注**的人，把 @昵称 规范化成 @[昵称](/author/uid)（前端渲染成可点击的链接）。
+	// 规范化会让内容变长（@张三 → @[张三](/author/12)），所以长度要按转换后的结果再校验一次，
+	// 避免突破 Comment.Content 的 varchar 上限导致插入失败。
+	mentionTargets := []model.MentionTarget{}
+	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, user.Id)
+	if maxLength > 0 && utf8.RuneCountInString(table.Content) > maxLength {
+		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
+		return
+	}
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -764,6 +774,12 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}()
 
+	// @ 提及通知：只发给「被 @ 到的人」（内容作者那条已由上面的逻辑发出）。
+	// 评论待审核（audit=0）时不发：评论可能不被展示，通知过去也看不到内容。
+	if cast.ToInt(table.Audit) == 1 {
+		go (&model.Mention{}).NotifyNew(mentionTargets, user.Id, "评论", table.BindType, table.BindId, table.Content, "")
+	}
+
 	// 返回本次写入的审核状态：前台据此决定提示语（开启审核时提示「审核通过后显示」）
 	// 并插入一条「待审核」占位 —— 待审核的评论不在列表接口的返回里（非管理员只查 audit=1）
 	this.json(ctx, gin.H{
@@ -832,11 +848,28 @@ func (this *Comment) update(ctx *gin.Context) {
 		return
 	}
 
-	_, err = item.Scan(&table).Update(async.Result())
+	payload := async.Result()
+
+	// @ 提及：编辑评论时同样规范化（匹配范围仍是评论作者已关注的人），
+	// 否则手动输入的 @昵称 永远变不成链接
+	if _, ok := payload["content"]; ok {
+		payload["content"], _ = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), cast.ToInt(itemData["uid"]))
+	}
+
+	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
+	}
+
+	// 评论审核通过时补发 @ 提及通知：待审核阶段故意不发（评论不展示，点进去看不到），
+	// 所以「待审核 → 通过」这一刻必须补 —— 这就是后台「通过」按钮这条路径。
+	// 只在审核状态真正发生变化时补，普通编辑（audit 未进 payload）不会重复打扰。
+	if rawAudit, ok := payload["audit"]; ok {
+		if nowAudit := cast.ToInt(rawAudit); nowAudit == AuditPassed && nowAudit != cast.ToInt(itemData["audit"]) {
+			go model.NotifyMentionsOnCommentApprove(cast.ToInt(params["id"]))
+		}
 	}
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)

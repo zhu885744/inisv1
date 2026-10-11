@@ -363,6 +363,10 @@ func (this *Article) create(ctx *gin.Context) {
 		}
 	}
 
+	// @ 提及：只匹配作者**已关注**的人（未关注的人保持普通文本，不转链接也不通知）
+	mentionTargets := []model.MentionTarget{}
+	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, this.user(ctx).Id)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -398,6 +402,11 @@ func (this *Article) create(ctx *gin.Context) {
 				Type: "article-create",
 			})
 		}()
+	}
+
+	// @ 提及通知：只在文章真正可展示（已发布 + 审核通过）时发，草稿与待审核不打扰被 @ 的人
+	if status == 1 && cast.ToInt(table.Audit) == 1 {
+		go (&model.Mention{}).NotifyNew(mentionTargets, this.user(ctx).Id, "文章", "article", table.Id, table.Content, "")
 	}
 
 	if status == 0 {
@@ -486,6 +495,16 @@ func (this *Article) update(ctx *gin.Context) {
 	if cast.ToInt(payload["audit"]) == 1 {
 		payload["reason"] = ""
 	}
+	// @ 提及：只匹配文章作者已关注的人（管理员代他人编辑时也以作者为准，而不是管理员）
+	mentionOwnerUid := cast.ToInt(findResult["uid"])
+	if mentionOwnerUid <= 0 {
+		mentionOwnerUid = this.user(ctx).Id
+	}
+	mentionTargets := []model.MentionTarget{}
+	if _, ok := payload["content"]; ok {
+		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+	}
+
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -504,6 +523,22 @@ func (this *Article) update(ctx *gin.Context) {
 		Audit:     payload["audit"],
 		Reason:    cast.ToString(payload["reason"]),
 	})
+
+	// @ 提及通知：已发布文章再次编辑时，只通知「本次新增」的 @（filter 传旧正文）。
+	// 判定用 prevAudit（编辑前的审核状态）而不是 payload["audit"]：
+	// 「待审核 → 通过」这一刻的通知由审核回调补发（model.NotifyMentionsOnApprove），
+	// 这里若也用新状态判断，审核通过的同一次提交会发两条。
+	if len(mentionTargets) > 0 && status == 1 && prevAudit == AuditPassed {
+		// findResult 是更新前查出的原文（含 content），用它做「新增提及」的比对基准
+		filter := ""
+		if prevStatus == 1 {
+			filter = cast.ToString(findResult["content"])
+		}
+		go (&model.Mention{}).NotifyNew(
+			mentionTargets, mentionOwnerUid, "文章", "article",
+			cast.ToInt(params["id"]), cast.ToString(payload["content"]), filter,
+		)
+	}
 
 	if status == 0 {
 		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)

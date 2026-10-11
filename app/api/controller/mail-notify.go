@@ -94,6 +94,9 @@ func notifyAuditChange(info auditNotifyInfo) {
 		title := "您的" + label + "已通过审核"
 		model.MailNotifyUser(info.Uid, info.Kind+".passed", title, lines...)
 		model.CreateUserNotify(info.Uid, 0, notifyType, title, notifyContent, info.Kind, info.BindId)
+		// 审核通过 = 内容真正可展示：补发 @ 提及通知（待审核阶段是故意不发的，
+		// 不在这里补，开启审核的站点里 @ 通知就永久丢了）
+		go model.NotifyMentionsOnApprove(info.Kind, info.BindId, info.Uid)
 	case 2:
 		title := "您的" + label + "未通过审核"
 		model.MailNotifyUser(info.Uid, info.Kind+".rejected", title, lines...)

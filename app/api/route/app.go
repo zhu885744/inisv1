@@ -64,6 +64,7 @@ var controllers = map[string]controller.ApiInterface{
 	"decoration":    &controller.Decoration{},
 	"log":           &controller.Log{},
 	"stats":         &controller.Stats{},
+	"mention":       &controller.Mention{},
 }
 
 // registerRoutes 注册路由
