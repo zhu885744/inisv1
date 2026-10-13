@@ -677,39 +677,34 @@ func (this *UserCollects) collect(ctx *gin.Context) {
 		userInfo, _ := facade.DB.Model(&model.Users{}).Find(uid)
 		fromNickname := cast.ToString(cast.ToStringMap(userInfo)["nickname"])
 
-		var notifTitle, notifContent string
+		// 文案拆成「动作 + 目标」两段交给 CreateAggregateNotification：
+		// 同一条内容 24 小时内的未读收藏会合并成「XX 等 N 人收藏了你的动态「…」」
+		var notifTitle, action, target string
 		switch targetType {
 		case "article":
+			notifTitle, action = "文章被收藏", "收藏了你的文章"
 			if !utils.Is.Empty(title) {
-				title = truncateSafe(title, 20)
-				notifTitle = "文章被收藏"
-				notifContent = fromNickname + " 收藏了你的文章「" + title + "」"
-			} else {
-				notifTitle = "获得新收藏"
-				notifContent = fromNickname + " 收藏了你的文章"
+				target = "「" + truncateSafe(title, 20) + "」"
 			}
 		case "page":
+			notifTitle, action = "页面被收藏", "收藏了你的页面"
 			if !utils.Is.Empty(title) {
-				title = truncateSafe(title, 20)
-				notifTitle = "页面被收藏"
-				notifContent = fromNickname + " 收藏了你的页面「" + title + "」"
-			} else {
-				notifTitle = "获得新收藏"
-				notifContent = fromNickname + " 收藏了你的页面"
+				target = "「" + truncateSafe(title, 20) + "」"
 			}
 		case "moments":
+			notifTitle, action = "动态被收藏", "收藏了你的动态"
 			if !utils.Is.Empty(content) {
-				content = truncateSafe(content, 30)
-				notifTitle = "动态被收藏"
-				notifContent = fromNickname + " 收藏了你的动态「" + content + "」"
-			} else {
-				notifTitle = "获得新收藏"
-				notifContent = fromNickname + " 收藏了你的动态"
+				target = "「" + truncateSafe(content, 30) + "」"
 			}
 		}
 
-		_, _ = (&model.Notification{}).CreateNotification(
-			authorId, uid, "collect", notifTitle, notifContent, targetType, targetId,
+		// 内容摘要为空时回落通用标题，与改动前的文案一致
+		if utils.Is.Empty(target) {
+			notifTitle = "获得新收藏"
+		}
+
+		_, _ = (&model.Notification{}).CreateAggregateNotification(
+			authorId, uid, "collect", notifTitle, action, target, targetType, targetId, fromNickname,
 		)
 	}()
 

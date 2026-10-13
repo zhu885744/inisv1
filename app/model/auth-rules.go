@@ -479,6 +479,33 @@ func createAuthRules() (result []AuthRules) {
 		"mention": {
 			"GET": {"path=candidates&type=login&name=@候选用户"},
 		},
+		// 聚合流（关注 / 推荐 / 热门）：**必须登录**
+		// 它是按「我的关注关系」算出来的个性化数据，匿名开放相当于把全站关系链摊给爬虫；
+		// 未登录时前端直接引导登录（见 views/feed/Index.vue）。
+		// 频率限制沿用通用 QPS 中间件（middleware/qps.go），这里不重复登记。
+		"feed": {
+			"GET": {"path=all&type=login&name=聚合流"},
+		},
+		// 拉黑（黑名单）：拉黑 / 解除 / 状态查询都要登录；
+		// 拉黑是**双向**生效的（见 model/user-blocks.go），不需要额外的权限点
+		"user-blocks": {
+			"GET": {
+				"path=mine&type=login&name=我的拉黑列表",
+				"path=status&type=login&name=是否已拉黑",
+			},
+			"POST": {"path=block&type=login&name=拉黑用户"},
+			"PUT":  {"path=unblock&type=login&name=解除拉黑"},
+		},
+		// 举报：前台提交 / 撤回自己的举报；后台列表与处理需要权限点（控制器里用 meta.permit 判定）
+		"report": {
+			"GET": {
+				"path=mine&type=login&name=我的举报",
+				"path=all&type=login&name=举报列表",
+			},
+			"POST":   {"path=create&type=login&name=提交举报"},
+			"PUT":    {"path=handle&type=login&name=处理举报"},
+			"DELETE": {"path=cancel&type=login&name=撤回举报"},
+		},
 		"api-keys": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
 			"PUT":    {"update", "restore"},
@@ -793,6 +820,9 @@ func createAuthRules() (result []AuthRules) {
 				"path=followers&type=common&name=获取粉丝列表",
 				"path=is-following&type=login&name=检查是否已关注",
 				"path=counts&type=common&name=批量查询关注/粉丝数量",
+				"path=relation&type=login&name=查询互关状态",
+				"path=suggest&type=login&name=可能认识的人",
+				"path=stats&type=common&name=获取社交数据卡片",
 			},
 			"POST": {
 				"path=save&type=login",

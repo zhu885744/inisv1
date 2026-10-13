@@ -4,6 +4,7 @@ import (
 	"inis/app/facade"
 	"inis/app/model"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -72,6 +73,10 @@ func (this *UserFollows) IGET(ctx *gin.Context) {
 		"followers":    this.followers,
 		"is-following": this.isFollowing,
 		"counts":       this.counts,
+		// 主页社交化：互关状态 / 可能认识的人 / 社交数据卡片
+		"relation": this.relation,
+		"suggest":  this.suggest,
+		"stats":    this.stats,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -645,6 +650,9 @@ func (this *UserFollows) follow(ctx *gin.Context) {
 		)
 	}()
 
+	// 关注关系变了 → 清掉双方的社交数据卡片缓存（粉丝 / 关注数）
+	this.invalidateSocialStats(uid, followUid)
+
 	this.json(ctx, gin.H{"follow_uid": followUid}, facade.Lang(ctx, "关注成功！"), 200)
 }
 
@@ -670,6 +678,9 @@ func (this *UserFollows) unfollow(ctx *gin.Context) {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
+
+	// 关注关系变了 → 清掉双方的社交数据卡片缓存（粉丝 / 关注数）
+	this.invalidateSocialStats(uid, followUid)
 
 	this.json(ctx, gin.H{"follow_uid": followUid}, facade.Lang(ctx, "取消关注成功！"), 200)
 }
@@ -706,6 +717,8 @@ func (this *UserFollows) following(ctx *gin.Context) {
 	limit := this.meta.limit(ctx)
 
 	data, count := (&model.UserFollows{}).GetFollowing(targetUid, page, limit)
+	// 互关标识：批量补 is_following / is_follower / mutual（未登录时全部为 false）
+	data = this.attachRelation(data, currentUid, "following")
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -751,6 +764,8 @@ func (this *UserFollows) followers(ctx *gin.Context) {
 	limit := this.meta.limit(ctx)
 
 	data, count := (&model.UserFollows{}).GetFollowers(targetUid, page, limit)
+	// 互关标识：批量补 is_following / is_follower / mutual（未登录时全部为 false）
+	data = this.attachRelation(data, currentUid, "followers")
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -804,4 +819,303 @@ func (this *UserFollows) counts(ctx *gin.Context) {
 	counts := (&model.UserFollows{}).GetFollowsCounts(targetType, targetIds)
 
 	this.json(ctx, gin.H{"counts": counts}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// ============================== 主页社交化 ==============================
+
+const (
+	// socialStatsTTL - 社交数据卡片缓存秒数（获赞数要跨表统计，避免每次刷新都算一遍）
+	socialStatsTTL = int64(300)
+	// socialLikesIdLimit - 统计获赞时单类内容最多取多少条 id（防超大量内容把 IN 撑爆）
+	socialLikesIdLimit = 2000
+	// suggestLimit - 「可能认识的人」最多返回几个
+	suggestLimit = 6
+)
+
+// relation - 我与目标用户的关注关系（需登录）
+//
+// 返回 {is_following, is_follower, mutual}，主页按钮据此显示四种状态：
+//   未关注 → 关注      已关注（对方没关注我）→ 已关注
+//   对方关注我 → 回关   互相关注 → 互关
+func (this *UserFollows) relation(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	uid := this.meta.user(ctx).Id
+	if uid == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	followUid := cast.ToInt(params["follow_uid"])
+	if followUid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "follow_uid"), 400)
+		return
+	}
+
+	follows := &model.UserFollows{}
+	isFollowing := follows.IsFollowing(uid, followUid)
+	// 看自己主页时两个方向都按 false 处理，避免按钮显示成「互关」
+	isFollower := followUid != uid && follows.IsFollowing(followUid, uid)
+
+	this.json(ctx, gin.H{
+		"is_following": isFollowing,
+		"is_follower":  isFollower,
+		"mutual":       isFollowing && isFollower,
+	}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// suggest - 可能认识的人（共同关注二度推荐，需登录）
+//
+// 算法（不引入新表，全部基于现有 user_follows）：
+//   1. 取我关注的人 A
+//   2. 取 A 们关注的人 B（二度人脉）
+//   3. 排除：我自己、我已经关注的人
+//   4. 按「共同关注数」降序，最多 suggestLimit 个
+//
+// 隐私：只返回公开的作者字段（白名单 + SanitizeAuthor），不暴露任何关注关系明细，
+// 前端只展示「你们有 N 个共同关注」这一条聚合信息。
+func (this *UserFollows) suggest(ctx *gin.Context) {
+
+	uid := this.meta.user(ctx).Id
+	if uid == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	follows := &model.UserFollows{}
+
+	myFollowing := follows.FollowingUids(uid)
+	if len(myFollowing) == 0 {
+		this.json(ctx, gin.H{"list": []any{}}, facade.Lang(ctx, "关注一些人之后，这里会推荐你可能认识的人！"), 200)
+		return
+	}
+
+	mine := make(map[int]bool, len(myFollowing))
+	for _, id := range myFollowing {
+		mine[id] = true
+	}
+
+	// 二度人脉：我关注的人都在关注谁（一次 IN 查询，只取 follow_uid 列）
+	column, err := facade.DB.Model(&[]model.UserFollows{}).
+		Where("uid", "IN", userFollowsAnyIds(myFollowing)).
+		Where("status", 1).
+		Column("follow_uid")
+	if err != nil {
+		this.json(ctx, gin.H{"list": []any{}}, facade.Lang(ctx, "查询成功！"), 200)
+		return
+	}
+
+	// 统计共同关注数（自己、已关注的人直接跳过）
+	weight := make(map[int]int)
+	for _, id := range cast.ToIntSlice(column) {
+		if id <= 0 || id == uid || mine[id] {
+			continue
+		}
+		weight[id]++
+	}
+
+	if len(weight) == 0 {
+		this.json(ctx, gin.H{"list": []any{}}, facade.Lang(ctx, "暂时没有可推荐的人！"), 200)
+		return
+	}
+
+	ids := make([]int, 0, len(weight))
+	for id := range weight {
+		ids = append(ids, id)
+	}
+	// 共同关注多的优先；同分按 uid 升序，保证每次顺序稳定（推荐结果不会跳来跳去）
+	sort.Slice(ids, func(i, j int) bool {
+		if weight[ids[i]] != weight[ids[j]] {
+			return weight[ids[i]] > weight[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	if len(ids) > suggestLimit {
+		ids = ids[:suggestLimit]
+	}
+
+	list := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+
+		item, _ := facade.DB.Model(&model.Users{}).Find(id)
+		if utils.Is.Empty(item) {
+			continue
+		}
+
+		// 与 moments / 文章内嵌作者同一套白名单，剥掉权限组、封禁管理字段
+		user := utils.Map.WithField(item, []string{"id", "nickname", "avatar", "description", "json", "result", "title"})
+		model.SanitizeAuthor(user)
+
+		user["mutual_count"] = weight[id]
+		list = append(list, user)
+	}
+
+	this.json(ctx, gin.H{"list": list}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// stats - 社交数据卡片：关注 / 粉丝 / 动态 / 文章 / 获赞
+//
+// 都是主页本来就会展示的公开数字，所以 type=common（未登录也能看别人的主页）。
+// 结果缓存 5 分钟；关注 / 取关时调用 invalidateSocialStats 主动清掉双方缓存。
+func (this *UserFollows) stats(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	targetUid := cast.ToInt(params["uid"])
+	if targetUid <= 0 {
+		targetUid = this.meta.user(ctx).Id
+	}
+	if targetUid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "uid"), 400)
+		return
+	}
+
+	cacheName := socialStatsCacheName(targetUid)
+	if facade.Cache.Has(cacheName) {
+		if cached, ok := facade.Cache.Get(cacheName).(map[string]any); ok && len(cached) > 0 {
+			this.json(ctx, cached, facade.Lang(ctx, "查询成功！"), 200)
+			return
+		}
+	}
+
+	follows := &model.UserFollows{}
+
+	result := gin.H{
+		"follow":  follows.GetFollowingCount(targetUid),
+		"fans":    follows.GetFollowersCount(targetUid),
+		"moment":  socialContentCount[model.Moments](targetUid),
+		"article": socialContentCount[model.Article](targetUid),
+		"likes":   this.likesReceived(targetUid),
+	}
+
+	go facade.Cache.Set(cacheName, result, socialStatsTTL)
+
+	this.json(ctx, result, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// socialStatsCacheName - 社交数据卡片缓存名（保留 [GET] 前缀，便于通用标签清理）
+func socialStatsCacheName(uid int) string {
+	return "[GET]user-follows-stats[" + cast.ToString(uid) + "]"
+}
+
+// invalidateSocialStats - 关注关系变化后清掉相关用户的数据卡片缓存
+func (this *UserFollows) invalidateSocialStats(uids ...int) {
+	for _, uid := range uids {
+		if uid > 0 {
+			go facade.Cache.Del(socialStatsCacheName(uid))
+		}
+	}
+}
+
+// socialContentCount - 某用户**对外公开**的内容数（动态 / 文章通用：audit=1 且 status=1）
+func socialContentCount[T any](uid int) int64 {
+	count, _ := facade.DB.Model(&[]T{}).
+		Where("uid", uid).
+		Where("audit", 1).
+		Where("status", 1).
+		Count()
+	return count
+}
+
+// likesReceived - 获赞数：我发布的公开内容累计被点赞次数
+//
+// 分两步：先取公开内容的 id（动态 / 文章各自封顶 socialLikesIdLimit 条），
+// 再按 target_type + target_id IN (...) 统计 —— 不用 JOIN / 子查询，
+// 避免依赖表前缀（前缀由 config 决定，写死在 SQL 里不可靠）。
+func (this *UserFollows) likesReceived(uid int) int64 {
+
+	ids := make([]any, 0)
+	kinds := make([]any, 0)
+
+	for _, item := range []struct {
+		target any
+		kind   []any
+	}{
+		{&[]model.Moments{}, []any{"moment", "moments"}},
+		{&[]model.Article{}, []any{"article", "articles"}},
+	} {
+		column, err := facade.DB.Model(item.target).
+			Where("uid", uid).
+			Where("audit", 1).
+			Where("status", 1).
+			Order("id desc").
+			Limit(socialLikesIdLimit).
+			Column("id")
+		if err != nil {
+			continue
+		}
+
+		slice := cast.ToIntSlice(column)
+		if len(slice) == 0 {
+			continue
+		}
+
+		kinds = append(kinds, item.kind...)
+		for _, id := range slice {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		return 0
+	}
+
+	count, _ := facade.DB.Model(&[]model.UserLikes{}).
+		Where("target_type", "IN", kinds).
+		Where("target_id", "IN", ids).
+		Count()
+
+	return count
+}
+
+// attachRelation - 给关注 / 粉丝列表批量补互关标识
+//
+// kind = "following"：列表项是 TA 关注的人，对方 uid 在 follow_uid
+// kind = "followers"：列表项是 TA 的粉丝，对方 uid 在 uid
+// 未登录（myUid = 0）时不计算，字段保持 false —— 前端据此只展示列表、不展示关系状态。
+// 关键：一次 IN 查询批量算完（只处理当前这一页的 uid），不做逐条 Exist。
+func (this *UserFollows) attachRelation(data []map[string]any, myUid int, kind string) []map[string]any {
+
+	if len(data) == 0 {
+		return data
+	}
+
+	uids := make([]int, 0, len(data))
+	for _, item := range data {
+		uids = append(uids, followsListItemUid(item, kind))
+	}
+
+	follows := &model.UserFollows{}
+	iFollow := follows.FilterFollowingUids(myUid, uids)  // 我关注了谁
+	followMe := follows.FilterFollowerUids(myUid, uids) // 谁关注了我
+
+	for _, item := range data {
+		uid := followsListItemUid(item, kind)
+		if uid <= 0 {
+			continue
+		}
+		item["is_following"] = iFollow[uid]
+		item["is_follower"] = followMe[uid]
+		item["mutual"] = iFollow[uid] && followMe[uid]
+	}
+
+	return data
+}
+
+// followsListItemUid - 取关注 / 粉丝列表项里「对方」的 uid
+func followsListItemUid(item map[string]any, kind string) int {
+	if kind == "followers" {
+		return cast.ToInt(item["uid"])
+	}
+	return cast.ToInt(item["follow_uid"])
+}
+
+// userFollowsAnyIds - []int → []any（facade 的 IN 条件需要 any 切片）
+func userFollowsAnyIds(ids []int) []any {
+	result := make([]any, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, id)
+	}
+	return result
 }

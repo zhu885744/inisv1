@@ -77,6 +77,7 @@ func InitAuthPages() {
 		{Name: "装扮管理", Icon: "bi bi-palette", Path: "/admin/decoration", Size: "14px"},
 		{Name: "签到管理", Icon: "bi bi-calendar-check", Path: "/admin/checkin", Size: "14px"},
 		{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
+		{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
 		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
 		{Name: "查看日志", Icon: "bi bi-journal-text", Path: "/admin/logs", Size: "14px"},

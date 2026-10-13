@@ -81,6 +81,8 @@ func InitTable() {
 		{"UserLikes", InitUserLikes},
 		{"UserCollects", InitUserCollects},
 		{"UserFollows", InitUserFollows},
+		{"UserBlocks", InitUserBlocks},
+		{"Report", InitReport},
 		{"UserBanRecords", InitUserBanRecords},
 		{"Notification", InitNotification},
 		{"NotificationRead", InitNotificationRead},

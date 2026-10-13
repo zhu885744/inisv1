@@ -188,3 +188,78 @@ func (this *UserFollows) GetFollowsCounts(targetType string, targetIds []int) ma
 
 	return result
 }
+
+// FollowingUids - 我关注的人的 uid 列表（status = 1）
+//
+// 只取 uid 列，用于「可能认识的人」一类需要遍历关注列表的场景，
+// 数据量与关注数同阶（不会像 Select() 那样把 result 里的用户信息也查出来）。
+func (this *UserFollows) FollowingUids(uid int) []int {
+	if uid <= 0 {
+		return []int{}
+	}
+	column, err := facade.DB.Model(&[]UserFollows{}).Where([]any{
+		[]any{"uid", "=", uid},
+		[]any{"status", "=", 1},
+	}).Column("follow_uid")
+	if err != nil {
+		return []int{}
+	}
+	return cast.ToIntSlice(column)
+}
+
+// FollowerUids - 关注我的人的 uid 列表（status = 1）
+func (this *UserFollows) FollowerUids(uid int) []int {
+	if uid <= 0 {
+		return []int{}
+	}
+	column, err := facade.DB.Model(&[]UserFollows{}).Where([]any{
+		[]any{"follow_uid", "=", uid},
+		[]any{"status", "=", 1},
+	}).Column("uid")
+	if err != nil {
+		return []int{}
+	}
+	return cast.ToIntSlice(column)
+}
+
+// FilterFollowingUids - 从 uids 里筛出「我关注的人」（批量，用于列表的互关标识）
+//
+// 一次 IN 查询算完，不做逐条 Exist。传入的 uids 应为「某一页」的用户，天然有上限。
+func (this *UserFollows) FilterFollowingUids(uid int, uids []int) map[int]bool {
+	return this.filterUidSet("follow_uid", uid, uids, true)
+}
+
+// FilterFollowerUids - 从 uids 里筛出「关注了我的人」（批量，用于列表的互关标识）
+func (this *UserFollows) FilterFollowerUids(uid int, uids []int) map[int]bool {
+	return this.filterUidSet("uid", uid, uids, false)
+}
+
+// filterUidSet - 批量筛出「uid 关注了 uids 里的哪些人」/「uids 里的哪些人关注了 uid」
+//
+// field 为被统计的一方：
+//   scopeFollowUid=true  → 查 uid 关注的 follow_uid 落在 uids 里的记录（返回 follow_uid）
+//   scopeFollowUid=false → 查 uid 的粉丝 uid 落在 uids 里的记录（返回 uid）
+func (this *UserFollows) filterUidSet(field string, uid int, uids []int, scopeFollowUid bool) map[int]bool {
+	result := make(map[int]bool)
+	if uid <= 0 || len(uids) == 0 {
+		return result
+	}
+
+	where := []any{[]any{"status", "=", 1}}
+	if scopeFollowUid {
+		where = append(where, []any{"uid", "=", uid}, []any{"follow_uid", "IN", uids})
+	} else {
+		where = append(where, []any{"follow_uid", "=", uid}, []any{"uid", "IN", uids})
+	}
+
+	column, err := facade.DB.Model(&[]UserFollows{}).Where(where).Column(field)
+	if err != nil {
+		return result
+	}
+
+	for _, id := range cast.ToIntSlice(column) {
+		result[id] = true
+	}
+
+	return result
+}

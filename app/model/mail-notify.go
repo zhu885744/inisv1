@@ -77,6 +77,11 @@ func MailNotifyScenes() []MailNotifyScene {
 		{Key: "comment.notify", Label: "评论通知（内容作者）", Group: "评论互动", Target: MailTargetUser, Default: 1, Desc: "有人评论文章 / 页面 / 动态时通知内容作者"},
 		{Key: "comment.reply", Label: "回复通知（被回复人）", Group: "评论互动", Target: MailTargetUser, Default: 1, Desc: "有人回复评论时通知被回复的用户"},
 
+		// ---------- 举报治理 ----------
+		// 站内信始终发（见 model.NotifyAdmins），这里控制的是**邮件**通道：
+		// 关闭后举报仍会进后台「举报管理」，只是不再给管理员发邮件。
+		{Key: "report.new", Label: "收到新举报", Group: "举报治理", Target: MailTargetAdmin, Default: 1, Desc: "用户提交举报时通知管理员去处理（站内信不受此开关影响）"},
+
 		// ---------- 用户管理 ----------
 		{Key: "user.pending", Label: "新用户待审核", Group: "用户管理", Target: MailTargetAdmin, Default: 1, Desc: "注册需人工审核时，通知管理员审核"},
 		{Key: "user.passed", Label: "用户审核通过", Group: "用户管理", Target: MailTargetUser, Default: 1, Desc: "账号通过人工审核时通知用户"},

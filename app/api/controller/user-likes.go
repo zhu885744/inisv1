@@ -692,48 +692,40 @@ func (this *UserLikes) like(ctx *gin.Context) {
 		userInfo, _ := facade.DB.Model(&model.Users{}).Find(uid)
 		fromNickname := cast.ToString(cast.ToStringMap(userInfo)["nickname"])
 
-		var notifTitle, notifContent string
+		// 文案拆成「动作 + 目标」两段交给 CreateAggregateNotification：
+		// 同一条内容 24 小时内的未读点赞会合并成「XX 等 N 人赞了你的动态「…」」，
+		// 不再堆成 N 条（收藏同理，见 user-collects.go）
+		var notifTitle, action, target string
 		switch targetType {
 		case "article":
+			notifTitle, action = "文章被点赞", "赞了你的文章"
 			if !utils.Is.Empty(title) {
-				title = truncateSafe(title, 20)
-				notifTitle = "文章被点赞"
-				notifContent = fromNickname + " 赞了你的文章「" + title + "」"
-			} else {
-				notifTitle = "获得新点赞"
-				notifContent = fromNickname + " 赞了你的文章"
+				target = "「" + truncateSafe(title, 20) + "」"
 			}
 		case "page":
+			notifTitle, action = "页面被点赞", "赞了你的页面"
 			if !utils.Is.Empty(title) {
-				title = truncateSafe(title, 20)
-				notifTitle = "页面被点赞"
-				notifContent = fromNickname + " 赞了你的页面「" + title + "」"
-			} else {
-				notifTitle = "获得新点赞"
-				notifContent = fromNickname + " 赞了你的页面"
+				target = "「" + truncateSafe(title, 20) + "」"
 			}
 		case "moments":
+			notifTitle, action = "动态被点赞", "赞了你的动态"
 			if !utils.Is.Empty(content) {
-				content = truncateSafe(content, 30)
-				notifTitle = "动态被点赞"
-				notifContent = fromNickname + " 赞了你的动态「" + content + "」"
-			} else {
-				notifTitle = "获得新点赞"
-				notifContent = fromNickname + " 赞了你的动态"
+				target = "「" + truncateSafe(content, 30) + "」"
 			}
 		case "comment":
+			notifTitle, action = "评论被点赞", "赞了你的评论"
 			if !utils.Is.Empty(content) {
-				content = truncateSafe(content, 30)
-				notifTitle = "评论被点赞"
-				notifContent = fromNickname + " 赞了你的评论「" + content + "」"
-			} else {
-				notifTitle = "获得新点赞"
-				notifContent = fromNickname + " 赞了你的评论"
+				target = "「" + truncateSafe(content, 30) + "」"
 			}
 		}
 
-		_, _ = (&model.Notification{}).CreateNotification(
-			authorId, uid, "like", notifTitle, notifContent, bindType, bindId,
+		// 内容摘要为空（例如动态只有图片）时回落通用标题，与改动前的文案一致
+		if utils.Is.Empty(target) {
+			notifTitle = "获得新点赞"
+		}
+
+		_, _ = (&model.Notification{}).CreateAggregateNotification(
+			authorId, uid, "like", notifTitle, action, target, bindType, bindId, fromNickname,
 		)
 	}()
 

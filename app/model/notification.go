@@ -43,6 +43,11 @@ type Notification struct {
 	BindId   int    `gorm:"type:int(32); comment:关联实体ID; default:0;" json:"bind_id"`
 	BindType string `gorm:"type:varchar(32); comment:关联实体类型;" json:"bind_type"`
 	IsRead   int    `gorm:"type:int(2); default:0; comment:是否已读 0未读 1已读;" json:"is_read"`
+	// 聚合标识：type + bind_type + bind_id。同 key 的**未读**通知会被合并成一条，
+	// 由 CreateAggregateNotification 维护（点赞 / 收藏这类高频同质通知用，见该方法注释）
+	AggregateKey string `gorm:"type:varchar(160); index:idx_notifications_aggregate; comment:聚合标识;" json:"aggregate_key"`
+	// 聚合数量：1 表示单独一条，>1 表示「XX 等 N 人…」
+	AggregateCount int `gorm:"type:int(12); default:1; comment:聚合数量;" json:"aggregate_count"`
 	// 公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -63,6 +68,8 @@ func InitNotification() {
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_type ON inis_notification(type)")
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON inis_notification(is_read)")
 	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_create_time ON inis_notification(create_time)")
+	// 聚合查询用：按 aggregate_key + is_read 找同源的未读通知（见 CreateAggregateNotification）
+	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_aggregate ON inis_notification(aggregate_key)")
 }
 
 // NotificationRead 广播通知的用户状态表
@@ -142,6 +149,114 @@ func (this *Notification) CreateNotification(uid, fromUid int, typ, title, conte
 	}
 
 	return notif, nil
+}
+
+// aggregateWindow - 聚合通知的有效期：超过这个时间的未读通知不再合并（避免一条通知无限累加）
+const aggregateWindow = 24 * time.Hour
+
+// CreateAggregateNotification 创建「可聚合」的通知（点赞 / 收藏这类高频同质通知）
+//
+// 与 CreateNotification 的区别：同一个 (uid, type, bind_type, bind_id) 的**未读**通知，
+// 在 aggregateWindow 内会被合并成一条，而不是堆成 N 条：
+//
+//	第 1 次： 小朱 赞了你的动态「今天的风景」
+//	第 5 次： 小朱 等 5 人赞了你的动态「今天的风景」   ← 只更新这一条，不新增
+//
+// 为什么只聚合点赞 / 收藏：评论、回复、关注每条都有独立信息量（谁说了什么），
+// 合并会丢信息；点赞 / 收藏是「同一内容上的同类动作」，合并后反而更清楚。
+//
+// action - 动作短语（拼在昵称之后），如「赞了你的动态」
+// target - 目标描述，如「「今天的风景」」，可为空（空则不显示书名号部分）
+func (this *Notification) CreateAggregateNotification(uid, fromUid int, typ, title, action, target, bindType string, bindId int, fromNickname string) (*Notification, error) {
+
+	// 自己触发的动作不通知自己（与调用方的 authorId == uid 判断双重保险）
+	if uid <= 0 || uid == fromUid {
+		return nil, nil
+	}
+
+	aggregateKey := typ + ":" + bindType + ":" + cast.ToString(bindId)
+
+	exist, _ := facade.DB.Model(&Notification{}).Where([]any{
+		[]any{"uid", "=", uid},
+		[]any{"type", "=", typ},
+		[]any{"aggregate_key", "=", aggregateKey},
+		[]any{"is_read", "=", 0},
+		[]any{"create_time", ">=", time.Now().Add(-aggregateWindow).Unix()},
+	}).Find()
+
+	// 命中未读的同源通知 → 合并：数量 +1、正文改写成「XX 等 N 人…」、from_uid 记为最近一个触发者
+	if !utils.Is.Empty(exist) {
+
+		count := cast.ToInt(exist["aggregate_count"]) + 1
+		if count < 2 {
+			count = 2
+		}
+
+		content := aggregateContent(fromNickname, count, action, target)
+
+		_, err := facade.DB.Model(&Notification{}).
+			Where("id", cast.ToInt(exist["id"])).
+			Update(map[string]any{
+				"from_uid":        fromUid,
+				"content":         content,
+				"aggregate_count": count,
+			})
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "合并聚合通知失败")
+		}
+
+		return &Notification{
+			Id:             cast.ToInt(exist["id"]),
+			Uid:            uid,
+			FromUid:        fromUid,
+			Type:           typ,
+			Title:          cast.ToString(exist["title"]),
+			Content:        content,
+			BindId:         bindId,
+			BindType:       bindType,
+			AggregateKey:   aggregateKey,
+			AggregateCount: count,
+		}, err
+	}
+
+	notif := &Notification{
+		Uid:            uid,
+		FromUid:        fromUid,
+		Type:           typ,
+		Title:          title,
+		Content:        aggregateContent(fromNickname, 1, action, target),
+		BindId:         bindId,
+		BindType:       bindType,
+		IsRead:         0,
+		AggregateKey:   aggregateKey,
+		AggregateCount: 1,
+	}
+
+	_, err := facade.DB.Model(&Notification{}).Create(notif)
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "创建聚合通知失败")
+		return nil, err
+	}
+
+	return notif, nil
+}
+
+// aggregateContent - 聚合通知的正文
+//
+//	count = 1 → 「小朱 赞了你的动态「今天的风景」」
+//	count > 1 → 「小朱 等 5 人赞了你的动态「今天的风景」」
+func aggregateContent(nickname string, count int, action, target string) string {
+
+	nickname = strings.TrimSpace(nickname)
+	if utils.Is.Empty(nickname) {
+		nickname = "有人"
+	}
+
+	if count > 1 {
+		return fmt.Sprintf("%s 等 %d 人%s%s", nickname, count, action, target)
+	}
+
+	return nickname + " " + action + target
 }
 
 // CreateBroadcastNotification 创建广播通知（uid=0 表示推送给全体用户，仅创建一条记录）
