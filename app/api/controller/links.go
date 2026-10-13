@@ -644,7 +644,8 @@ func (this *Links) create(ctx *gin.Context) {
 
 	// 审核：关闭审核 → 直接「通过」；开启审核 → 「待审核」（开关 LINKS.audit，口径见 audit.go）。
 	// 管理员不受开关影响；管理员在 payload 里显式指定 audit 时，下面的参数遍历会覆盖这里的判定
-	utils.Struct.Set(&table, "Audit", auditForCreate(contentAuditSwitch("LINKS") && !this.meta.root(ctx), false))
+	// ⚠ 必须直接赋值：Struct.Set 按小写 tag（json:"audit"）匹配，传 "Audit" 会静默失效
+	table.Audit = auditForCreate(contentAuditSwitch("LINKS") && !this.meta.root(ctx), false)
 
 	for key, val := range params {
 		if utils.Get.Type(val) == "string" {

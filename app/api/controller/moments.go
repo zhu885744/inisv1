@@ -351,23 +351,31 @@ func (this *Moments) create(ctx *gin.Context) {
 
 	status := cast.ToInt(params["status"])
 
-	// 是否开启审核：配置存放在 config.json.audit（与文章 / 页面口径一致，判定见 audit.go）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 是否开启审核：**直接读库**（config.json.audit，判定口径见 audit.go）。
+	// 这里不能用 this.config(ctx)：那份配置带进程级缓存（[GET]config[MOMENTS]，无过期时间），
+	// 后台关掉审核后必须等缓存被清 / 进程重启才生效，表现就是
+	// 「系统设置里已经把内容审核关了，前台发动态仍然进待审核」。
+	// 评论 / 友链一直是直读（contentAuditSwitch），所以只有这三个内容模块有这个毛病。
+	auditSwitch := contentAuditSwitch("MOMENTS")
 
+	// ⚠ 必须**直接给字段赋值**，不能用 utils.Struct.Set(&table, "Audit", ...)：
+	// Struct.Set 只按 struct tag 精确匹配（go-utils/utils/struct.go 里是 tag == key），
+	// 而字段 tag 是小写的 json:"audit" / "status" / "publish_time"，
+	// 传大写字段名匹配不到 → 静默什么也不做 → Audit 恒为 0（永远待审核）、PublishTime 恒为 0。
 	if status == 0 {
-		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, true))
-		utils.Struct.Set(&table, "Status", 0)
-		utils.Struct.Set(&table, "PublishTime", 0)
+		table.Audit = auditForCreate(auditSwitch, true)
+		table.Status = 0
+		table.PublishTime = 0
 	} else {
 		// 关闭审核 → 发布即通过；开启审核 → 待审核
-		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
+		table.Audit = auditForCreate(auditSwitch, false)
 		// 状态固定为「已发布」：待审核 ≠ 草稿（原来复用 !audit，会把待审核动态写成草稿，混进草稿筛选）
-		utils.Struct.Set(&table, "Status", 1)
+		table.Status = 1
 
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-			utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
+			table.PublishTime = cast.ToInt64(publishTime)
 		} else {
-			utils.Struct.Set(&table, "PublishTime", time.Now().Unix())
+			table.PublishTime = time.Now().Unix()
 		}
 	}
 
@@ -399,10 +407,13 @@ func (this *Moments) create(ctx *gin.Context) {
 		go (&model.Mention{}).NotifyNew(mentionTargets, uid, "动态", "moments", table.Id, table.Content, "")
 	}
 
+	// 回传 audit / status：审核开关关闭时 audit=1（已通过），
+	// 前端据此决定提示「发布成功」还是「发布成功，等待审核」——
+	// 否则关掉审核也照样弹「请耐心等待审核」，用户会以为仍然进了待审核
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
+		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "草稿保存成功！"), 200)
 	} else {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "创建成功！"), 200)
 		go (&model.EXP{}).Add(model.EXP{
 			Type:        "moments",
 			Uid:         uid,
@@ -446,8 +457,8 @@ func (this *Moments) update(ctx *gin.Context) {
 		status = prevStatus
 	}
 
-	// 是否开启审核：读取 config.json.audit（与文章 / 页面口径一致，判定见 audit.go）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 是否开启审核：同样直接读库（理由见 create）
+	auditSwitch := contentAuditSwitch("MOMENTS")
 	// 关闭审核 → 通过；开启审核 → 仅「首次发布」进入待审核，已审核过的编辑不再打回
 	audit, auditSet := auditForUpdate(auditSwitch, status == 0, prevStatus == 0, prevAudit)
 
@@ -996,6 +1007,11 @@ func (this *Moments) updateViews(ctx *gin.Context, data map[string]any) {
 	facade.Cache.Set(cacheKey, true, 86400)
 }
 
+// config - 动态模块配置（editor / audit / comment）
+//
+// 注意：**审核开关不再从这里读**（create / update 用的是 contentAuditSwitch，直读数据库）——
+// 本方法的结果带进程级缓存（[GET]config[MOMENTS]，无过期时间），改完配置要等缓存被清或重启才生效，
+// 曾经表现就是「后台关掉内容审核，前台发动态仍然进待审核」。
 func (this *Moments) config(ctx *gin.Context) (result map[string]any) {
 	cacheName := "[GET]config[MOMENTS]"
 

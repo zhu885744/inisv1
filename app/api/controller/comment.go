@@ -545,7 +545,8 @@ func (this *Comment) create(ctx *gin.Context) {
 	// 审核：关闭审核 → 直接「通过」；开启审核 → 「待审核」（口径见 audit.go，开关在「系统设置 → 评论配置」）。
 	// 管理员自己发的评论直接通过（不必审核自己）；管理员在 payload 里显式指定 audit 时，
 	// 下面遍历参数时会覆盖这里的判定（allow 里 audit 只对 root 开放）。
-	utils.Struct.Set(&table, "Audit", auditForCreate(contentAuditSwitch("COMMENT") && !this.meta.root(ctx), false))
+	// ⚠ 必须直接赋值：Struct.Set 按小写 tag（json:"audit"）匹配，传 "Audit" 会静默失效
+	table.Audit = auditForCreate(contentAuditSwitch("COMMENT") && !this.meta.root(ctx), false)
 
 	for key, val := range params {
 		if utils.In.Array(key, commentAllowFieldsSlice) {

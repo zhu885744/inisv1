@@ -25,9 +25,11 @@ type Comment struct {
 	//
 	// 是否开启审核由 COMMENT 配置的 json.audit 决定（后台「系统设置 → 评论配置 → 内容审核」）：
 	// 关闭时前台提交直接记为「已通过」，开启时记为「待审核」，非管理员在接口层看不到未通过的评论。
-	// 默认值给 1（已通过）：AutoMigrate 给历史评论补这一列时按「已通过」填充，
-	// 否则开启审核后老评论会全部从列表里消失。
-	Audit  int    `gorm:"type:int(12); index; comment:审核; default:1;" json:"audit"`
+	//
+	// ⚠ 这里**不能**写 default:1 —— GORM 在 Create 时会把「零值字段」替换成 default 值，
+	// 于是「开启审核时写入 audit=0（待审核）」会被替换成 1（已通过），评论审核开关直接失效。
+	// 历史评论（AutoMigrate 补列那批）早已按「已通过」落库，不需要再靠 tag 的默认值兜底。
+	Audit  int    `gorm:"type:int(12); index; comment:审核;" json:"audit"`
 	Reason string `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`

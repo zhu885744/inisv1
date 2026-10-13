@@ -336,24 +336,27 @@ func (this *Article) create(ctx *gin.Context) {
 	// 获取状态：0-草稿，1-发布
 	status := cast.ToInt(params["status"])
 
-	// 是否开启了审核（判定口径见 audit.go）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 是否开启了审核：**直接读库**（判定口径见 audit.go）。
+	// 不能用 this.config(ctx)（带进程缓存的配置），否则后台改了开关要等缓存过期 / 重启才生效
+	auditSwitch := contentAuditSwitch("ARTICLE")
 
 	// 如果是草稿，跳过审核检查，不设置发布时间
+	// ⚠ 必须**直接给字段赋值**：utils.Struct.Set 只按 struct tag（小写 json:"audit"）精确匹配，
+	// 传大写字段名会静默失效 → Audit 恒为 0（永远待审核）、PublishTime 恒为 0
 	if status == 0 {
-		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, true))
-		utils.Struct.Set(&table, "Status", 0)
-		utils.Struct.Set(&table, "PublishTime", 0)
+		table.Audit = auditForCreate(auditSwitch, true)
+		table.Status = 0
+		table.PublishTime = 0
 	} else {
 		// 关闭审核 → 直接通过；开启审核 → 待审核
-		utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
-		utils.Struct.Set(&table, "Status", 1)
+		table.Audit = auditForCreate(auditSwitch, false)
+		table.Status = 1
 
 		// 处理 publish_time，若未传则默认使用当前时间
 		if publishTime, ok := params["publish_time"]; ok && cast.ToInt64(publishTime) > 0 {
-			utils.Struct.Set(&table, "PublishTime", cast.ToInt64(publishTime))
+			table.PublishTime = cast.ToInt64(publishTime)
 		} else {
-			utils.Struct.Set(&table, "PublishTime", time.Now().Unix())
+			table.PublishTime = time.Now().Unix()
 		}
 	}
 
@@ -409,10 +412,11 @@ func (this *Article) create(ctx *gin.Context) {
 		go (&model.Mention{}).NotifyNew(mentionTargets, this.user(ctx).Id, "文章", "article", table.Id, table.Content, "")
 	}
 
+	// 回传 audit / status：审核开关关闭时 audit=1（已通过），前端据此给正确提示
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
+		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "草稿保存成功！"), 200)
 	} else {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "创建成功！"), 200)
 	}
 }
 
@@ -459,8 +463,8 @@ func (this *Article) update(ctx *gin.Context) {
 		status = prevStatus
 	}
 
-	// 是否开启了审核（判定口径见 audit.go）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	// 是否开启了审核：同样直接读库（理由见 create）
+	auditSwitch := contentAuditSwitch("ARTICLE")
 	// 审核状态：关闭审核 → 通过；开启审核 → 只有「首次发布」进入待审核，
 	// 已审核过的文章再次编辑保存不会重置审核状态（管理员可在编辑页显式指定）
 	audit, auditSet := auditForUpdate(auditSwitch, status == 0, prevStatus == 0, prevAudit)
@@ -855,6 +859,10 @@ func (this *Article) updateViews(ctx *gin.Context, data map[string]any) {
 	facade.Cache.Set(cacheKey, true, 86400)
 }
 
+// config - 文章模块配置（editor / audit / comment）
+//
+// 注意：**审核开关不再从这里读**（create / update 用的是 contentAuditSwitch，直读数据库）——
+// 本方法的结果带进程级缓存，改完配置要等缓存被清或重启才生效。
 func (this *Article) config(ctx *gin.Context) (result map[string]any) {
 	cacheName := "[GET]config[ARTICLE]"
 

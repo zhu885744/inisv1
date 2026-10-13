@@ -397,9 +397,11 @@ func (this *Pages) create(ctx *gin.Context) {
 		allow = append(allow, "audit", "reason")
 	}
 
-	// 独立页面没有草稿概念，直接按审核开关判定（口径见 audit.go）
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
-	utils.Struct.Set(&table, "Audit", auditForCreate(auditSwitch, false))
+	// 独立页面没有草稿概念，直接按审核开关判定（口径见 audit.go）。
+	// **直接读库**：this.config(ctx) 带进程缓存，会让开关改了不即时生效
+	auditSwitch := contentAuditSwitch("PAGE")
+	// ⚠ 必须直接赋值：Struct.Set 按小写 tag（json:"audit"）匹配，传 "Audit" 会静默失效
+	table.Audit = auditForCreate(auditSwitch, false)
 
 	for key, val := range params {
 		if utils.In.Array(key, allow) {
@@ -436,7 +438,8 @@ func (this *Pages) create(ctx *gin.Context) {
 		go (&model.Mention{}).NotifyNew(mentionTargets, uid, "页面", "page", table.Id, table.Content, "")
 	}
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+	// 回传 audit：审核开关关闭时 audit=1（已通过）
+	this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 // update 更新数据
@@ -476,7 +479,7 @@ func (this *Pages) update(ctx *gin.Context) {
 	// 审核判定与文章 / 动态对齐（口径见 audit.go）：未开启审核 → 直接通过；
 	// 开启审核时只有「首次发布」（尚未审核过）进入待审核，
 	// 已审核过的页面再次编辑保存不会重置审核状态
-	auditSwitch := cast.ToBool(cast.ToStringMap(this.config(ctx)["json"])["audit"])
+	auditSwitch := contentAuditSwitch("PAGE")
 	if audit, auditSet := auditForUpdate(auditSwitch, false, false, prevAudit); auditSet {
 		async.Set("audit", audit)
 	}
@@ -732,6 +735,10 @@ func (this *Pages) restore(ctx *gin.Context) {
 }
 
 // 获取配置
+// config - 独立页面模块配置（editor / audit / comment）
+//
+// 注意：**审核开关不再从这里读**（create / update 用的是 contentAuditSwitch，直读数据库）——
+// 本方法的结果带进程级缓存，改完配置要等缓存被清或重启才生效。
 func (this *Pages) config(ctx *gin.Context) (result map[string]any) {
 	cacheName := "[GET]config[PAGE]"
 	if this.cache.enable(ctx) && facade.Cache.Has(cacheName) {

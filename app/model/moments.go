@@ -19,7 +19,9 @@ type Moments struct {
 	Views       int                   `gorm:"type:int(32); comment:浏览量; default:0;" json:"views"`
 	Audit       int                   `gorm:"type:int(12); comment:审核; default:0;" json:"audit"`
 	Reason      string                `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
-	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布; default:1;" json:"status"`
+	// ⚠ 不要 default:1 —— GORM 在 Create 时会把零值字段替换成 default 值，
+	// 草稿（status=0）会被写成 1（已发布），前台「我的动态」里草稿直接对外可见
+	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布;" json:"status"`
 	LastUpdate  int64                 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text        any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
