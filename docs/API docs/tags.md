@@ -4,6 +4,14 @@
 
 `tags` 控制器用于管理系统标签数据，支持标签的 CRUD 操作及数据统计功能。所有接口均支持缓存优化。
 
+### 与话题（Hashtag）的关系
+
+> **标签即话题**：`tags` 表同时承载「话题」——前台话题聚合页 / 话题榜 / 关注 / 内置顶都用它，
+> 只是走独立的 `topics` 控制器（见 `docs/API docs/topics.md` 与 `docs/topics.md`）。
+> 因此本控制器额外开放了两个话题扩展字段：`moderator_uid`（话题主持人）、`recommend`（精选）。
+> 动态 / 文章正文里写 `#话题#` 会自动创建并关联话题，`moments.tags` / `article.tags`
+> 存的就是本表的 id（格式 `|1|2|3|`）。
+
 ### 接口类型说明
 
 | 接口类型 | 说明 |
@@ -256,9 +264,11 @@
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `id` | int | 否 | 标签ID，为空时新增 |
-| `name` | string | 否 | 标签名称 |
-| `description` | string | 否 | 标签描述 |
-| `avatar` | string | 否 | 标签头像 |
+| `name` | string | 否 | 标签/话题名称（最长 32 字） |
+| `description` | string | 否 | 标签/话题描述 |
+| `avatar` | string | 否 | 标签图 / 话题封面 |
+| `moderator_uid` | int | 否 | 话题主持人用户ID（0 = 未设置，只有话题场景使用） |
+| `recommend` | int | 否 | 精选话题：1 = 是，0 = 否 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
 
@@ -283,9 +293,11 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `name` | string | 否 | 标签名称 |
-| `description` | string | 否 | 标签描述 |
-| `avatar` | string | 否 | 标签头像 |
+| `name` | string | 否 | 标签/话题名称（最长 32 字） |
+| `description` | string | 否 | 标签/话题描述 |
+| `avatar` | string | 否 | 标签图 / 话题封面 |
+| `moderator_uid` | int | 否 | 话题主持人用户ID（0 = 未设置） |
+| `recommend` | int | 否 | 精选话题：1 = 是，0 = 否 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
 
@@ -308,16 +320,18 @@
 
 - **路径**: `/api/tags/update`
 - **方法**: `PUT`
-- **描述**: 更新标签信息
+- **描述**: 更新标签信息（含话题主持人、精选话题）
 
 **请求参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `id` | int | **是** | 标签ID |
-| `name` | string | 否 | 标签名称 |
-| `description` | string | 否 | 标签描述 |
-| `avatar` | string | 否 | 标签头像 |
+| `name` | string | 否 | 标签/话题名称（最长 32 字；改名不会改动正文里已写入的话题链接显示名） |
+| `description` | string | 否 | 标签/话题描述 |
+| `avatar` | string | 否 | 标签图 / 话题封面 |
+| `moderator_uid` | int | 否 | 话题主持人用户ID（0 = 未设置） |
+| `recommend` | int | 否 | 精选话题：1 = 是，0 = 否 |
 | `json` | json | 否 | JSON数据 |
 | `text` | string | 否 | 文本内容 |
 

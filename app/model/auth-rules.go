@@ -321,6 +321,30 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
+		// 话题（Hashtag）：与 tags 同表，面向用户的读接口公开、写接口需登录
+		// （管理侧的增删改仍在 tags 下，需要后台页面权限）
+		"topics": {
+			"GET": {
+				"path=board&type=common&name=话题榜",
+				"path=detail&type=common&name=话题详情",
+				"path=content&type=common&name=话题内容聚合",
+				"path=candidates&type=login&name=话题联想候选",
+				"path=mine&type=login&name=我关注的话题",
+			},
+			"POST": {
+				"path=follow&type=login&name=关注话题",
+				"path=unfollow&type=login&name=取消关注话题",
+				"path=moderator-update&type=login&name=主持人编辑话题",
+				"path=pin&type=login&name=话题内置顶内容",
+				"path=unpin&type=login&name=取消话题内置顶",
+				"path=remove-content&type=login&name=移出话题",
+				"path=delete-content&type=login&name=删除话题内内容",
+			},
+			"PUT": {
+				"path=unfollow&type=login&name=取消关注话题",
+				"path=unpin&type=login&name=取消话题内置顶",
+			},
+		},
 		"users": {
 			"GET": {
 				"path=one&type=common",

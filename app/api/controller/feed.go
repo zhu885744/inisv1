@@ -2,8 +2,10 @@ package controller
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,11 +130,16 @@ func (this *Feed) all(ctx *gin.Context) {
 		limit = feedMaxLimit
 	}
 
-	// hot 的结果与「我是谁」无关 → 全站共享缓存，命中率高；
 	// follow / recommend 与「我关注了谁」有关 → key 必须带 uid，否则会串流
-	cacheName := fmt.Sprintf("feed:hot:%d:%d", page, limit)
-	if feedType != "hot" {
-		cacheName = fmt.Sprintf("feed:%d:%s:%d:%d", uid, feedType, page, limit)
+	cacheName := fmt.Sprintf("feed:%d:%s:%d:%d", uid, feedType, page, limit)
+	if feedType == "hot" {
+		// hot 的结果与「我关注了谁」无关，但**与「我拉黑了谁」有关**
+		// （hotFeed 里会双向过滤拉黑对象）。所以不能直接用全站共享 key：
+		// A 拉黑 B 之后，过滤过的结果会被缓存给所有人 —— 要么大家都看不到 B，
+		// 要么反过来 A 仍能看到 B（取决于谁的请求先填充缓存）。
+		// 这里把「拉黑集合」做成指纹拼进 key：没拉黑过人（绝大多数）的用户仍共享同一份缓存，
+		// 有拉黑的按集合区分，正确性与命中率兼顾。
+		cacheName = fmt.Sprintf("feed:hot:%d:%d:%s", page, limit, this.blockedFingerprint(uid))
 	}
 
 	if facade.Cache.Has(cacheName) {
@@ -323,6 +330,32 @@ func (this *Feed) followingUids(uid int) []any {
 	}
 
 	return result
+}
+
+// blockedFingerprint - 拉黑集合的缓存指纹（进热门流缓存 key，见 all() 里的说明）
+//
+// 没有拉黑任何人时返回 "0"，所有普通用户共享同一份热门缓存；
+// 有拉黑时按集合内容取模哈希（同集合的人仍能共享），集合变化会自然换 key，
+// 旧缓存 60 秒后自动过期，不需要额外清理。
+func (this *Feed) blockedFingerprint(uid int) string {
+
+	blocked := this.blockedUids(uid)
+	if len(blocked) == 0 {
+		return "0"
+	}
+
+	ids := make([]int, 0, len(blocked))
+	for _, id := range blocked {
+		ids = append(ids, cast.ToInt(id))
+	}
+	sort.Ints(ids)
+
+	sum := fnv.New32a()
+	for _, id := range ids {
+		_, _ = sum.Write([]byte(strconv.Itoa(id) + ","))
+	}
+
+	return strconv.FormatUint(uint64(sum.Sum32()), 36)
 }
 
 // blockedUids - 我拉黑的人 + 拉黑我的人（双向过滤）

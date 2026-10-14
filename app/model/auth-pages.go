@@ -69,7 +69,7 @@ func InitAuthPages() {
 		{Name: "评论管理", Icon: "bi bi-chat-square-text", Path: "/admin/comment", Size: "14px"},
 		{Name: "公告管理", Icon: "bi bi-megaphone", Path: "/admin/placard", Size: "14px"},
 		{Name: "轮播管理", Icon: "bi bi-images", Path: "/admin/banner", Size: "14px"},
-		{Name: "标签管理", Icon: "bi bi-tags", Path: "/admin/tags", Size: "14px"},
+		{Name: "话题管理", Icon: "bi bi-tags", Path: "/admin/tags", Size: "14px"},
 		{Name: "等级管理", Icon: "bi bi-graph-up-arrow", Path: "/admin/level", Size: "14px"},
 		{Name: "经验管理", Icon: "bi bi-star-half", Path: "/admin/exp", Size: "14px"},
 		{Name: "商品管理", Icon: "bi bi-bag", Path: "/admin/goods", Size: "14px"},

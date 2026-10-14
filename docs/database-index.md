@@ -156,15 +156,24 @@ ALTER TABLE auth_rules ADD INDEX idx_auth_rules_pid (pid);
 
 **常用查询模式**：
 - 根据 `id` 查询标签
-- 根据 `name` 查询标签
+- 根据 `name` 查询标签（**话题自动创建 / 按名访问话题页**都走这个查询）
+- 按 `moderator_uid`（话题主持人）筛选 —— 低频，不建索引
+- 按 `recommend`（精选话题）筛选 —— 基数极低，不建索引
 
 ```sql
 -- 主键索引（已存在）
 ALTER TABLE tags ADD PRIMARY KEY (id);
 
--- 标签名称索引
+-- 标签名称索引（话题按名查找：Topic.FindOrCreate / topics/detail?key=xxx）
 ALTER TABLE tags ADD INDEX idx_tags_name (name);
 ```
+
+> **话题（Hashtag）导致的额外查询**：正文里的 `#话题#` 会写入内容的 `tags` 字段
+> （`inis_moment.tags` / `inis_article.tags`，格式 `|1|2|3|`），话题聚合页用
+> `LIKE '%|12|%'` 反查内容。这种「值包裹在字符串里」的存储**无法命中索引**，
+> 属于全表扫描。当前数据量下可接受（详见 `docs/topics.md`）；如果内容量级很大，
+> 需要改造成「内容-话题」关联表（`content_id + tag_id` 双列索引）再查。
+> 热度榜的内容量统计（`Topic.Counts`）也依赖这一列，同样是一次全表扫描后内存汇总。
 
 ### 8. article_group 文章分类表
 
@@ -287,6 +296,43 @@ ALTER TABLE integral_card ADD INDEX idx_integral_card_uid (uid);
 
 > 说明：以上索引均在模型 `IntegralCard` 中通过 GORM 结构体 tag 声明，`AutoMigrate` 会自动创建，无需手工执行。
 
+### 14. tag_follows 话题关注表
+
+**常用查询模式**：
+- 按 `uid` 查「我关注的话题」（`uid + status`）
+- 按 `tag_id` 查关注数（`tag_id + status`）
+- 按 `uid + tag_id` 判断是否已关注（唯一索引直接命中）
+
+```sql
+-- 联合唯一索引：一个用户对同一话题只有一条记录（关注 / 取关复用 status，不删行）
+ALTER TABLE tag_follows ADD UNIQUE INDEX uk_tag_follows_pair (uid, tag_id);
+
+-- 我关注的话题
+ALTER TABLE tag_follows ADD INDEX idx_tag_follows_uid_status (uid, status);
+
+-- 话题关注数
+ALTER TABLE tag_follows ADD INDEX idx_tag_follows_tag_status (tag_id, status);
+```
+
+### 15. topic_pins 话题内置顶表
+
+**常用查询模式**：
+- 按 `tag_id + target_type` 取该话题内置顶的内容 id 列表
+- 按 `tag_id + target_type + target_id` 判断是否已置顶（唯一索引直接命中）
+- 按 `target_type + target_id` 清理某条内容在所有话题里的置顶
+
+```sql
+-- 联合唯一索引：同一话题内同一条内容只能置顶一次
+ALTER TABLE topic_pins ADD UNIQUE INDEX uk_topic_pins_target (tag_id, target_type, target_id);
+
+-- 取话题内置顶列表 / 清内容置顶
+ALTER TABLE topic_pins ADD INDEX idx_topic_pins_tag (tag_id, target_type);
+ALTER TABLE topic_pins ADD INDEX idx_topic_pins_target (target_type, target_id);
+```
+
+> 说明：以上两张表的索引都在模型（`TagFollows` / `TopicPins`）里用 GORM tag 声明，
+> `AutoMigrate` 会自动创建，无需手工执行。
+
 ---
 
 ## 索引创建脚本
@@ -358,6 +404,16 @@ ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_value (value);
 ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_batch (batch);
 ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_expire_time (expire_time);
 ALTER TABLE inis_integral_card ADD INDEX idx_integral_card_uid (uid);
+
+-- ==================== tag_follows（话题关注）表 ====================
+ALTER TABLE inis_tag_follows ADD UNIQUE INDEX uk_tag_follows_pair (uid, tag_id);
+ALTER TABLE inis_tag_follows ADD INDEX idx_tag_follows_uid_status (uid, status);
+ALTER TABLE inis_tag_follows ADD INDEX idx_tag_follows_tag_status (tag_id, status);
+
+-- ==================== topic_pins（话题内置顶）表 ====================
+ALTER TABLE inis_topic_pins ADD UNIQUE INDEX uk_topic_pins_target (tag_id, target_type, target_id);
+ALTER TABLE inis_topic_pins ADD INDEX idx_topic_pins_tag (tag_id, target_type);
+ALTER TABLE inis_topic_pins ADD INDEX idx_topic_pins_target (target_type, target_id);
 ```
 
 ---

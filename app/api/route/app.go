@@ -31,6 +31,7 @@ var controllers = map[string]controller.ApiInterface{
 	"comm":          &controller.Comm{},
 	"toml":          &controller.Toml{},
 	"tags":          &controller.Tags{},
+	"topics":        &controller.Topics{},
 	"pages":         &controller.Pages{},
 	"users":         &controller.Users{},
 	"oauth":         &controller.OAuth{},

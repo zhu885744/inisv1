@@ -484,7 +484,8 @@ func (this *Tags) create(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Tags{CreateTime: time.Now().Unix(), UpdateTime: time.Now().Unix()}
-	allow := []any{"name", "description", "avatar", "json", "text"}
+	// moderator_uid / recommend 是话题扩展字段（话题主持人、精选），只有后台在改
+	allow := []any{"name", "description", "avatar", "json", "text", "moderator_uid", "recommend"}
 
 	// 动态给结构体赋值
 	for key, val := range params {
@@ -551,7 +552,8 @@ func (this *Tags) update(ctx *gin.Context) {
 
 	// 表数据结构体
 	table := model.Tags{}
-	allow := []any{"name", "description", "avatar", "json", "text"}
+	// moderator_uid / recommend 是话题扩展字段（话题主持人、精选），只有后台在改
+	allow := []any{"name", "description", "avatar", "json", "text", "moderator_uid", "recommend"}
 	async := utils.Async[map[string]any]()
 
 	// 动态给结构体赋值

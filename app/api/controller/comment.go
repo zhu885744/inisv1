@@ -569,6 +569,12 @@ func (this *Comment) create(ctx *gin.Context) {
 	// 避免突破 Comment.Content 的 varchar 上限导致插入失败。
 	mentionTargets := []model.MentionTarget{}
 	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, user.Id)
+
+	// 话题：#话题# 规范化为 #[话题名](/topic/12)，前端渲染成可点击链接。
+	// 评论表没有 tags 字段，所以只做链接、不参与话题内容聚合（见 model/topics.go）。
+	// 同样放在长度校验之前：规范化会让内容变长。
+	table.Content, _ = (&model.Topic{}).Parse(table.Content)
+
 	if maxLength > 0 && utf8.RuneCountInString(table.Content) > maxLength {
 		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
 		return
@@ -855,6 +861,8 @@ func (this *Comment) update(ctx *gin.Context) {
 	// 否则手动输入的 @昵称 永远变不成链接
 	if _, ok := payload["content"]; ok {
 		payload["content"], _ = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), cast.ToInt(itemData["uid"]))
+		// 话题：与新建一致，只做链接不做聚合（评论没有 tags 字段）
+		payload["content"], _ = (&model.Topic{}).Parse(cast.ToString(payload["content"]))
 	}
 
 	_, err = item.Scan(&table).Update(payload)

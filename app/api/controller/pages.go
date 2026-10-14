@@ -413,6 +413,9 @@ func (this *Pages) create(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, this.user(ctx).Id)
 
+	// 话题：#话题# 规范化为可点击的话题链接（独立页面没有 tags 字段，不参与话题聚合）
+	table.Content, _ = (&model.Topic{}).Parse(table.Content)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -503,6 +506,8 @@ func (this *Pages) update(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	if _, ok := payload["content"]; ok {
 		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+		// 话题：与新建一致，只做链接不做聚合
+		payload["content"], _ = (&model.Topic{}).Parse(cast.ToString(payload["content"]))
 	}
 	// 审核通过时清空驳回原因：作者不该继续看到已经过期的原因
 	if cast.ToInt(payload["audit"]) == 1 {

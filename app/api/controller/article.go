@@ -370,6 +370,11 @@ func (this *Article) create(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, this.user(ctx).Id)
 
+	// 话题（#话题#）：规范化为 #[话题名](/topic/12)，与作者手选的标签**取并集**写入 tags
+	topicIds := []int{}
+	table.Content, topicIds = (&model.Topic{}).Parse(table.Content)
+	table.Tags = (&model.Topic{}).MergeTagsField(table.Tags, topicIds)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -507,6 +512,16 @@ func (this *Article) update(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	if _, ok := payload["content"]; ok {
 		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+
+		// 话题：正文话题与标签取并集。
+		// 客户端没传 tags（只改正文）时要以库里的原有标签为基准，否则会把作者手选的标签冲掉
+		baseTags := cast.ToString(payload["tags"])
+		if _, ok := payload["tags"]; !ok {
+			baseTags = cast.ToString(findResult["tags"])
+		}
+		content, topicIds := (&model.Topic{}).Parse(cast.ToString(payload["content"]))
+		payload["content"] = content
+		payload["tags"] = (&model.Topic{}).MergeTagsField(baseTags, topicIds)
 	}
 
 	_, err = item.Scan(&table).Update(payload)

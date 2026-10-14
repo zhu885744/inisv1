@@ -389,6 +389,12 @@ func (this *Moments) create(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, uid)
 
+	// 话题（#话题#）：规范化为 #[话题名](/topic/12)，并把话题 id 写进 tags 字段
+	// （|1|2|3| 口径与文章一致，话题聚合页据此 LIKE 检索，解析逻辑见 model/topics.go）
+	topicIds := []int{}
+	table.Content, topicIds = (&model.Topic{}).Parse(table.Content)
+	table.Tags = (&model.Topic{}).BuildTagsField(topicIds)
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -509,6 +515,12 @@ func (this *Moments) update(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	if _, ok := payload["content"]; ok {
 		payload["content"], mentionTargets = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), mentionOwnerUid)
+
+		// 话题：按新正文重建 tags —— 编辑时删掉 #话题# 要跟着解除关联，
+		// 所以这里是「重建」而不是「合并」（动态的话题只来自正文）
+		content, topicIds := (&model.Topic{}).Parse(cast.ToString(payload["content"]))
+		payload["content"] = content
+		payload["tags"] = (&model.Topic{}).BuildTagsField(topicIds)
 	}
 
 	_, err = item.Scan(&table).Update(payload)

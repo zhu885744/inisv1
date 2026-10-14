@@ -66,6 +66,8 @@ func InitTable() {
 		{"LinksGroup", InitLinksGroup},
 		{"Placard", InitPlacard},
 		{"Tags", InitTags},
+		{"TagFollows", InitTagFollows},
+		{"TopicPins", InitTopicPins},
 		{"Users", InitUsers},
 		{"UserOauth", InitUserOauth},
 		{"AuthGroup", InitAuthGroup},

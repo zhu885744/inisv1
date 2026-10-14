@@ -22,6 +22,8 @@ type Moments struct {
 	// ⚠ 不要 default:1 —— GORM 在 Create 时会把零值字段替换成 default 值，
 	// 草稿（status=0）会被写成 1（已发布），前台「我的动态」里草稿直接对外可见
 	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布;" json:"status"`
+	// 话题：正文里 #话题# 解析出的标签 id，格式 |1|2|3|（与文章 tags 口径一致，便于 LIKE 聚合）
+	Tags        string                `gorm:"size:256; comment:话题; default:Null;" json:"tags"`
 	LastUpdate  int64                 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text        any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
