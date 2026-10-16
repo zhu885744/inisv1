@@ -97,7 +97,8 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
     { "type": "avatar_frame", "name": "头像框", "icon": "bi-person-badge", "slot": "avatar",
       "allow_custom_text": 0, "fields": ["image", "scale", "animated"], "description": "展示在头像外圈，可随时切换。" },
     { "type": "title", "name": "头衔", "slot": "title", "allow_custom_text": 1,
-      "fields": ["text", "color", "bg", "border", "glow", "icon", "animated"], "description": "..." }
+      "fields": ["text", "image", "scale", "color", "bg", "border", "glow", "icon", "animated"],
+      "description": "展示在昵称旁，支持纯文字配色与图片徽章。" }
   ],
   "config": { "enabled": 1, "show_in_goods": 1, "currency": "integral",
               "avatar_frame": { "enabled": 1, "frame_scale": 1.2 },
@@ -204,7 +205,11 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `decoration_id` | int | **是** | 装扮ID；`<=0` 返回 400 |
-| `text` | string | 否 | 纯样式头衔的自定义文字（装扮自带文字时忽略） |
+| `text` | string | 否 | 头衔的自定义文字（装扮自带文字时忽略）。仅「纯样式模板」头衔必填；纯图片头衔不需要文字（传了也会被忽略） |
+
+> 头衔的 `payload` 有两种形态且互斥：
+> `text`（纯文字，可配 color/bg/border/glow/icon）与 `image` + `scale`（纯图片，`scale` 控制图片高度倍数，1 为默认）。
+> 两者皆无才是「纯样式模板」，佩戴时必须由用户提供 `text`。
 
 - 成功：`{wearing: {...}}` + `佩戴成功！`
 - **业务失败返回 `202`**，msg 来自模型层（如 `装扮不存在！`、`你还没有这个装扮！`）

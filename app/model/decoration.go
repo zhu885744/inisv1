@@ -52,8 +52,10 @@ func DecorationTypeMeta() []facade.H {
 			"icon":              "bi-award",
 			"slot":              "title",
 			"allow_custom_text": 1,
-			"fields":            []string{"text", "color", "bg", "border", "glow", "icon", "animated"},
-			"description":       "展示在昵称旁，支持配色、渐变与发光。",
+			// text 与 image 二选一：配了 image 就是「纯图片头衔」（只显示图片，不叠加文字）；
+			// 只配 text 是文字头衔；两者都不配则为「纯样式模板」（佩戴时用户自填文字）
+			"fields":      []string{"text", "image", "scale", "color", "bg", "border", "glow", "icon", "animated"},
+			"description": "展示在昵称旁，支持纯文字配色与纯图片徽章（二选一）。",
 		},
 	}
 }
@@ -496,16 +498,12 @@ func DecorationCount() facade.H {
 const DecorationConfigKey = "SYSTEM_DECORATION"
 
 // 装扮类型常量
-//
-// 这是整个装扮体系唯一需要「扩展」的地方：新增一类装扮 = 新增一个 type 常量 +
-// 一个 payload 渲染约定 + 前端一个渲染器，不需要改动表结构。
-// 已按 BBS 方向预留：勋章 / 昵称色 / 名片背景 / 评论气泡 / 主题。
+// 整个装扮体系唯一需要「扩展」的地方：新增一类装扮 = 新增一个 type 常量 + 新增一个元数据
 const (
 	DecorationTypeAvatarFrame = "avatar_frame" // 头像框
 	DecorationTypeTitle       = "title"        // 头衔（称号）
 	DecorationTypeMedal       = "medal"        // 勋章（预留）
 	DecorationTypeNameColor   = "name_color"   // 昵称颜色（预留）
-	DecorationTypeCardBg      = "card_bg"      // 名片背景（预留）
 	DecorationTypeBubble      = "bubble"       // 评论气泡（预留）
 )
 
@@ -883,8 +881,6 @@ func decorationCategoryName(typ string) string {
 		return "勋章"
 	case DecorationTypeNameColor:
 		return "昵称颜色"
-	case DecorationTypeCardBg:
-		return "名片背景"
 	case DecorationTypeBubble:
 		return "评论气泡"
 	}
@@ -1266,9 +1262,13 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 					"name":    deco.Name,
 					"payload": payload,
 				}
-				titleText = text
-				if utils.Is.Empty(titleText) {
-					titleText = cast.ToString(payload["text"])
+				// 纯图片头衔：users.title 保持为空 —— 图片不携带文字，
+				// payload 里残留的 text（历史配置改型后留下的）也不回写
+				if utils.Is.Empty(cast.ToString(payload["image"])) {
+					titleText = text
+					if utils.Is.Empty(titleText) {
+						titleText = cast.ToString(payload["text"])
+					}
 				}
 			}
 		}
@@ -1354,11 +1354,20 @@ func WearDecoration(uid int, decorationId int, text string) (facade.H, error) {
 		}
 	}
 
-	// 头衔文字：装扮自带文字优先，否则使用用户自填文字（纯样式类模板）
+	// 头衔两种形态（互斥，图片优先）：
+	//   payload.image  图片头衔 → 纯图，不携带任何文字（用户自填的文字同样忽略）
+	//   payload.text   文字头衔 → 直接用装扮自带文字（用户自填的忽略）
+	//   两者都没有       纯样式模板 → 必须用户自填（长度按后台配置校验）
 	customText := strings.TrimSpace(text)
 	if deco.Type == DecorationTypeTitle {
 		payload := decorationPayloadMap(deco.Payload)
-		if utils.Is.Empty(cast.ToString(payload["text"])) {
+
+		switch {
+		case !utils.Is.Empty(cast.ToString(payload["image"])):
+			customText = ""
+		case !utils.Is.Empty(cast.ToString(payload["text"])):
+			customText = cast.ToString(payload["text"])
+		default:
 			if utils.Is.Empty(customText) {
 				return nil, errors.New("请填写头衔文字！")
 			}
@@ -1369,8 +1378,6 @@ func WearDecoration(uid int, decorationId int, text string) (facade.H, error) {
 			if utf8.RuneCountInString(customText) > maxLength {
 				return nil, fmt.Errorf("头衔最多 %d 个字！", maxLength)
 			}
-		} else {
-			customText = cast.ToString(payload["text"])
 		}
 	}
 
