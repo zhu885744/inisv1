@@ -940,8 +940,10 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 		return
 	}
 
-	if utils.Is.Empty(params["password"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "密码"), 400)
+	// 强度校验：与「修改密码」（users-identity.go）共用同一套口径。
+	// 原先只判非空，直接调接口可以设出「1」「123456」这类密码
+	if message := passwordWeakMessage(cast.ToString(params["password"])); message != "" {
+		this.json(ctx, nil, facade.Lang(ctx, message), 400)
 		return
 	}
 
@@ -965,6 +967,9 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 
 	// 删除验证码
 	go facade.Cache.Del(cacheName)
+
+	// 清资料缓存：口径与 users/change-password、users/update 一致
+	facade.Cache.Del(fmt.Sprintf("user[%v]", user["id"]))
 
 	this.json(ctx, nil, facade.Lang(ctx, "密码重置成功！"), 200)
 }

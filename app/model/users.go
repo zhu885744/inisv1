@@ -42,6 +42,8 @@ type Users struct {
 	CurrentBanId int   `gorm:"type:int(32); default:0; comment:当前生效封禁记录ID;" json:"current_ban_id"`
 	LastBanAt    int64 `gorm:"comment:最后封禁时间; default:0;" json:"last_ban_at"`
 	Restrictions int   `gorm:"type:int(32); default:0; comment:权限限制位掩码（0=无限制）;" json:"restrictions"`
+	// 上次修改账号（用户名）的时间：改账号冷却的依据，见 model/account-change.go
+	AccountUpdateTime int64 `gorm:"comment:上次修改账号时间; default:0;" json:"account_update_time"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`

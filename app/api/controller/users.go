@@ -26,15 +26,16 @@ func (this *Users) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"one":       this.one,
-		"all":       this.all,
-		"sum":       this.sum,
-		"min":       this.min,
-		"max":       this.max,
-		"rand":      this.rand,
-		"count":     this.count,
-		"column":    this.column,
-		"blackroom": this.blackroom,
+		"one":          this.one,
+		"all":          this.all,
+		"sum":          this.sum,
+		"min":          this.min,
+		"max":          this.max,
+		"rand":         this.rand,
+		"count":        this.count,
+		"column":       this.column,
+		"blackroom":    this.blackroom,
+		"account-rule": this.accountRule,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -73,11 +74,14 @@ func (this *Users) IPUT(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"update":        this.update,
-		"restore":       this.restore,
-		"email":         this.email,
-		"phone":         this.phone,
-		"status":        this.status,
+		"update":          this.update,
+		"restore":         this.restore,
+		"email":           this.email,
+		"phone":           this.phone,
+		"change-password": this.changePassword,
+		"change-account":  this.changeAccount,
+		"verify-code":     this.sendVerifyCode,
+		"status":          this.status,
 		"ban":           this.ban,
 		"unban":         this.unban,
 		"clear-ban":     this.clearBan,
@@ -1051,11 +1055,9 @@ func (this *Users) email(ctx *gin.Context) {
 		return
 	}
 
-	// 驱动
-	drive := cast.ToString(facade.SMSToml.Get("drive.email"))
-
-	if utils.Is.Empty(drive) {
-		this.json(ctx, nil, facade.Lang(ctx, "管理员未开启邮箱服务，无法发送验证码！"), 400)
+	// 身份验证：改绑邮箱会改变登录凭证，属于敏感操作，不能只凭登录态放行
+	// （当前密码 / 已绑定邮箱验证码 / 已绑定手机验证码，三选一，见 users-identity.go）
+	if err := this.verifyIdentityFor(ctx, user, params); err != nil {
 		return
 	}
 
@@ -1070,54 +1072,13 @@ func (this *Users) email(ctx *gin.Context) {
 		return
 	}
 
-	// 缓存名称
-	cacheName := fmt.Sprintf("%v-%v", drive, params["email"])
-
-	// 验证码为空，发送验证码
+	// 新邮箱的验证码：为空则发送，非空则校验（证明这个邮箱归你所有）
+	// 频控 / 缓存 key / 错误文案都走统一实现（users-identity.go）
 	if utils.Is.Empty(params["code"]) {
-		// 本地频控检查
-		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["email"])
-		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["email"])
-
-		// 检查发送间隔（60秒）
-		lastSendTime := facade.Cache.Get(frequencyCacheName)
-		if !utils.Is.Empty(lastSendTime) {
-			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
-				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
-				return
-			}
-		}
-
-		// 检查每日发送限制（10次）
-		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
-		if dailyCount >= 10 {
-			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
-			return
-		}
-
-		sms := facade.NewSMS(drive).VerifyCode(params["email"])
-		if sms.Error != nil {
-			this.json(ctx, nil, sms.Error.Error(), 400)
-			return
-		}
-
-		// 缓存验证码 - 5分钟
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
-		// 缓存发送时间 - 60秒
-		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
-		// 缓存每日发送次数 - 24小时
-		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
-
-		msg := fmt.Sprintf("验证码发送至您的邮箱：%s，请注意查收！", facade.Comm.MaskEmail(cast.ToString(params["email"])))
-		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
+		this.sendCode(ctx, codeSceneChangeEmail, channelEmail, cast.ToString(params["email"]))
 		return
 	}
-
-	// 获取缓存里面的验证码
-	cacheCode := facade.Cache.Get(cacheName)
-
-	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
-		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+	if err := this.checkCode(ctx, codeSceneChangeEmail, channelEmail, cast.ToString(params["email"]), cast.ToString(params["code"])); err != nil {
 		return
 	}
 
@@ -1128,8 +1089,8 @@ func (this *Users) email(ctx *gin.Context) {
 		return
 	}
 
-	// 删除验证码
-	go facade.Cache.Del(cacheName)
+	// 清资料缓存：邮箱是登录字段，缓存里的用户资料要跟着失效
+	facade.Cache.Del(fmt.Sprintf("user[%v]", user.Id))
 
 	this.json(ctx, gin.H{"id": user.Id}, facade.Lang(ctx, "修改成功！"), 200)
 }
@@ -1160,11 +1121,9 @@ func (this *Users) phone(ctx *gin.Context) {
 		return
 	}
 
-	// 驱动
-	drive := cast.ToString(facade.SMSToml.Get("drive.sms"))
-
-	if utils.Is.Empty(drive) {
-		this.json(ctx, nil, facade.Lang(ctx, "管理员未开启短信服务，无法发送验证码！"), 400)
+	// 身份验证：改绑手机号会改变登录凭证，属于敏感操作，不能只凭登录态放行
+	// （当前密码 / 已绑定邮箱验证码 / 已绑定手机验证码，三选一，见 users-identity.go）
+	if err := this.verifyIdentityFor(ctx, user, params); err != nil {
 		return
 	}
 
@@ -1177,59 +1136,13 @@ func (this *Users) phone(ctx *gin.Context) {
 		return
 	}
 
-	// 缓存名称
-	cacheName := fmt.Sprintf("%v-%v", drive, params["phone"])
-
-	// 验证码为空，发送验证码
+	// 新手机号的验证码：为空则发送，非空则校验（证明这个手机号归你所有）
+	// 频控 / 缓存 key / 阿里云频控文案都走统一实现（users-identity.go）
 	if utils.Is.Empty(params["code"]) {
-		// 本地频控检查
-		frequencyCacheName := fmt.Sprintf("frequency-%v-%v", drive, params["phone"])
-		dailyLimitCacheName := fmt.Sprintf("daily-limit-%v-%v", drive, params["phone"])
-
-		// 检查发送间隔（60秒）
-		lastSendTime := facade.Cache.Get(frequencyCacheName)
-		if !utils.Is.Empty(lastSendTime) {
-			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
-				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
-				return
-			}
-		}
-
-		// 检查每日发送限制（10次）
-		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
-		if dailyCount >= 10 {
-			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
-			return
-		}
-
-		sms := facade.NewSMS(drive).VerifyCode(params["phone"])
-		if sms.Error != nil {
-			// 处理阿里云频控错误
-			if strings.Contains(sms.Error.Error(), "check frequency failed") || strings.Contains(sms.Error.Error(), "FREQUENCY_FAIL") {
-				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请稍后再试！"), 400)
-				return
-			}
-			this.json(ctx, nil, sms.Error.Error(), 400)
-			return
-		}
-
-		// 缓存验证码 - 5分钟
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
-		// 缓存发送时间 - 60秒
-		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
-		// 缓存每日发送次数 - 24小时
-		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
-
-		msg := fmt.Sprintf("验证码发送至您的手机：%s，请注意查收！", facade.Comm.MaskPhone(cast.ToString(params["phone"])))
-		this.json(ctx, nil, facade.Lang(ctx, msg), 201)
+		this.sendCode(ctx, codeSceneChangePhone, channelSMS, cast.ToString(params["phone"]))
 		return
 	}
-
-	// 获取缓存里面的验证码
-	cacheCode := facade.Cache.Get(cacheName)
-
-	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
-		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+	if err := this.checkCode(ctx, codeSceneChangePhone, channelSMS, cast.ToString(params["phone"]), cast.ToString(params["code"])); err != nil {
 		return
 	}
 
@@ -1240,8 +1153,8 @@ func (this *Users) phone(ctx *gin.Context) {
 		return
 	}
 
-	// 删除验证码
-	go facade.Cache.Del(cacheName)
+	// 清资料缓存：手机号是登录字段，缓存里的用户资料要跟着失效
+	facade.Cache.Del(fmt.Sprintf("user[%v]", user.Id))
 
 	this.json(ctx, gin.H{"id": user.Id}, facade.Lang(ctx, "修改成功！"), 200)
 }
@@ -1281,63 +1194,26 @@ func (this *Users) destroy(ctx *gin.Context) {
 		contact = user.Phone
 	}
 
-	cacheName := fmt.Sprintf("[login][%v=%v]", social, contact)
+	// 验证码频道（与上面 social 的判定一致）
+	channel := channelSMS
+	if social == "email" {
+		channel = channelEmail
+	}
 
+	// 因子一：发到「已绑定联系方式」的验证码（场景隔离的缓存 key，防跨场景复用）
+	// 不传 code = 发送验证码
 	if utils.Is.Empty(params["code"]) {
-		drive := utils.Ternary(social == "email", "email", "sms")
-
-		frequencyCacheName := fmt.Sprintf("destroy-frequency-%v-%v", drive, contact)
-		dailyLimitCacheName := fmt.Sprintf("destroy-daily-limit-%v-%v", drive, contact)
-
-		lastSendTime := facade.Cache.Get(frequencyCacheName)
-		if !utils.Is.Empty(lastSendTime) {
-			if time.Now().Unix()-cast.ToInt64(lastSendTime) < 60 {
-				this.json(ctx, nil, facade.Lang(ctx, "发送过于频繁，请60秒后再试！"), 400)
-				return
-			}
-		}
-
-		dailyCount := cast.ToInt(facade.Cache.Get(dailyLimitCacheName))
-		if dailyCount >= 10 {
-			this.json(ctx, nil, facade.Lang(ctx, "今日发送验证码次数已达上限，请明日再试！"), 400)
-			return
-		}
-
-		sms := facade.NewSMS(drive).VerifyCode(contact)
-		if sms.Error != nil {
-			this.json(ctx, nil, sms.Error.Error(), 400)
-			return
-		}
-
-		go facade.Cache.Set(cacheName, sms.VerifyCode, 5*time.Minute)
-		go facade.Cache.Set(frequencyCacheName, time.Now().Unix(), time.Second*60)
-		go facade.Cache.Set(dailyLimitCacheName, dailyCount+1, time.Hour*24)
-		this.json(ctx, nil, facade.Lang(ctx, "验证码发送成功！"), 201)
+		this.sendCode(ctx, codeSceneDestroy, channel, contact)
 		return
 	}
 
-	cacheCode := facade.Cache.Get(cacheName)
-	if cast.ToString(params["code"]) != cast.ToString(cacheCode) {
-		this.json(ctx, nil, facade.Lang(ctx, "验证码错误！"), 400)
+	if err := this.checkCode(ctx, codeSceneDestroy, channel, contact, cast.ToString(params["code"])); err != nil {
 		return
 	}
 
-	go facade.Cache.Del(cacheName)
-
-	if utils.Is.Empty(params["password"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "请输入当前密码以确认注销！"), 400)
-		return
-	}
-
-	userRecord, _ := facade.DB.Model(&model.Users{}).Where("id", user.Id).Find()
-	if utils.Is.Empty(userRecord) {
-		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
-		return
-	}
-
-	userPassword := cast.ToString(userRecord["password"])
-	if utils.Password.Verify(userPassword, params["password"]) == false {
-		this.json(ctx, nil, facade.Lang(ctx, "密码错误！"), 400)
+	// 因子二：当前密码。注销是最高敏感级的操作，保留「验证码 + 密码」双因子 ——
+	// 改密码 / 改邮箱 / 改手机号是单因子（见 verifyIdentity）
+	if err := this.verifyPassword(ctx, user, cast.ToString(params["password"])); err != nil {
 		return
 	}
 

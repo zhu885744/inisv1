@@ -57,6 +57,7 @@ func HideContact(string) string {
 //	source                    注册来源（内部数据）
 //	ban_count/current_ban_id/last_ban_at/restrictions  封禁管理侧字段
 //	login_time                最后登录时间（行为数据）
+//	account_update_time       上次改账号时间（行为数据，本人可见——前台要用它算冷却）
 var userPrivateFields = []string{
 	"password",
 	"remark",
@@ -67,6 +68,7 @@ var userPrivateFields = []string{
 	"last_ban_at",
 	"restrictions",
 	"login_time",
+	"account_update_time",
 	"delete_time",
 }
 

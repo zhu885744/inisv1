@@ -34,6 +34,8 @@ const (
 	CaptchaSceneResetPassword = "reset_password"
 	// CaptchaSceneChangeContact 修改邮箱 / 手机号（提交验证码时）
 	CaptchaSceneChangeContact = "change_contact"
+	// CaptchaSceneChangeAccount 修改账号（用户名）：没有「发送验证码」阶段，命中即校验
+	CaptchaSceneChangeAccount = "change_account"
 	// CaptchaSceneDestroy 注销账户（提交验证码时）
 	CaptchaSceneDestroy = "destroy"
 )
@@ -46,6 +48,7 @@ var captchaSceneList = []string{
 	CaptchaSceneRegister,
 	CaptchaSceneResetPassword,
 	CaptchaSceneChangeContact,
+	CaptchaSceneChangeAccount,
 	CaptchaSceneDestroy,
 }
 
