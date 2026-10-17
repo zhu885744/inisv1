@@ -61,6 +61,8 @@ func InitTable() {
 		{"AuthRules", InitAuthRules},
 		{"Banner", InitBanner},
 		{"Comment", InitComment},
+		// 内容可见范围（登录可见 / 付费可见）的解锁记录，依赖文章 / 动态 / 页面 / 评论表
+		{"ContentUnlock", InitContentUnlock},
 		{"Config", InitConfig},
 		{"Links", InitLinks},
 		{"LinksGroup", InitLinksGroup},

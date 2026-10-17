@@ -20,11 +20,11 @@ type Article struct {
 }
 
 const (
-	articleAllowFields = "title,abstract,content,covers,tags,group,editor,remark,json,text,publish_time,status"
+	articleAllowFields = "title,abstract,content,covers,tags,group,editor,remark,json,text,publish_time,status,scope,scope_integral"
 	articleAllowQuery  = "id"
 )
 
-var articleAllowFieldsSlice = []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time", "status"}
+var articleAllowFieldsSlice = []any{"title", "abstract", "content", "covers", "tags", "group", "editor", "remark", "json", "text", "publish_time", "status", "scope", "scope_integral"}
 var articleAllowQuerySlice = []any{"id"}
 
 func (this *Article) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -208,6 +208,9 @@ func (this *Article) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
+	data = applyScopeData(ctx, data, "article")
+
 	// 更新用户经验
 	go this.updateExp(ctx, cast.ToStringMap(data))
 	// 更新文章浏览量
@@ -259,6 +262,9 @@ func (this *Article) all(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 可见范围：列表同样按条脱敏（付费内容只留标题 / 摘要，正文不回传）
+	data = applyScopeData(ctx, data, "article")
+
 	this.json(ctx, gin.H{
 		"data":  data,
 		"count": count,
@@ -290,12 +296,15 @@ func (this *Article) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 
 	items, _ := mold.Select()
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
+	var data any = utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
 		return
 	}
+
+	// 可见范围：随机推荐同样脱敏，避免绕过详情页的限制
+	data = applyScopeData(ctx, data, "article")
 
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
 }
@@ -710,6 +719,9 @@ func (this *Article) column(ctx *gin.Context) {
 		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
+
+	// 可见范围：column 也可能取到 content，同样按条脱敏
+	data = applyScopeData(ctx, data, "article")
 
 	if !utils.Is.Empty(data) {
 		code = 200

@@ -22,11 +22,11 @@ type Pages struct {
 }
 
 const (
-	pagesAllowFields = "key,title,content,remark,tags,editor,json,text,publish_time"
+	pagesAllowFields = "key,title,content,remark,tags,editor,json,text,publish_time,scope,scope_integral"
 	pagesAllowQuery  = "id,key"
 )
 
-var pagesAllowFieldsSlice = []any{"key", "title", "content", "remark", "tags", "editor", "json", "text", "publish_time"}
+var pagesAllowFieldsSlice = []any{"key", "title", "content", "remark", "tags", "editor", "json", "text", "publish_time", "scope", "scope_integral"}
 var pagesAllowQuerySlice = []any{"id", "key"}
 
 func (this *Pages) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -245,6 +245,9 @@ func (this *Pages) one(ctx *gin.Context) {
 		go this.updateViews(ctx, cast.ToStringMap(data))
 	}
 
+	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
+	data = applyScopeData(ctx, data, "page")
+
 	// 更新用户经验
 	go func() {
 		user := this.meta.user(ctx)
@@ -308,6 +311,9 @@ func (this *Pages) all(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 可见范围：列表同样按条脱敏（付费页面只留标题，正文不回传）
+	data = applyScopeData(ctx, data, "page")
+
 	this.json(ctx, gin.H{
 		"data":  data,
 		"count": count,
@@ -339,12 +345,15 @@ func (this *Pages) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 
 	items, _ := mold.Select()
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
+	var data any = utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
 		return
 	}
+
+	// 可见范围：随机获取同样脱敏
+	data = applyScopeData(ctx, data, "page")
 
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
 }
@@ -620,6 +629,9 @@ func (this *Pages) column(ctx *gin.Context) {
 		data = utils.ArrayMapWithField(items, params["field"])
 		this.setCache(ctx, cacheName, data)
 	}
+
+	// 可见范围：column 也可能取到 content，同样按条脱敏
+	data = applyScopeData(ctx, data, "page")
 
 	if !utils.Is.Empty(data) {
 		code = 200

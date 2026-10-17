@@ -396,8 +396,8 @@ inisv1/
 │   ├── i18n-assets.go      # 语言包内嵌（go:embed）
 │   └── i18n/               # 国际化语言包：zh-cn / en-us / ko-kr / ru-ru
 │
-├── docs/                   # 文档（53 篇）
-│   ├── API docs/           # 接口文档（46 篇，按模块划分）
+├── docs/                   # 文档（55 篇）
+│   ├── API docs/           # 接口文档（48 篇，按模块划分）
 │   │   ├── api-keys.md                 # 接口密钥
 │   │   ├── article-group.md            # 文章分组
 │   │   ├── article.md                  # 文章
@@ -411,6 +411,7 @@ inisv1/
 │   │   ├── comm.md                     # 通用（验证码、统计等）
 │   │   ├── comment.md                  # 评论
 │   │   ├── config.md                   # 系统配置
+│   │   ├── content-scope.md            # 内容可见范围（公开 / 登录可见 / 付费可见）
 │   │   ├── decoration.md               # 装扮
 │   │   ├── exp.md                      # 经验值
 │   │   ├── feed.md                     # 聚合流（关注 / 推荐 / 热门）
@@ -438,6 +439,7 @@ inisv1/
 │   │   ├── tags.md                     # 标签（含话题主持人 / 精选字段）
 │   │   ├── topics.md                   # 话题（Hashtag）：榜 / 聚合 / 关注 / 主持人治理
 │   │   ├── toml.md                     # TOML 配置读写
+│   │   ├── unlock.md                   # 内容可见权限查询 / 积分兑换
 │   │   ├── user-blocks.md              # 用户拉黑
 │   │   ├── user-collects.md            # 用户收藏
 │   │   ├── user-follows.md             # 用户关注
@@ -462,10 +464,10 @@ inisv1/
 │   ├── theme_embed.go      # //go:embed all:dist（仅在 -tags embed 时编译）
 │   └── dist/               # 前端构建产物：cp -R Mellow/dist/. theme/dist/
 │
-└── app/                    # 后端核心业务代码（176 个 .go）
+└── app/                    # 后端核心业务代码（182 个 .go）
     │
     ├── api/                # 接口层（控制器 / 中间件 / 路由）
-    │   ├── controller/     # 控制器（47）
+    │   ├── controller/     # 控制器（51）
     │   │   ├── OAuth.go            # 第三方登录
     │   │   ├── api-keys.go         # 接口密钥管理
     │   │   ├── article-group.go    # 文章分组
@@ -500,11 +502,13 @@ inisv1/
     │   │   ├── proxy.go            # 代理
     │   │   ├── qps-warn.go         # QPS 预警
     │   │   ├── rss.go              # RSS 订阅
+    │   │   ├── scope.go            # 内容可见范围判定与正文脱敏（各控制器共用）
     │   │   ├── search.go           # 搜索
     │   │   ├── stats.go            # 数据统计（资源告警阈值）
     │   │   ├── tags.go             # 标签（后台管理，含话题主持人 / 精选）
     │   │   ├── topics.go           # 话题（Hashtag）：榜 / 聚合 / 关注 / 主持人治理
     │   │   ├── toml.go             # TOML 配置读写（后台配置页）
+    │   │   ├── unlock.go           # 内容可见权限查询 / 积分兑换
     │   │   ├── user-collects.go    # 用户收藏
     │   │   ├── user-follows.go     # 用户关注
     │   │   ├── user-likes.go       # 用户点赞
@@ -566,7 +570,7 @@ inisv1/
     │   ├── tls.go                  # TLS / HTTPS
     │   └── token.go                # Token 校验
     │
-    ├── model/              # 数据模型与业务逻辑（49）
+    ├── model/              # 数据模型与业务逻辑（51）
     │   ├── api-keys.go             # 接口密钥
     │   ├── article-group.go        # 文章分组
     │   ├── article.go              # 文章
@@ -581,6 +585,7 @@ inisv1/
     │   ├── checkin.go              # 每日签到（含签到规则）
     │   ├── comment.go              # 评论
     │   ├── config.go               # 系统配置（config 表，含启动迁移）
+    │   ├── content-unlock.go       # 内容可见范围（公开 / 登录可见 / 付费可见）与积分兑换记录
     │   ├── decoration.go           # 装扮（头衔 / 头像框，佩戴状态同步到 users.title）
     │   ├── exp.go                  # 经验值
     │   ├── goods.go                # 商品（装扮商城）

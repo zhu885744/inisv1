@@ -293,6 +293,15 @@ func (this *Topics) content(ctx *gin.Context) {
 	// 置顶标记：前端据此显示「置顶」徽标与主持人的取消置顶按钮
 	data = markPinned(data, pinned)
 
+	// 可见范围：话题聚合页同样按条脱敏（登录可见 / 付费可见的内容不回传正文）
+	bindType := "moments"
+	if contentType == "article" {
+		bindType = "article"
+	}
+	if redacted, ok := applyScopeData(ctx, data, bindType).([]map[string]any); ok {
+		data = redacted
+	}
+
 	if utils.Is.Empty(data) {
 		this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0}, facade.Lang(ctx, "无数据！"), 204)
 		return

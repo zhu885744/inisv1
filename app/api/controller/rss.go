@@ -108,8 +108,11 @@ func (this *Rss) generateRSS(siteName, siteURL, siteDescription string, articles
 		sb.WriteString(fmt.Sprintf(`      <guid isPermaLink="true">%s</guid>`+"\n", itemURL)) // guid 不使用 CDATA
 
 		// description 必须有内容，否则某些抓取器认为 item 无效
+		// 可见范围：RSS 是匿名抓取，无法校验登录 / 积分兑换，
+		// 因此只有「公开」的文章才输出全文，其它范围退回到摘要
+		public := model.ScopeNormalize(article.Scope) == model.ScopePublic
 		var content string
-		if showFull && article.Content != "" {
+		if showFull && public && article.Content != "" {
 			content = article.Content
 		} else if article.Abstract != "" {
 			content = article.Abstract

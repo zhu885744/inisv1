@@ -21,11 +21,12 @@ type Comment struct {
 }
 
 const (
-	commentAllowFields = "pid,content,images,bind_id,bind_type,editor,json,text"
+	// 评论只有 1 公开 / 2 登录可见，没有付费可见，因此不接受 scope_integral
+	commentAllowFields = "pid,content,images,bind_id,bind_type,editor,json,text,scope"
 	commentAllowQuery  = "id,pid,bind_id,bind_type,editor"
 )
 
-var commentAllowFieldsSlice = []any{"pid", "content", "images", "bind_id", "bind_type", "editor", "json", "text"}
+var commentAllowFieldsSlice = []any{"pid", "content", "images", "bind_id", "bind_type", "editor", "json", "text", "scope"}
 var commentAllowQuerySlice = []any{"id", "pid", "bind_id", "bind_type", "editor"}
 
 func (this *Comment) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -290,6 +291,9 @@ func (this *Comment) one(ctx *gin.Context) {
 
 	data = this.maskCommentData(ctx, data)
 
+	// 可见范围：评论同样支持登录可见 / 付费可见，无权查看时清空正文
+	data = applyScopeData(ctx, data, "comment")
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -341,6 +345,9 @@ func (this *Comment) all(ctx *gin.Context) {
 
 	data = this.maskCommentData(ctx, data)
 
+	// 可见范围：评论列表同样按条脱敏（付费评论只保留占位信息）
+	data = applyScopeData(ctx, data, "comment")
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -368,6 +375,8 @@ func (this *Comment) rand(ctx *gin.Context) {
 
 	item, _ := mold.Order("RAND()").Limit(limit).Select()
 	data := this.maskCommentData(ctx, utils.ArrayMapWithField(item, params["field"]))
+	// 可见范围：随机获取的评论同样脱敏
+	data = applyScopeData(ctx, data, "comment")
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
@@ -563,6 +572,10 @@ func (this *Comment) create(ctx *gin.Context) {
 			utils.Struct.Set(&table, key, this.processFieldValue(val))
 		}
 	}
+
+	// 评论不支持付费可见：scope=3 一律降级为「登录可见」
+	// （旧前端 / 历史数据里可能带 3，统一在这里收敛，避免评论出现积分墙）
+	table.Scope = model.ScopeForBind("comment", table.Scope)
 
 	// @ 提及：只匹配作者**已关注**的人，把 @昵称 规范化成 @[昵称](/author/uid)（前端渲染成可点击的链接）。
 	// 规范化会让内容变长（@张三 → @[张三](/author/12)），所以长度要按转换后的结果再校验一次，
@@ -960,6 +973,9 @@ func (this *Comment) column(ctx *gin.Context) {
 
 	data = this.maskCommentData(ctx, data)
 
+	// 可见范围：column 也可能取到 content，同样按条脱敏
+	data = applyScopeData(ctx, data, "comment")
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -1160,6 +1176,9 @@ func (this *Comment) flat(ctx *gin.Context) {
 	}
 
 	data = this.maskCommentData(ctx, data)
+
+	// 可见范围：评论树（含回复）逐层脱敏
+	data = applyScopeData(ctx, data, "comment")
 
 	if !utils.Is.Empty(data) {
 		code = 200

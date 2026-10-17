@@ -22,6 +22,9 @@ type Moments struct {
 	// ⚠ 不要 default:1 —— GORM 在 Create 时会把零值字段替换成 default 值，
 	// 草稿（status=0）会被写成 1（已发布），前台「我的动态」里草稿直接对外可见
 	Status      int                   `gorm:"type:int(12); comment:状态 0-草稿 1-发布;" json:"status"`
+	// 可见范围：1-公开 2-登录可见 3-付费可见（ScopeIntegral 为兑换所需积分）
+	Scope         int    `gorm:"type:int(12); comment:可见范围 1-公开 2-登录可见 3-付费可见; default:1;" json:"scope"`
+	ScopeIntegral int    `gorm:"type:int(32); comment:付费可见所需积分; default:0;" json:"scope_integral"`
 	// 话题：正文里 #话题# 解析出的标签 id，格式 |1|2|3|（与文章 tags 口径一致，便于 LIKE 聚合）
 	Tags        string                `gorm:"size:256; comment:话题; default:Null;" json:"tags"`
 	LastUpdate  int64                 `gorm:"comment:最后更新时间; default:0;" json:"last_update"`

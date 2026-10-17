@@ -210,29 +210,42 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 	switch v := items.(type) {
 	case []model.Article:
 		for _, article := range v {
-			// snippet 为「内容预览」：摘要为空时前端会退化成展示这段正文片段
+			// snippet 为「内容预览」：摘要为空时前端会退化成展示这段正文片段。
+			// 可见范围：非公开内容不输出正文片段，避免从搜索结果绕过登录 / 积分限制
+			snippet := ""
+			if model.ScopeNormalize(article.Scope) == model.ScopePublic {
+				snippet = this.snippetKeyword(article.Content, word, 40, 100)
+			}
 			data = append(data, map[string]any{
-				"id":          article.Id,
-				"title":       article.Title,
-				"covers":      article.Covers,
-				"abstract":    article.Abstract,
-				"snippet":     this.snippetKeyword(article.Content, word, 40, 100),
-				"create_time": article.CreateTime,
-				"tags":        article.Tags,
-				"views":       article.Views,
-				"audit":       article.Audit,
+				"id":             article.Id,
+				"title":          article.Title,
+				"covers":         article.Covers,
+				"abstract":       article.Abstract,
+				"snippet":        snippet,
+				"create_time":    article.CreateTime,
+				"tags":           article.Tags,
+				"views":          article.Views,
+				"audit":          article.Audit,
+				"scope":          model.ScopeNormalize(article.Scope),
+				"scope_integral": article.ScopeIntegral,
 			})
 		}
 	case []model.Pages:
 		for _, page := range v {
+			snippet := ""
+			if model.ScopeNormalize(page.Scope) == model.ScopePublic {
+				snippet = this.snippetKeyword(page.Content, word, 40, 100)
+			}
 			data = append(data, map[string]any{
-				"id":          page.Id,
-				"key":         page.Key,
-				"title":       page.Title,
-				"snippet":     this.snippetKeyword(page.Content, word, 40, 100),
-				"create_time": page.CreateTime,
-				"views":       page.Views,
-				"audit":       page.Audit,
+				"id":             page.Id,
+				"key":            page.Key,
+				"title":          page.Title,
+				"snippet":        snippet,
+				"create_time":    page.CreateTime,
+				"views":          page.Views,
+				"audit":          page.Audit,
+				"scope":          model.ScopeNormalize(page.Scope),
+				"scope_integral": page.ScopeIntegral,
 			})
 		}
 	case []model.Tags:
@@ -268,14 +281,21 @@ func (this *Search) processSearchResult(items any, count int64, limit int, searc
 		}
 	case []model.Moments:
 		for _, moment := range v {
+			// 可见范围：非公开动态不输出正文 / 图片
+			content, images := moment.Content, moment.Images
+			if model.ScopeNormalize(moment.Scope) != model.ScopePublic {
+				content, images = "", ""
+			}
 			data = append(data, map[string]any{
-				"id":          moment.Id,
-				"content":     moment.Content,
-				"images":      moment.Images,
-				"location":    moment.Location,
-				"create_time": moment.CreateTime,
-				"audit":       moment.Audit,
-				"status":      moment.Status,
+				"id":             moment.Id,
+				"content":        content,
+				"images":         images,
+				"location":       moment.Location,
+				"create_time":    moment.CreateTime,
+				"audit":          moment.Audit,
+				"status":         moment.Status,
+				"scope":          model.ScopeNormalize(moment.Scope),
+				"scope_integral": moment.ScopeIntegral,
 			})
 		}
 	}

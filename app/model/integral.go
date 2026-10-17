@@ -29,6 +29,7 @@ const (
 	IntegralTypeRefund        = "refund"         // 订单取消/退款返还（获得）
 	IntegralTypeGive          = "give"           // 管理员调整
 	IntegralTypeCard          = "card"           // 卡密兑换（获得）
+	IntegralTypeUnlock        = "unlock"         // 兑换内容可见权限（消耗 / 作者收入）
 )
 
 // defaultIntegralRules - 默认积分任务规则（作为配置缺失时的兜底）

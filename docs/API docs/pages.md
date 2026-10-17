@@ -4,6 +4,8 @@
 
 页面管理控制器，提供独立页面的 CRUD 操作及数据统计功能。
 
+> 可见范围（公开 / 登录可见 / 付费可见-积分兑换）见 [content-scope.md](./content-scope.md)：`scope` + `scope_integral` 字段，无权查看时正文会被清空并回传 `scope_state`。
+
 ### 审核字段说明
 
 | 审核值 | 说明 |

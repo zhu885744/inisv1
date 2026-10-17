@@ -524,6 +524,18 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {"path=block&type=login&name=拉黑用户"},
 			"PUT":  {"path=unblock&type=login&name=解除拉黑"},
 		},
+		// 内容可见范围（登录可见 / 付费可见）：
+		//   - check 供详情页判断是否需要登录 / 兑换，必须允许匿名调用（登录时也能读到自己的状态）；
+		//   - pay / list 需要登录。
+		"unlock": {
+			"GET": {
+				"path=check&type=common&name=可见范围状态",
+				"path=list&type=login&name=我的兑换记录",
+			},
+			"POST": {
+				"path=pay&type=login&name=兑换内容可见权限",
+			},
+		},
 		// 举报：前台提交 / 撤回自己的举报；后台列表与处理需要权限点（控制器里用 meta.permit 判定）
 		"report": {
 			"GET": {

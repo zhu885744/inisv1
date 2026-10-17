@@ -30,7 +30,12 @@ type Article struct {
 	// ⚠ 不要 default:1 —— GORM 在 Create 时会把零值字段替换成 default 值，
 	// 草稿（status=0）会被写成 1（已发布），草稿箱失效
 	Status     int    `gorm:"type:int(12); comment:状态 0-草稿 1-发布;" json:"status"`
-	LastUpdate int64  `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
+	// 可见范围：1-公开（含访客）2-登录可见 3-付费可见；
+	// 付费可见时 ScopeIntegral 为兑换所需积分（兑换记录见 content-unlock.go）
+	// ⚠ default:1：不传 scope 时按公开落库，历史数据（0）在读取时也按公开处理
+	Scope         int    `gorm:"type:int(12); comment:可见范围 1-公开 2-登录可见 3-付费可见; default:1;" json:"scope"`
+	ScopeIntegral int    `gorm:"type:int(32); comment:付费可见所需积分; default:0;" json:"scope_integral"`
+	LastUpdate    int64  `gorm:"comment:最后更新时间; default:0;" json:"last_update"`
 	// 以下为公共字段
 	Json        any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text        any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`

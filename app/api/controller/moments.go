@@ -20,11 +20,11 @@ type Moments struct {
 }
 
 const (
-	momentsAllowFields = "content,images,location,json,text,publish_time,status"
+	momentsAllowFields = "content,images,location,json,text,publish_time,status,scope,scope_integral"
 	momentsAllowQuery  = "id,top,views"
 )
 
-var momentsAllowFieldsSlice = []any{"content", "images", "location", "json", "text", "publish_time", "status"}
+var momentsAllowFieldsSlice = []any{"content", "images", "location", "json", "text", "publish_time", "status", "scope", "scope_integral"}
 var momentsAllowQuerySlice = []any{"id", "top", "views"}
 
 func (this *Moments) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -234,6 +234,9 @@ func (this *Moments) one(ctx *gin.Context) {
 	// 更新动态浏览量
 	go this.updateViews(ctx, cast.ToStringMap(data))
 
+	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
+	data = applyScopeData(ctx, data, "moments")
+
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
 }
 
@@ -281,6 +284,9 @@ func (this *Moments) all(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
+	// 可见范围：列表同样按条脱敏（付费动态只留占位信息）
+	data = applyScopeData(ctx, data, "moments")
+
 	this.json(ctx, gin.H{
 		"data":  data,
 		"count": count,
@@ -311,12 +317,15 @@ func (this *Moments) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 
 	items, _ := mold.Select()
-	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
+	var data any = utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {
 		this.json(ctx, nil, facade.Lang(ctx, "无数据！"), 204)
 		return
 	}
+
+	// 可见范围：随机获取同样脱敏
+	data = applyScopeData(ctx, data, "moments")
 
 	this.json(ctx, data, facade.Lang(ctx, "好的！"), 200)
 }
@@ -753,6 +762,9 @@ func (this *Moments) column(ctx *gin.Context) {
 		this.setCache(ctx, cacheName, data)
 	}
 
+	// 可见范围：column 也可能取到 content，同样按条脱敏
+	data = applyScopeData(ctx, data, "moments")
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -922,6 +934,9 @@ func (this *Moments) comment(ctx *gin.Context) {
 		code = 200
 		msg[0] = "数据请求成功！"
 	}
+
+	// 可见范围：动态下的评论同样支持登录可见 / 付费可见，无权查看时清空正文
+	data = applyScopeData(ctx, data, "comment")
 
 	this.json(ctx, gin.H{
 		"data":  data,

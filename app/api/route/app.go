@@ -42,6 +42,7 @@ var controllers = map[string]controller.ApiInterface{
 	"config":        &controller.Config{},
 	"article":       &controller.Article{},
 	"comment":       &controller.Comment{},
+	"unlock":        &controller.Unlock{},
 	"placard":       &controller.Placard{},
 	"api-keys":      &controller.ApiKeys{},
 	"ip-black":      &controller.IpBlack{},
