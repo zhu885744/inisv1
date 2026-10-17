@@ -966,10 +966,16 @@ func (this *Comment) update(ctx *gin.Context) {
 		return
 	}
 
-	err := validator.NewValid("comment", params)
-	if err != nil {
-		this.json(ctx, nil, err.Error(), 400)
-		return
+	// 后台「通过 / 驳回」只提交 {id, audit, reason}，不带 content；
+	// 而 comment 验证器把 content 标成了 required（发表评论必填），
+	// 无条件校验会把这两个按钮直接打成 400「content 不能为空！」。
+	// 因此只有真的提交了正文（编辑评论）时才跑完整校验。
+	var err error
+	if _, ok := params["content"]; ok {
+		if err = validator.NewValid("comment", params); err != nil {
+			this.json(ctx, nil, err.Error(), 400)
+			return
+		}
 	}
 
 	table := model.Comment{}
