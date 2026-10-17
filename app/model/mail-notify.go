@@ -72,6 +72,9 @@ func MailNotifyScenes() []MailNotifyScene {
 		{Key: "moments.pending", Label: "动态待审核", Group: "内容审核", Target: MailTargetAdmin, Default: 1, Desc: "用户发布动态进入待审核时，通知管理员去审核"},
 		{Key: "moments.passed", Label: "动态审核通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "动态审核通过时通知作者"},
 		{Key: "moments.rejected", Label: "动态审核未通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "动态被驳回时通知作者"},
+		{Key: "comment.pending", Label: "评论待审核", Group: "内容审核", Target: MailTargetAdmin, Default: 1, Desc: "评论进入待审核时，通知管理员去审核"},
+		{Key: "comment.passed", Label: "评论审核通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "评论审核通过时通知评论者"},
+		{Key: "comment.rejected", Label: "评论审核未通过", Group: "内容审核", Target: MailTargetUser, Default: 1, Desc: "评论被驳回时通知评论者（含驳回原因）"},
 
 		// ---------- 评论互动 ----------
 		{Key: "comment.notify", Label: "评论通知（内容作者）", Group: "评论互动", Target: MailTargetUser, Default: 1, Desc: "有人评论文章 / 页面 / 动态时通知内容作者"},

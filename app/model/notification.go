@@ -31,6 +31,9 @@ const (
 	// 被 @ 提及（文章 / 动态 / 独立页 / 评论里 @ 到了当前用户）
 	// bind_type/bind_id 指向被 @ 的内容，点击跳到该内容；@ 的解析见 app/model/mention.go
 	NotificationTypeMention = "mention"
+	// 内容被兑换（付费可见）：其他用户消耗积分兑换后通知作者
+	// bind_type/bind_id 指向被兑换的内容，点击跳到该内容；发送见 model.SendUnlockNotify
+	NotificationTypeUnlock = "unlock"
 )
 
 type Notification struct {

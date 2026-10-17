@@ -918,9 +918,14 @@ func (this *Moments) comment(ctx *gin.Context) {
 	query := this.withTrashOptions(facade.DB.Model(&result), params)
 	query = this.buildQuery(query, params)
 	query = query.Where("bind_type", "moments").Where("bind_id", bindId)
+
+	// 前台评论列表只返回审核通过的评论（与 comment/flat 同一口径），
+	// 否则动态详情页会把待审核评论直接展示给访客
+	query = query.Where("audit", AuditPassed)
 	count, _ := query.Count()
 
-	cacheName := this.cache.name(ctx)
+	// key 带 audit=passed 后缀：让加入过滤前写入的旧缓存（可能含待审核评论）自然失效
+	cacheName := this.cache.name(ctx) + "&audit=passed"
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
@@ -955,6 +960,9 @@ func (this *Moments) commentCount(ctx *gin.Context) {
 	if bindId > 0 {
 		query = query.Where("bind_id", bindId)
 	}
+
+	// 与列表同一口径：只统计审核通过的评论
+	query = query.Where("audit", AuditPassed)
 
 	count, _ := query.Count()
 	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)

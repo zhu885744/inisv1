@@ -279,6 +279,11 @@ func NotifyMentionsOnCommentApprove(commentId int) {
 	row, _ := facade.DB.Model(&Comment{}).Where("id", commentId).Find()
 	item := cast.ToStringMap(row)
 
+	// 仅作者可见的评论：被 @ 的人看不到正文，通知只会泄露内容，直接跳过
+	if cast.ToInt(item["scope"]) == ScopeAuthor {
+		return
+	}
+
 	content := strings.TrimSpace(cast.ToString(item["content"]))
 	uid := cast.ToInt(item["uid"])
 	if content == "" || uid <= 0 {

@@ -77,7 +77,7 @@ func (this *Unlock) check(ctx *gin.Context) {
 		return
 	}
 
-	owner, scope, integral, err := model.ScopeContentInfo(bindType, bindId)
+	owner, scope, integral, _, err := model.ScopeContentInfo(bindType, bindId)
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
 		return

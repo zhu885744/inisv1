@@ -38,11 +38,14 @@
 | 文章/页面/动态被点赞 | `like` | 内容作者 | "xxx 赞了你的{内容类型}「{内容标题}」" |
 | 文章/页面/动态被收藏 | `collect` | 内容作者 | "xxx 收藏了你的{内容类型}「{内容标题}」" |
 | 被用户关注 | `follow` | 被关注者 | "xxx 关注了你" |
+| 付费内容被兑换（积分） | `unlock` | 内容作者 | "xxx 兑换了你的文章《{标题}》内容查看权限"（内容另附：对方消耗 N 积分，积分已转入你的账户；`bind_type` 为 article/moments/page，点击跳到该内容） |
 | 文章进入待审核 / 审核结果 | `article` | 管理员 / 文章作者 | "有新的文章待审核" / "您的文章已通过审核 / 未通过审核"（驳回时内容带「驳回原因：xxx」，邮件见 `article.*`） |
 | 独立页面进入待审核 / 审核结果 | `page` | 管理员 / 作者 | 同文章，文案为「独立页面」，驳回带原因（邮件见 `page.*`） |
 | 友链进入待审核 / 审核结果 | `links` | 管理员 / 申请者 | 同文章，文案为「友链」，驳回带原因（邮件见 `links.*`） |
 | 动态进入待审核 | `moments` | 所有超级管理员 | "您有新的动态「{动态正文摘要}」待审核"（同一事件还会发邮件，见 `moments.pending`） |
 | 动态审核通过 / 未通过 | `moments` | 动态作者 | "您的动态「{动态正文摘要}」审核已通过 / 未通过"（驳回时内容带「驳回原因：xxx」，邮件见 `moments.*`） |
+| 评论进入待审核 | `comment` | 所有超级管理员 | "有新的评论待审核"（内容带评论者账号 / 昵称、评论摘要与来源，邮件见 `comment.pending`；`bind_type`/`bind_id` 指向被评论的内容） |
+| 评论审核通过 / 未通过 | `comment` | 评论者 | "您的评论已通过审核 / 未通过审核"（驳回时内容带「驳回原因：xxx」，邮件见 `comment.*`） |
 | 管理员调整积分 | `system` | 目标用户 | "管理员为你增加了 N 积分，当前积分余额为 M。"（归入系统通知，不单独占用类型） |
 | 管理员绑定卡密给用户 | `system` | 目标用户 | "你收到了积分卡密"（`bind_type=integral-card`，内容含卡密明文与兑换入口，见 `integral/card-bind`） |
 | 系统消息 | `system` | 指定用户 / 全体 | 管理员通过 `send-system` 发送；`target_type=all` 时生成一条广播（uid=0） |
@@ -85,7 +88,7 @@
 | `id` | int | 主键，自增 |
 | `uid` | int | 接收通知的用户ID |
 | `from_uid` | int | 触发通知的用户ID |
-| `type` | string | 通知类型：comment/like/collect/follow/article/page/links/moments/system（管理员调整积分触发的积分变动通知归入 `system`） |
+| `type` | string | 通知类型：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/system（管理员调整积分触发的积分变动通知归入 `system`） |
 | `title` | string | 通知标题 |
 | `content` | string | 通知内容 |
 | `bind_id` | int | 关联实体ID（文章/评论/用户等） |
@@ -131,7 +134,7 @@
 | `page` | int | 否 | 页码，默认1 |
 | `size` | int | 否 | 每页数量 |
 | `order` | string | 否 | 排序字段，默认 `create_time desc` |
-| `type` | string | 否 | 通知类型过滤：comment/like/collect/follow/article/page/links/moments/system |
+| `type` | string | 否 | 通知类型过滤：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/system |
 | `is_read` | int | 否 | 已读状态过滤：0=未读，1=已读；**不传 / 传空串 / 传 null 均表示「全部」** |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 

@@ -13,10 +13,12 @@ import (
 //
 // 约定：
 //   - 文章 / 动态 / 独立页面有 scope（1 公开 / 2 登录可见 / 3 付费可见）与 scope_integral（兑换所需积分）两个字段；
-//   - **评论不支持付费可见**（见 model.ScopePaySupported）：评论只有 scope（1 公开 / 2 登录可见），没有积分字段，
-//     历史数据里的 3 一律按「登录可见」处理；
+//   - **评论不支持付费可见**（见 model.ScopePaySupported）：评论只有 scope（1 公开 / 2 登录可见 / 4 仅作者可见），
+//     没有积分字段，历史数据里的 3 一律按「登录可见」处理；
+//   - 「仅作者可见」只对评论开放（见 model.ScopeAuthorSupported）：「作者」指**被评论内容的作者**，
+//     评论者本人与管理员同样可看，其他登录用户 / 访客只看到占位提示；
 //   - 无权查看时**不报错**，而是清空正文 / 图片，并在返回体里补上：
-//     scope（归一化后的范围）、scope_integral（所需积分）、scope_state（login 需登录 / pay 需兑换）；
+//     scope（归一化后的范围）、scope_integral（所需积分）、scope_state（login 需登录 / pay 需兑换 / author 仅作者可见）；
 //   - 作者本人不受限制；管理员仅在**后台管理界面**发起的请求里豁免（见 newScopeGuard），
 //     这样在前台浏览时同样能看到真实的付费墙效果；付费内容的解锁记录见 model/content-unlock.go。
 
@@ -32,6 +34,9 @@ var scopeHideFields = map[string][]string{
 type scopeGuard struct {
 	uid   int
 	admin bool
+	// 评论「仅作者可见」需要知道被评论内容的作者 uid；
+	// 一次列表请求里同一条内容会命中很多评论，用 map 缓存避免逐条查库
+	authors map[string]int
 }
 
 // 后台管理界面标记（前端 utils/request 在 /admin 路径下自动附加）
@@ -54,11 +59,27 @@ const (
 // 而不是「有没有 article/one 这个接口的权限点」：前台接口（common）本来就不会出现在
 // 后台权限树里，用接口权限点判定会让非 root 运营在后台编辑时看不到正文。
 func newScopeGuard(ctx *gin.Context) scopeGuard {
-	guard := scopeGuard{uid: meta{}.user(ctx).Id}
+	guard := scopeGuard{uid: meta{}.user(ctx).Id, authors: make(map[string]int)}
 	if guard.uid > 0 && ctx.GetHeader(scopeAdminHeader) == scopeAdminFlag {
 		guard.admin = backendUser(guard.uid)
 	}
 	return guard
+}
+
+// contentAuthor - 取评论所属内容的作者 uid（带请求级缓存）
+func (this scopeGuard) contentAuthor(bindType string, bindId int) int {
+	if bindId <= 0 || this.authors == nil {
+		return 0
+	}
+
+	key := bindType + ":" + cast.ToString(bindId)
+	if owner, exist := this.authors[key]; exist {
+		return owner
+	}
+
+	owner := model.ScopeCommentContentOwner(bindType, bindId)
+	this.authors[key] = owner
+	return owner
 }
 
 // backendUser - 是否为后台用户（root 分组，或所在分组配置了后台页面权限）
@@ -84,15 +105,30 @@ func backendUser(uid int) bool {
 // access - 判定单条内容对当前请求者的可见状态
 //
 // unlocked 为批量查询出来的已解锁内容集合；传 nil 时按单条查库。
-func (this scopeGuard) access(owner, scope, bindId int, bindType string, unlocked map[int]bool) string {
+// contentOwner 仅评论的「仅作者可见」需要：被评论内容的作者 uid（不传视为 0）。
+func (this scopeGuard) access(owner, scope, bindId int, bindType string, unlocked map[int]bool, contentOwner ...int) string {
 
-	// 管理员 / 作者本人：不受可见范围限制
+	// 管理员 / 作者本人（评论者 / 内容作者都算）：不受可见范围限制
 	if this.admin || (this.uid > 0 && owner > 0 && owner == this.uid) {
 		return model.ScopeStateAllow
 	}
 
 	// 按内容类型归一化：评论不支持付费可见，3 会降级为「登录可见」
-	switch model.ScopeForBind(bindType, scope) {
+	scope = model.ScopeForBind(bindType, scope)
+
+	// 仅作者可见（评论）：除评论者本人外，只有被评论内容的作者能看到
+	if scope == model.ScopeAuthor {
+		author := 0
+		if len(contentOwner) > 0 {
+			author = contentOwner[0]
+		}
+		if this.uid > 0 && author > 0 && author == this.uid {
+			return model.ScopeStateAllow
+		}
+		return model.ScopeStateAuthor
+	}
+
+	switch scope {
 	case model.ScopeLogin:
 		// 登录可见：访客只看到提示
 		if this.uid == 0 {
@@ -130,7 +166,14 @@ func (this scopeGuard) redact(row map[string]any, bindType string, unlocked map[
 	bindId := cast.ToInt(row["id"])
 	owner := cast.ToInt(row["uid"])
 
-	state := this.access(owner, scope, bindId, bindType, unlocked)
+	// 仅作者可见：作者是「被评论内容的作者」，不是评论者本人，
+	// 需要按评论的 bind_type / bind_id 反查（结果按内容缓存，不逐条查库）
+	contentAuthor := 0
+	if scope == model.ScopeAuthor {
+		contentAuthor = this.contentAuthor(cast.ToString(row["bind_type"]), cast.ToInt(row["bind_id"]))
+	}
+
+	state := this.access(owner, scope, bindId, bindType, unlocked, contentAuthor)
 
 	// 可查看：原样返回（不做任何写入，缓存协程可能正在序列化同一份数据）
 	if state == model.ScopeStateAllow {

@@ -21,7 +21,7 @@ type Comment struct {
 }
 
 const (
-	// 评论只有 1 公开 / 2 登录可见，没有付费可见，因此不接受 scope_integral
+	// 评论可见范围：1 公开 / 2 登录可见 / 4 仅作者可见；没有付费可见，因此不接受 scope_integral
 	commentAllowFields = "pid,content,images,bind_id,bind_type,editor,json,text,scope"
 	commentAllowQuery  = "id,pid,bind_id,bind_type,editor"
 )
@@ -60,6 +60,33 @@ func (this *Comment) setCache(ctx *gin.Context, cacheName string, data any) {
 	if this.cache.enable(ctx) {
 		go facade.Cache.Set(cacheName, data)
 	}
+}
+
+// canAuditAll - 是否可见全部审核状态的评论
+//
+// 只有管理员（root 分组，或被授予该接口权限点的后台用户）能看「待审核 / 未通过」；
+// 普通用户与访客只能看 audit=1 的评论。
+func (this *Comment) canAuditAll(ctx *gin.Context) bool {
+	return this.meta.permit(ctx)
+}
+
+// withAuditFilter - 非管理员只保留「审核通过」的评论
+func (this *Comment) withAuditFilter(query *facade.ModelStruct, ctx *gin.Context) *facade.ModelStruct {
+	if this.canAuditAll(ctx) {
+		return query
+	}
+	return query.Where("audit", AuditPassed)
+}
+
+// auditCacheName - 缓存名带上「审核可见性」视角
+//
+// 缓存名只由请求参数生成、不区分身份：若管理员先请求，会把「含待审核」的结果写进缓存，
+// 随后游客命中同一 key 就能看到待审核评论。这里把视角拼进 key，两种视角各自独立缓存。
+func (this *Comment) auditCacheName(ctx *gin.Context) string {
+	if this.canAuditAll(ctx) {
+		return this.cache.name(ctx) + "&audit=all"
+	}
+	return this.cache.name(ctx) + "&audit=passed"
 }
 
 func (this *Comment) processFieldValue(val any) any {
@@ -135,12 +162,15 @@ func (this *Comment) aggregateQuery(ctx *gin.Context, aggFunc func(query *facade
 		query = query.WhereIn("id", ids)
 	}
 
+	// 验证：聚合统计同样不能把待审核评论算进去
+	query = this.withAuditFilter(query, ctx)
+
 	fields := utils.Unity.Keys(params["field"])
 	if utils.Is.Empty(fields) {
 		return nil, ""
 	}
 
-	cacheName := this.cache.name(ctx)
+	cacheName := this.auditCacheName(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
@@ -277,13 +307,15 @@ func (this *Comment) one(ctx *gin.Context) {
 		}
 	}
 
-	cacheName := this.cache.name(ctx)
+	cacheName := this.auditCacheName(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
 		query := this.withTrashOptions(facade.DB.Model(&table), params)
 		query = this.buildQuery(query, params)
+		// 单条查询同样要过审核：否则知道 id 就能直接读到待审核 / 未通过的评论
+		query = this.withAuditFilter(query, ctx)
 		item, _ := query.Where(table).Find()
 		data = facade.Comm.WithField(item, params["field"])
 		this.setCache(ctx, cacheName, data)
@@ -327,13 +359,11 @@ func (this *Comment) all(ctx *gin.Context) {
 	query = this.buildQuery(query, params)
 
 	// 非管理员只看「审核通过」的评论（审核未通过 / 待审核的评论对前台不可见，口径同文章 / 动态）
-	if !this.meta.root(ctx) {
-		query = query.Where("audit", AuditPassed)
-	}
+	query = this.withAuditFilter(query, ctx)
 
 	count, _ := query.Where(table).Count()
 
-	cacheName := this.cache.name(ctx)
+	cacheName := this.auditCacheName(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
@@ -372,6 +402,7 @@ func (this *Comment) rand(ctx *gin.Context) {
 		mold.Where("id", "NOT IN", except)
 	}
 	mold = this.buildQuery(mold, params)
+	mold = this.withAuditFilter(mold, ctx)
 
 	item, _ := mold.Order("RAND()").Limit(limit).Select()
 	data := this.maskCommentData(ctx, utils.ArrayMapWithField(item, params["field"]))
@@ -393,6 +424,105 @@ func (this *Comment) save(ctx *gin.Context) {
 		this.create(ctx)
 	} else {
 		this.update(ctx)
+	}
+}
+
+// commentSummary - 评论正文摘要（审核通知的邮件 / 站内信文案用）
+func commentSummary(content string) string {
+	text := cleanSearchText(content)
+	if utils.Is.Empty(text) {
+		return "（无正文）"
+	}
+
+	runes := []rune(text)
+	if len(runes) > 30 {
+		return string(runes[:30]) + "..."
+	}
+	return text
+}
+
+// commentBindTitle - 评论所属内容的展示名（邮件 / 站内信里标明评论来源）
+//
+// 文章 / 页面取标题，动态没有标题则用正文摘要（与评论通知邮件模板的口径一致）。
+func commentBindTitle(bindType string, bindId int) string {
+	if bindId <= 0 {
+		return ""
+	}
+
+	var table any
+	switch bindType {
+	case "article":
+		table = &model.Article{}
+	case "page":
+		table = &model.Pages{}
+	case "moments":
+		table = &model.Moments{}
+	default:
+		return ""
+	}
+
+	item, _ := facade.DB.Model(table).Where("id", bindId).Find()
+	data := cast.ToStringMap(item)
+
+	if title := strings.TrimSpace(cast.ToString(data["title"])); !utils.Is.Empty(title) {
+		return title
+	}
+
+	return commentSummary(cast.ToString(data["content"]))
+}
+
+// notifyCommentAudit - 评论审核状态变化时发通知（邮件 + 站内信）
+//
+// 与文章 / 动态 / 页面共用一套规则（见 controller/mail-notify.go）：
+//   - 进入待审核 → 通知管理员（comment.pending），站内信正文带上评论者身份；
+//   - 审核通过 → 通知评论者（comment.passed）；
+//   - 审核未通过 → 通知评论者（comment.rejected），并带上驳回原因。
+//
+// 站内信固定发，邮件受「系统设置 → 邮件通知 → 内容审核」的场景开关控制；
+// 跳转目标用被评论内容的 bind_type / bind_id，点消息直接回到内容页。
+func notifyCommentAudit(uid int, content string, audit int, reason, bindType string, bindId int) {
+	if uid <= 0 {
+		return
+	}
+
+	summary := commentSummary(content)
+	source := commentBindTitle(bindType, bindId)
+	nowText := model.MailNotifyTime()
+	reason = strings.TrimSpace(reason)
+
+	lines := []string{"评论：" + summary}
+	if !utils.Is.Empty(source) {
+		lines = append(lines, "来源："+source)
+	}
+	lines = append(lines, "时间："+nowText)
+	if audit == AuditReject && !utils.Is.Empty(reason) {
+		lines = append(lines, "驳回原因："+reason)
+	}
+
+	// 站内信正文：驳回原因放最前面（消息列表内容区只有 2 行高度），跳转目标为被评论内容
+	notifyContent := "时间：" + nowText
+	if !utils.Is.Empty(source) {
+		notifyContent = "来源：" + source + " · " + notifyContent
+	}
+	if audit == AuditReject && !utils.Is.Empty(reason) {
+		notifyContent = "驳回原因：" + reason + " · " + notifyContent
+	}
+
+	switch audit {
+	case AuditPending:
+		title := "有新的评论待审核"
+		account, nickname := model.MailNotifyUserIdentity(uid)
+		model.MailNotifyAdmin("comment.pending", title, append(model.MailNotifyUserInfo(uid), lines...)...)
+		model.NotifyAdmins(uid, model.NotificationTypeComment, title,
+			"评论者："+nickname+"（"+account+"） · "+notifyContent, bindType, bindId)
+	case AuditPassed:
+		title := "您的评论已通过审核"
+		model.MailNotifyUser(uid, "comment.passed", title, lines...)
+		model.CreateUserNotify(uid, 0, model.NotificationTypeComment, title, notifyContent, bindType, bindId)
+	case AuditReject:
+		title := "您的评论未通过审核"
+		model.MailNotifyUser(uid, "comment.rejected", title, lines...)
+		model.CreateUserNotify(uid, 0, model.NotificationTypeComment, title, notifyContent, bindType, bindId)
 	}
 }
 
@@ -600,6 +730,12 @@ func (this *Comment) create(ctx *gin.Context) {
 		return
 	}
 
+	// 审核通知：评论进入待审核时提醒管理员（与文章 / 动态同一套规则）
+	// 站内信始终发，邮件受「系统设置 → 邮件通知 → 内容审核 → 评论待审核」控制
+	if cast.ToInt(table.Audit) == AuditPending {
+		go notifyCommentAudit(user.Id, table.Content, AuditPending, "", table.BindType, table.BindId)
+	}
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -725,8 +861,9 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 
 			// 回复通知：发给被回复的人（场景 comment.reply）
-			// 回复自己、或被回复人没有邮箱时不发
-			if table.Pid > 0 {
+			// 回复自己、或被回复人没有邮箱时不发；
+			// 「仅作者可见」的评论只应让内容作者看到，不能让被回复的其他人拿到正文
+			if table.Pid > 0 && cast.ToInt(table.Scope) != model.ScopeAuthor {
 				parentComment, _ := facade.DB.Model(&model.Comment{}).Where("id", table.Pid).Find()
 				if !utils.Is.Empty(parentComment) {
 					parentUid := cast.ToInt(cast.ToStringMap(parentComment)["uid"])
@@ -795,8 +932,9 @@ func (this *Comment) create(ctx *gin.Context) {
 	}()
 
 	// @ 提及通知：只发给「被 @ 到的人」（内容作者那条已由上面的逻辑发出）。
-	// 评论待审核（audit=0）时不发：评论可能不被展示，通知过去也看不到内容。
-	if cast.ToInt(table.Audit) == 1 {
+	// 评论待审核（audit=0）时不发：评论可能不被展示，通知过去也看不到内容；
+	// 「仅作者可见」同样不发 —— 被 @ 的人看不到正文，通知只会泄露内容。
+	if cast.ToInt(table.Audit) == 1 && cast.ToInt(table.Scope) != model.ScopeAuthor {
 		go (&model.Mention{}).NotifyNew(mentionTargets, user.Id, "评论", table.BindType, table.BindId, table.Content, "")
 	}
 
@@ -870,6 +1008,11 @@ func (this *Comment) update(ctx *gin.Context) {
 
 	payload := async.Result()
 
+	// 审核通过时清掉上一次的驳回原因，避免列表里残留旧原因
+	if cast.ToInt(payload["audit"]) == AuditPassed {
+		payload["reason"] = ""
+	}
+
 	// @ 提及：编辑评论时同样规范化（匹配范围仍是评论作者已关注的人），
 	// 否则手动输入的 @昵称 永远变不成链接
 	if _, ok := payload["content"]; ok {
@@ -885,12 +1028,27 @@ func (this *Comment) update(ctx *gin.Context) {
 		return
 	}
 
-	// 评论审核通过时补发 @ 提及通知：待审核阶段故意不发（评论不展示，点进去看不到），
+	// 审核状态变化 → 发通知（邮件 + 站内信）；普通编辑（audit 未进 payload）不打扰任何人。
+	// 评论审核通过时还要补发 @ 提及通知：待审核阶段故意不发（评论不展示，点进去看不到），
 	// 所以「待审核 → 通过」这一刻必须补 —— 这就是后台「通过」按钮这条路径。
-	// 只在审核状态真正发生变化时补，普通编辑（audit 未进 payload）不会重复打扰。
 	if rawAudit, ok := payload["audit"]; ok {
-		if nowAudit := cast.ToInt(rawAudit); nowAudit == AuditPassed && nowAudit != cast.ToInt(itemData["audit"]) {
-			go model.NotifyMentionsOnCommentApprove(cast.ToInt(params["id"]))
+		nowAudit := cast.ToInt(rawAudit)
+		if prevAudit := cast.ToInt(itemData["audit"]); nowAudit != prevAudit {
+			// 后台点「通过 / 驳回」时通常只传 audit（+ reason），正文沿用库里的
+			content := cast.ToString(payload["content"])
+			if utils.Is.Empty(content) {
+				content = cast.ToString(itemData["content"])
+			}
+
+			go notifyCommentAudit(
+				cast.ToInt(itemData["uid"]), content, nowAudit,
+				cast.ToString(payload["reason"]),
+				cast.ToString(itemData["bind_type"]), cast.ToInt(itemData["bind_id"]),
+			)
+
+			if nowAudit == AuditPassed {
+				go model.NotifyMentionsOnCommentApprove(cast.ToInt(params["id"]))
+			}
 		}
 	}
 
@@ -961,7 +1119,10 @@ func (this *Comment) column(ctx *gin.Context) {
 		query = query.WhereIn("id", ids)
 	}
 
-	cacheName := this.cache.name(ctx)
+	// 取列可能拿到 content，同样按审核状态过滤
+	query = this.withAuditFilter(query, ctx)
+
+	cacheName := this.auditCacheName(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached
@@ -1113,7 +1274,10 @@ func (this *Comment) replies(pid any, ctx *gin.Context) (ids []int) {
 
 	var result []model.Comment
 	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
-	mold.Where("pid", pid).Column("id")
+	mold = mold.Where("pid", pid)
+	// 子回复只取审核通过的：否则「通过」的父评论下会带出待审核的回复
+	mold = mold.Where("audit", AuditPassed)
+	mold.Column("id")
 	mold.Select()
 
 	for _, val := range result {
@@ -1154,9 +1318,14 @@ func (this *Comment) flat(ctx *gin.Context) {
 	mold := facade.DB.Model(&result).Where("pid", 0)
 	mold = this.withTrashOptions(mold, params)
 	mold = this.buildQuery(mold, params)
+	// 前台评论树只返回「审核通过」的评论：待审核 / 未通过的评论对任何前台访问者
+	// （含作者本人与管理员）都不展示，避免把审核中内容当成已发布内容显示。
+	// 刚提交的评论由前端本地「待审核」占位提示，审核通过后重新拉取才会出现。
+	mold = mold.Where("audit", AuditPassed)
 	count, _ := mold.Where(table).Count()
 
-	cacheName := this.cache.name(ctx)
+	// key 带 audit=passed 后缀：让加入过滤前写入的旧缓存（可能含待审核评论）自然失效
+	cacheName := this.cache.name(ctx) + "&audit=passed"
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
 		data = cached

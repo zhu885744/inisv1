@@ -31,10 +31,11 @@ type Comment struct {
 	// 历史评论（AutoMigrate 补列那批）早已按「已通过」落库，不需要再靠 tag 的默认值兜底。
 	Audit  int    `gorm:"type:int(12); index; comment:审核;" json:"audit"`
 	Reason string `gorm:"size:512; comment:审核未通过原因; default:Null;" json:"reason"`
-	// 可见范围：1-公开 2-登录可见
+	// 可见范围：1-公开 2-登录可见 4-仅作者可见（仅评论支持，见 model.ScopeAuthorSupported）
 	// 评论**不支持付费可见**（见 model.ScopePaySupported）：因此没有兑换积分字段，
 	// 历史数据里的 scope=3 会在接口层按「登录可见」处理，无权查看时只回传占位信息。
-	Scope int `gorm:"type:int(12); comment:可见范围 1-公开 2-登录可见; default:1;" json:"scope"`
+	// 「仅作者可见」只对被评论内容的作者、评论者本人与管理员可见。
+	Scope int `gorm:"type:int(12); comment:可见范围 1-公开 2-登录可见 4-仅作者可见; default:1;" json:"scope"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`

@@ -652,6 +652,8 @@
 | `article.rejected` / `page.rejected` / `links.rejected` | 作者 | 审核未通过（audit=2） |
 | `moments.pending` | 管理员 | 动态进入待审核（`audit=0`） |
 | `moments.passed` / `moments.rejected` | 动态作者 | 动态审核通过 / 未通过 |
+| `comment.pending` | 管理员 | 评论进入待审核（`audit=0`） |
+| `comment.passed` / `comment.rejected` | 评论者 | 评论审核通过 / 未通过（驳回带原因） |
 | `comment.notify` | 内容作者 | 有人评论文章 / 页面 / 动态 |
 | `comment.reply` | 被回复人 | 有人回复评论 |
 | `user.pending` | 管理员 | 注册需人工审核 |
