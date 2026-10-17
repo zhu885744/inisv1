@@ -249,14 +249,14 @@ func (this *client) handleAuth(token string) {
 		return
 	}
 
-	// 解析 token
-	jwt := facade.Jwt().Parse(token)
-	if jwt.Error != nil {
-		socketLog("auth token 解析失败: %s, 错误: %v", this.info.ID, jwt.Error)
+	// 校验凭证：先查服务端会话，未命中再兼容旧 JWT（与 HTTP 中间件同一口径）
+	identity, err := facade.AuthenticateToken(token)
+	if err != nil {
+		socketLog("auth token 校验失败: %s, 错误: %v", this.info.ID, err)
 		return
 	}
 
-	uid := cast.ToInt(jwt.Data["uid"])
+	uid := identity.Uid
 	if uid <= 0 {
 		return
 	}
@@ -268,8 +268,8 @@ func (this *client) handleAuth(token string) {
 	}
 	userMap := cast.ToStringMap(user)
 
-	// 校验密码哈希（与 Jwt 中间件 validatePasswordHash 逻辑一致）
-	if utils.Hash.Sum32(userMap["password"]) != jwt.Data["hash"] {
+	// 校验密码哈希（与 Jwt 中间件 validatePasswordHash 逻辑一致）：改密后旧会话立即失效
+	if utils.Hash.Sum32(userMap["password"]) != identity.Hash {
 		socketLog("auth token 密码哈希不匹配: %s", this.info.ID)
 		return
 	}

@@ -92,7 +92,8 @@ func (this base) error(ctx *gin.Context, msg any, code ...int) {
 
 // setToken 设置登录token到客户的cookie中
 func (this base) setToken(ctx *gin.Context, token any) {
-	expire := cast.ToInt(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
+	// 会话有效期与主站 setToken 保持一致（crypt.toml 的 session.expire，默认 15 天）
+	expire := facade.SessionCookieExpire()
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 	// domain 传空（host-only 写入），与 abortWithError 的清除方式保持一致，
 	// 否则浏览器视为不同 cookie 条目，401/登出时无法清除

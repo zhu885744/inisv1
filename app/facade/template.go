@@ -297,14 +297,9 @@ concurrent_limit = ${attachment.concurrent_limit}
 
 const TempCrypt = `# ======== 加密配置 ========
 
-# JWT配置
-[jwt]
-# 密钥
-key      = "${jwt.key}"
-# 过期时间(秒)
-expire   = "${jwt.expire}"
-# 签发者
-issuer   = "${jwt.issuer}"
-# 主题
-subject  = "${jwt.subject}"
+# 登录会话配置（服务端会话，数据存缓存：session:{sid}）
+[session]
+# 会话有效期(秒) - 支持算式，如 "15 * 24 * 60 * 60" 表示 15 天
+# 滑动续期：最后活跃时间 + 有效期
+expire   = "${session.expire}"
 `

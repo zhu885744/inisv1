@@ -42,12 +42,12 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"login":            this.login,
-		"register":         this.register,
-		"sign-code":        this.signCode, // 验证码登录（邮箱/手机号 + 验证码）
-		"check-token":      this.checkToken,
-		"reset-password":   this.resetPassword,
-		"logout":           this.logout,
+		"login":          this.login,
+		"register":       this.register,
+		"sign-code":      this.signCode, // 验证码登录（邮箱/手机号 + 验证码）
+		"check-token":    this.checkToken,
+		"reset-password": this.resetPassword,
+		"logout":         this.logout,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -207,10 +207,13 @@ func (this *Comm) login(ctx *gin.Context) {
 		return
 	}
 
-	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
-	})
+	// 签发服务端会话（Redis）：token 只是随机会话 id，可随时撤销
+	token, valid, err := facade.SessionLogin(table.Id, utils.Hash.Sum32(table.Password), ctx.ClientIP(), ctx.Request.UserAgent())
+	if err != nil {
+		facade.Log.Error(map[string]any{"uid": table.Id, "error": err.Error()}, "创建登录会话失败")
+		this.json(ctx, nil, facade.Lang(ctx, "登录失败，请稍后重试！"), 500)
+		return
+	}
 
 	// 分级脱敏：登录返回的是「本人」数据 —— 保留自己的账号/邮箱/手机号，
 	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
@@ -224,12 +227,12 @@ func (this *Comm) login(ctx *gin.Context) {
 
 	result := map[string]any{
 		"user":       item,
-		"token":      jwt.Text,
-		"valid_time": jwt.Valid, // 登录会话有效期（秒）
+		"token":      token,
+		"valid_time": valid, // 登录会话有效期（秒）
 	}
 
 	// 往客户端写入cookie - 存储登录token
-	setToken(ctx, jwt.Text)
+	setToken(ctx, token)
 	// 登录增加经验
 	go this.loginExp(item["id"])
 
@@ -480,10 +483,13 @@ func (this *Comm) signCode(ctx *gin.Context) {
 		return
 	}
 
-	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
-	})
+	// 签发服务端会话（Redis）：token 只是随机会话 id，可随时撤销
+	token, valid, err := facade.SessionLogin(table.Id, utils.Hash.Sum32(table.Password), ctx.ClientIP(), ctx.Request.UserAgent())
+	if err != nil {
+		facade.Log.Error(map[string]any{"uid": table.Id, "error": err.Error()}, "创建登录会话失败")
+		this.json(ctx, nil, facade.Lang(ctx, "登录失败，请稍后重试！"), 500)
+		return
+	}
 
 	// 分级脱敏：登录返回的是「本人」数据 —— 保留自己的账号/邮箱/手机号，
 	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
@@ -497,12 +503,12 @@ func (this *Comm) signCode(ctx *gin.Context) {
 
 	result := map[string]any{
 		"user":       item,
-		"token":      jwt.Text,
-		"valid_time": jwt.Valid, // 登录会话有效期（秒）
+		"token":      token,
+		"valid_time": valid, // 登录会话有效期（秒）
 	}
 
 	// 往客户端写入cookie - 存储登录token
-	setToken(ctx, jwt.Text)
+	setToken(ctx, token)
 	// 登录增加经验
 	go this.loginExp(item["id"])
 
@@ -743,7 +749,12 @@ func (this *Comm) register(ctx *gin.Context) {
 	// 可能先把「空的权限缓存」写进 Cache（该缓存无过期时间），导致默认权限长期不生效）
 	this.auth(table.Id)
 
-	// 删除密码
+	// 会话哈希要在清空响应里的密码之前算好：
+	// table.Password 此时是落库的密码哈希，清空后 Sum32 会变成空串，
+	// 会话下次校验时与数据库对不上 → 注册完立刻被判为登录过期
+	sessionHash := utils.Hash.Sum32(table.Password)
+
+	// 删除密码（仅用于响应，避免把哈希返回给前端）
 	table.Password = ""
 
 	// ===== 注册验证方式：人工审核 =====
@@ -772,19 +783,22 @@ func (this *Comm) register(ctx *gin.Context) {
 		return
 	}
 
-	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
-	})
+	// 注册即登录：签发服务端会话（token 只是随机 id）
+	token, valid, err := facade.SessionLogin(table.Id, sessionHash, ctx.ClientIP(), ctx.Request.UserAgent())
+	if err != nil {
+		facade.Log.Error(map[string]any{"uid": table.Id, "error": err.Error()}, "创建登录会话失败")
+		this.json(ctx, nil, facade.Lang(ctx, "注册成功，请稍后登录！"), 200)
+		return
+	}
 
 	result := map[string]any{
 		"user":       table,
-		"token":      jwt.Text,
-		"valid_time": jwt.Valid, // 登录会话有效期（秒）
+		"token":      token,
+		"valid_time": valid, // 登录会话有效期（秒）
 	}
 
 	// 往客户端写入cookie - 存储登录token
-	setToken(ctx, jwt.Text)
+	setToken(ctx, token)
 	// 登录增加经验
 	go this.loginExp(table.Id)
 	// 注册欢迎消息 / 欢迎邮件（按后台开关执行，内部异步）
@@ -971,6 +985,9 @@ func (this *Comm) password(ctx *gin.Context, socialType string) {
 	// 清资料缓存：口径与 users/change-password、users/update 一致
 	facade.Cache.Del(fmt.Sprintf("user[%v]", user["id"]))
 
+	// 重置密码后该账号的所有登录会话立即失效（含其他设备），必须重新登录
+	go facade.SessionDestroyUser(cast.ToInt(user["id"]))
+
 	this.json(ctx, nil, facade.Lang(ctx, "密码重置成功！"), 200)
 }
 
@@ -1018,9 +1035,9 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 		return
 	}
 
-	// 解析token
-	jwt := facade.Jwt().Parse(token)
-	if jwt.Error != nil {
+	// 校验凭证：先查服务端会话，未命中再兼容旧 JWT（迁移期）
+	identity, err := facade.AuthenticateToken(token)
+	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 无效！", "Authorization"), 400)
 		return
 	}
@@ -1028,22 +1045,33 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 	// 表数据结构体
 	table := model.Users{}
 	// 查询用户
-	item, _ := facade.DB.Model(&table).Where("id", jwt.Data["uid"]).Find()
+	item, _ := facade.DB.Model(&table).Where("id", identity.Uid).Find()
 	if utils.Is.Empty(item) {
 		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 204)
 		return
 	}
 
-	// token 有效时长
-	valid := jwt.Valid
+	// 密码哈希：改密 / 重置密码后旧凭证立即失效（与中间件同一口径）
+	if utils.Hash.Sum32(cast.ToStringMap(item)["password"]) != identity.Hash {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 无效！", "Authorization"), 400)
+		return
+	}
 
+	// token 有效时长
+	valid := identity.Valid
+
+	// 续签：作废旧会话、签发新会话；旧 JWT 在这里也会转成 session
 	if cast.ToBool(params["renew"]) {
-		jwt = facade.Jwt().Create(facade.H{
-			"uid":  table.Id,
-			"hash": utils.Hash.Sum32(table.Password),
-		})
-		token = jwt.Text
-		valid = cast.ToInt64(utils.Calc(facade.AppToml.Get("jwt.expire", facade.DefaultJwtExpire)))
+		newToken, newValid, err := facade.SessionLogin(table.Id, identity.Hash, ctx.ClientIP(), ctx.Request.UserAgent())
+		if err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "续签失败，请重新登录！"), 500)
+			return
+		}
+		if !utils.Is.Empty(identity.Sid) {
+			facade.SessionDestroy(identity.Sid)
+		}
+		token = newToken
+		valid = newValid
 		// 往客户端写入cookie - 存储登录token
 		setToken(ctx, token)
 	}
@@ -1078,6 +1106,14 @@ func (this *Comm) logout(ctx *gin.Context) {
 
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 
+	// 服务端撤销会话：JWT 时代退出登录只清 cookie，令牌本身仍然有效；
+	// 现在必须同步删除 Redis 里的 session，否则旧 token 被抓到还能继续用
+	token := ctx.Request.Header.Get("Authorization")
+	if utils.Is.Empty(token) {
+		token, _ = ctx.Cookie(tokenName)
+	}
+	facade.SessionDestroy(token)
+
 	// 清除 cookie：domain 必须与登录时 setToken 的 domain 一致，否则无法清除
 	// 同时兼容带域名和空域名两种写法
 	ctx.SetCookie(tokenName, "", -1, "/", host, false, false)
@@ -1089,7 +1125,7 @@ func (this *Comm) logout(ctx *gin.Context) {
 // 设置登录token到客户的cookie中
 func setToken(ctx *gin.Context, token any) {
 
-	expire := cast.ToInt(utils.Calc(facade.CryptToml.Get("jwt.expire", facade.DefaultJwtExpire)))
+	expire := facade.SessionCookieExpire()
 	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
 
 	// domain 传空：写入 host-only cookie（不带 Domain 属性）。

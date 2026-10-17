@@ -672,10 +672,13 @@ func (this *OAuth) loginResult(ctx *gin.Context, uid int, extra facade.H) bool {
 		return false
 	}
 
-	jwt := facade.Jwt().Create(facade.H{
-		"uid":  table.Id,
-		"hash": utils.Hash.Sum32(table.Password),
-	})
+	// 签发服务端会话（Redis）：与密码登录、验证码登录同一套
+	token, valid, err := facade.SessionLogin(table.Id, utils.Hash.Sum32(table.Password), ctx.ClientIP(), ctx.Request.UserAgent())
+	if err != nil {
+		facade.Log.Error(map[string]any{"uid": table.Id, "error": err.Error()}, "创建登录会话失败")
+		this.json(ctx, nil, facade.Lang(ctx, "登录失败，请稍后重试！"), 500)
+		return false
+	}
 
 	// 分级脱敏：登录返回的是「本人」数据（保留账号/邮箱/手机号，移除密码与管理员备注）
 	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
@@ -687,15 +690,15 @@ func (this *OAuth) loginResult(ctx *gin.Context, uid int, extra facade.H) bool {
 
 	result := facade.H{
 		"user":       item,
-		"token":      jwt.Text,
-		"valid_time": jwt.Valid, // 登录会话有效期（秒）
+		"token":      token,
+		"valid_time": valid, // 登录会话有效期（秒）
 	}
 	for key, value := range extra {
 		result[key] = value
 	}
 
 	// 往客户端写入cookie - 存储登录token
-	setToken(ctx, jwt.Text)
+	setToken(ctx, token)
 	// 登录增加经验 / 积分
 	go loginReward(table.Id)
 

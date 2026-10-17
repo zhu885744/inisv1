@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
 	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
@@ -37,18 +39,12 @@ func Method() gin.HandlerFunc {
 			return
 		}
 
-		jwt := facade.Jwt().Parse(token)
-		if jwt.Error != nil {
-			logJwtFailure(ctx, token, jwt.Error)
-			result["msg"] = jwtErrorMessage(ctx, jwt.Error)
-			abortWithError(ctx, tokenName, 401, result["msg"].(string))
-			return
-		}
-
-		uid := jwt.Data["uid"]
-		user, err := getUserInfoWithCache(uid, jwt.Valid)
+		user, err := authenticateToken(token)
 		if err != nil {
-			abortWithError(ctx, tokenName, 401, err.Error())
+			if !errors.Is(err, facade.ErrSessionInvalid) {
+				logAuthFailure(ctx, token, err)
+			}
+			abortWithError(ctx, tokenName, 401, authErrorMessage(ctx, err))
 			return
 		}
 

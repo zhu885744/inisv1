@@ -23,7 +23,7 @@ import (
 //
 // 两个刻意不生成的文件：
 //   - database.toml：由安装向导写入，提前生成空文件会让「先配好数据库才能完成安装」的校验失效；
-//   - crypt.toml：JWT 密钥必须随机生成并持久化，由 crypt.go 自己读写（这里只要保证 config 目录存在）。
+//   - crypt.toml：登录会话配置，由 crypt.go 自己按模板生成与读写（这里只要保证 config 目录存在）。
 
 // 其余配置文件名（app / cache / crypt 三个已在各自文件里定义）
 const (

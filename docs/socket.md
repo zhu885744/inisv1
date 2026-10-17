@@ -5,8 +5,8 @@
 | 项 | 说明 |
 | :--- | :--- |
 | 端点 | `GET /socket`（WebSocket）——见 `app/socket/route/app.go` |
-| 中间件 | `api/middleware.Jwt()` + `socket/middleware.App` |
-| 鉴权 | 握手时按 Jwt 中间件取 token（请求头 `Authorization` 或 Cookie `INIS_LOGIN_TOKEN`）；浏览器无法给握手设置请求头、跨域也带不上 Cookie，所以连接后应发送 `{"type":"auth","token":"…"}` 升级身份（`app/socket/controller/index.go#handleAuth`），升级成功后会重新广播在线状态 |
+| 中间件 | `api/middleware.Auth()` + `socket/middleware.App` |
+| 鉴权 | 握手时按登录校验中间件取 token（请求头 `Authorization` 或 Cookie `INIS_LOGIN_TOKEN`，即服务端会话 id）；浏览器无法给握手设置请求头、跨域也带不上 Cookie，所以连接后应发送 `{"type":"auth","token":"…"}` 升级身份（`app/socket/controller/index.go#handleAuth`，内部走 `facade.AuthenticateToken`，与 HTTP 同一套会话校验），升级成功后会重新广播在线状态 |
 | 心跳 | 服务端定期发 WS `ping`（浏览器自动回 `pong`）；客户端可发 `{"type":"ping"}` 收到 `{"type":"pong"}` |
 | 前端封装 | `Mellow/src/utils/socket.js`（`createSocketClient`，断线自动重连，退避 1s→20s） |
 | 后台页面 | 「管理 → 数据统计」`/admin/stats`（`Mellow/src/views/admin/Stats.vue`） |

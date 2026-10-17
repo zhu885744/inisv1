@@ -116,7 +116,7 @@ AppSecret 只留在服务端；前端只负责拼授权页地址（从 `config` 
   "msg": "登录成功！",
   "data": {
     "user": { "id": 1, "account": "xxxx", "nickname": "用户昵称", "avatar": "头像URL" },
-    "token": "JWT Token",
+    "token": "会话 id（随机字符串）",
     "valid_time": 1296000,
     "bind": true,
     "register": true,
@@ -198,7 +198,7 @@ AppSecret 只留在服务端；前端只负责拼授权页地址（从 `config` 
   "msg": "登录成功！",
   "data": {
     "user": { "id": 2, "account": "a1b2c3d4e5", "nickname": "第三方昵称", "avatar": "头像URL" },
-    "token": "JWT Token",
+    "token": "会话 id（随机字符串）",
     "valid_time": 1296000,
     "bind": true,
     "register": true,
@@ -242,7 +242,7 @@ AppSecret 只留在服务端；前端只负责拼授权页地址（从 `config` 
   "msg": "登录成功！",
   "data": {
     "user": { "id": 1, "account": "xxxx", "nickname": "用户昵称", "avatar": "头像URL" },
-    "token": "JWT Token",
+    "token": "会话 id（随机字符串）",
     "valid_time": 1296000,
     "bind": true,
     "platform": "qq"

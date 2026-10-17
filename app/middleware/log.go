@@ -44,7 +44,7 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 					}
 				}
 
-				// 请求导出同样要脱敏：Authorization（裸 JWT）/ Cookie 不允许进日志
+				// 请求导出同样要脱敏：Authorization（登录会话 id）/ Cookie 不允许进日志
 				request := dumpRequestSanitized(ctx)
 				if broken {
 					facade.Log.Error(map[string]any{

@@ -296,7 +296,7 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"sms-aliyun-number-verify": this.putSMSAliYunNumberVerify,
 		"sms-tencent":              this.putSMSTencent,
 		"sms-drive":                this.putSMSDrive,
-		"crypt-jwt":                this.putCryptJWT,
+		"crypt-session":            this.putCryptSession,
 		"cache-default":            this.putCacheDefault,
 		"cache-redis":              this.putCacheRedis,
 		"cache-file":               this.putCacheFile,
@@ -449,8 +449,8 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
-	// 允许的查询范围
-	field := []any{"jwt"}
+	// 允许的查询范围（JWT 已移除，只剩登录会话配置；老配置里仍可能是 [jwt] 段）
+	field := []any{"session", "jwt"}
 
 	item := facade.CryptToml
 	if item.Error != nil {
@@ -458,9 +458,23 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 		return
 	}
 
+	// 兼容老配置：crypt.toml 里只有 [jwt] 时，把 expire 映射到 session 返回，
+	// 避免后台「登录会话」页在管理员保存前显示为空
+	result := cast.ToStringMap(item.Get("session"))
+	if utils.Is.Empty(result["expire"]) {
+		if legacy := cast.ToStringMap(item.Get("jwt")); !utils.Is.Empty(legacy["expire"]) {
+			result["expire"] = legacy["expire"]
+		}
+	}
+	if utils.Is.Empty(result["expire"]) {
+		result["expire"] = facade.DefaultSessionExpire
+	}
+
+	payload := gin.H{"session": result}
+
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		this.json(ctx, payload, facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -469,8 +483,8 @@ func (this *Toml) getCrypt(ctx *gin.Context) {
 		return
 	}
 
-	// 获取指定（脱敏敏感字段，如 JWT 密钥 key）
-	this.json(ctx, this.maskSensitiveFields(ctx, item.Get(cast.ToString(params["name"]))), facade.Lang(ctx, "数据请求成功！"), 200)
+	// 指定查询（name=jwt 是旧前端的写法，同样返回会话配置）
+	this.json(ctx, payload, facade.Lang(ctx, "数据请求成功！"), 200)
 }
 
 // applyStorageRules - 给存储配置补上命名规则的生效值（dir_rule / file_rule）
@@ -1211,41 +1225,28 @@ func (this *Toml) testSMSTencent(ctx *gin.Context) {
 	this.json(ctx, nil, facade.Lang(ctx, "测试短信发送成功！"), 200)
 }
 
-// putCryptJWT - 修改JWT配置
-func (this *Toml) putCryptJWT(ctx *gin.Context) {
+// putCryptSession - 修改登录会话配置
+//
+// JWT 已彻底移除，crypt.toml 只剩 [session] expire；
+// 保存时会用新模板重写文件，老站点里的 [jwt] 段随之清理掉。
+func (this *Toml) putCryptSession(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
-
-	// 还原脱敏占位值（避免把脱敏密钥写回配置）
-	this.restoreSecretParams(params, []string{"key"}, cast.ToStringMap(facade.CryptToml.Get("jwt")))
-
-	if utils.Is.Empty(params["key"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "key"), 400)
-		return
-	}
 
 	if utils.Is.Empty(params["expire"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "expire"), 400)
 		return
 	}
 
-	if utils.Is.Empty(params["issuer"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "issuer"), 400)
+	// 有效期必须是可计算的表达式且大于 0（否则会话一创建就过期）
+	if cast.ToInt64(utils.Calc(cast.ToString(params["expire"]))) <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 格式不正确！", "expire"), 400)
 		return
 	}
 
-	if utils.Is.Empty(params["subject"]) {
-		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "subject"), 400)
-		return
-	}
-
-	temp := facade.TempCrypt
-	temp = utils.Replace(temp, map[string]any{
-		"${jwt.key}":     params["key"],
-		"${jwt.expire}":  params["expire"],
-		"${jwt.issuer}":  params["issuer"],
-		"${jwt.subject}": params["subject"],
+	temp := utils.Replace(facade.TempCrypt, map[string]any{
+		"${session.expire}": params["expire"],
 	})
 	temp = this.replaceTomlVars(temp, facade.CryptToml.Result)
 
@@ -1454,7 +1455,6 @@ func (this *Toml) putStorageLocal(ctx *gin.Context) {
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
 
-
 // testCOS - 测试COS连接
 func (this *Toml) testCOS(ctx *gin.Context) {
 
@@ -1591,7 +1591,6 @@ func (this *Toml) putStorageCOS(ctx *gin.Context) {
 
 	this.saveTomlConfig(ctx, temp, "config/storage.toml", "修改成功！")
 }
-
 
 // putStorageAttachment - 修改附件配置
 func (this *Toml) putStorageAttachment(ctx *gin.Context) {

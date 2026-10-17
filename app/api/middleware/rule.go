@@ -130,12 +130,12 @@ func Rule() gin.HandlerFunc {
 
 		// 以下分支均要求有效登录身份：
 
-		// 1) token 解析失败/用户失效（Jwt() 暂存的错误）→ 401，
+		// 1) 凭证校验失败/用户失效（Auth() 暂存的错误）→ 401，
 		//    同时通过 abortWithError 清除客户端无效 cookie，实现"自愈"：
-		//    下一次请求即为匿名，可重新登录获取有效 token。
-		if jwtErr, ok := ctx.Get(jwtErrorKey); ok {
-			err, _ := jwtErr.(error)
-			abortWithError(ctx, getTokenName(), 401, jwtErrorMessage(ctx, err))
+		//    下一次请求即为匿名，可重新登录获取有效会话。
+		if authErr, ok := ctx.Get(authErrorKey); ok {
+			err, _ := authErr.(error)
+			abortWithError(ctx, getTokenName(), 401, authErrorMessage(ctx, err))
 			return
 		}
 

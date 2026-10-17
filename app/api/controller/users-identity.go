@@ -447,7 +447,9 @@ func (this *Users) changePassword(ctx *gin.Context) {
 		return
 	}
 
-	if _, err := facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("password", utils.Password.Create(password)); err != nil {
+	hashed := utils.Password.Create(password)
+
+	if _, err := facade.DB.Model(&model.Users{}).Where("id", user.Id).UpdateColumn("password", hashed); err != nil {
 		facade.Log.Error(map[string]any{"error": err, "uid": user.Id}, "修改密码失败")
 		this.fail(ctx, "修改失败，请稍后重试！")
 		return
@@ -456,8 +458,21 @@ func (this *Users) changePassword(ctx *gin.Context) {
 	// 清资料缓存（口径与 users/update 一致）
 	facade.Cache.Del(fmt.Sprintf("user[%v]", user.Id))
 
+	// 改密后该账号的全部旧会话立即失效（其他设备强制下线）；
+	// 当前设备续签一个新会话，避免用户刚改完密码就被踢回登录页
+	facade.SessionDestroyUser(user.Id)
+
+	var token string
+	var valid int64
+	if sid, expire, err := facade.SessionLogin(user.Id, utils.Hash.Sum32(hashed), ctx.ClientIP(), ctx.Request.UserAgent()); err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error(), "uid": user.Id}, "改密后签发新会话失败")
+	} else {
+		token, valid = sid, expire
+		setToken(ctx, sid)
+	}
+
 	// 审计日志只记 user_id：密码相关操作不落任何凭证明文
 	facade.Log.Info(map[string]any{"user_id": user.Id}, "用户修改密码")
 
-	this.json(ctx, gin.H{"id": user.Id}, facade.Lang(ctx, "密码修改成功！"), 200)
+	this.json(ctx, gin.H{"id": user.Id, "token": token, "valid_time": valid}, facade.Lang(ctx, "密码修改成功！"), 200)
 }

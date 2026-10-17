@@ -285,7 +285,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=sms-aliyun&name=修改阿里云短信服务配置",
 				"path=sms-aliyun-number-verify&name=修改阿里云号码验证配置",
 				"path=sms-tencent&name=修改腾讯云短信服务配置",
-				"path=crypt-jwt&name=修改JWT配置",
+				"path=crypt-session&name=修改登录会话配置",
 				"path=cache-redis&name=修改Redis缓存配置",
 				"path=cache-file&name=修改文件缓存配置",
 				"path=cache-ram&name=修改内存缓存配置",

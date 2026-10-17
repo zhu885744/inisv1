@@ -82,10 +82,10 @@ func (this *Users) IPUT(ctx *gin.Context) {
 		"change-account":  this.changeAccount,
 		"verify-code":     this.sendVerifyCode,
 		"status":          this.status,
-		"ban":           this.ban,
-		"unban":         this.unban,
-		"clear-ban":     this.clearBan,
-		"appeal-handle": this.appealHandle,
+		"ban":             this.ban,
+		"unban":           this.unban,
+		"clear-ban":       this.clearBan,
+		"appeal-handle":   this.appealHandle,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -631,6 +631,12 @@ func (this *Users) status(ctx *gin.Context) {
 
 	// 删除缓存（用户相关缓存均为 user[uid][...] 形式，用标签一次清干净）
 	facade.Cache.DelTags(fmt.Sprintf("user[%v]", userId))
+
+	// 冻结 / 待审核：撤销该用户的全部登录会话
+	// 中间件虽然会拦状态异常的账号，但会话仍然存在；解冻后旧会话不该「自动复活」，需重新登录
+	if status != model.UserStatusNormal {
+		facade.SessionDestroyUser(userId)
+	}
 
 	// 人工审核通过：补发注册欢迎消息 / 欢迎邮件
 	if beforeStatus == model.UserStatusAudit && status == model.UserStatusNormal && !utils.Is.Empty(before) {
@@ -1417,11 +1423,12 @@ func (this *Users) ban(ctx *gin.Context) {
 		facade.Log.Info(map[string]any{"uid": uid, "operator_id": operator.Id}, "管理员删除被封禁用户全部内容")
 	}
 
-	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
-
 	// 清除目标用户的缓存，强制下线
 	facade.Cache.Del(fmt.Sprintf("user[%v]", uid))
-	facade.Cache.DelPrefix(fmt.Sprintf("[token][%v]", tokenName))
+
+	// 服务端撤销该用户的全部会话：封禁后旧 token 立即失效
+	// （此前删除的是 [token][...] 前缀缓存，但项目里从未写入过该类缓存，等于空操作）
+	facade.SessionDestroyUser(uid)
 
 	// 删除列表缓存
 	go this.delCache()

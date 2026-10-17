@@ -15,7 +15,7 @@ var defaultMiddleware = []gin.HandlerFunc{
 	global.QpsPoint(),
 	global.QpsGlobal(),
 	global.Params(),
-	middle.Jwt(),
+	middle.Auth(),
 	middle.Rule(),
 	middle.ApiKey(),
 	middle.Restriction(),

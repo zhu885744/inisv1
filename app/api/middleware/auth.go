@@ -1,16 +1,14 @@
 package middleware
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
-	"strings"
 	"time"
 
-	JWTLIB "github.com/golang-jwt/jwt/v5"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
@@ -20,17 +18,17 @@ const (
 	cacheUserPrefix  = "user[%v]"
 	tokenNameKey     = "app.token_name"
 	defaultTokenName = "INIS_LOGIN_TOKEN"
-	// jwtErrorKey - Jwt() 解析失败时暂存错误的上下文键。
+	// authErrorKey - Auth() 校验失败时暂存错误的上下文键。
 	// Rule() 依据接口类型决定是否因此拒绝请求：
-	// 公共接口（type=common）不受坏 token 影响，需登录的接口才会 401。
-	jwtErrorKey = "jwt_error"
+	// 公共接口（type=common）不受无效凭证影响，需登录的接口才会 401。
+	authErrorKey = "auth_error"
 )
 
 var getTokenName = func() string {
 	return cast.ToString(facade.AppToml.Get(tokenNameKey, defaultTokenName))
 }
 
-// getTokenFromHeaderOrCookie 从请求头或 Cookie 中获取 token
+// getTokenFromHeaderOrCookie 从请求头或 Cookie 中获取登录凭证（服务端会话 id）
 func getTokenFromHeaderOrCookie(ctx *gin.Context, tokenName string) string {
 	if authHeader := ctx.Request.Header.Get("Authorization"); !utils.Is.Empty(authHeader) {
 		return authHeader
@@ -39,68 +37,46 @@ func getTokenFromHeaderOrCookie(ctx *gin.Context, tokenName string) string {
 	return token
 }
 
-// tokenFingerprint - 提取 token 指纹（签发时间/签发者/签名尾段），用于定位失败 token 的来源。
-// 通过 iat（签发时间）可判断 token 是何时被哪个实例签发的：
-// 若 iat 早于本实例密钥的启用时间，则为旧密钥/其他实例签发的残留 token。
+// tokenFingerprint - 提取凭证指纹（长度 + 哈希前 6 字节）
+//
+// 会话 id 本身就是凭证，日志里不能出现明文片段，用哈希保证同一 token 的日志可关联但不泄露。
 func tokenFingerprint(token string) map[string]any {
-	result := map[string]any{"token_length": len(token)}
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		result["format"] = "malformed（非三段式，可能携带了 Bearer 前缀或脏数据）"
-		result["token_head"] = token[:min(16, len(token))]
-		return result
+	sum := sha256.Sum256([]byte(token))
+	return map[string]any{
+		"token_length": len(token),
+		"token_hash":   hex.EncodeToString(sum[:6]),
 	}
-
-	// 记录签名末段，同一密钥签出的 token 签名不同，但可用于跨日志比对
-	sig := parts[2]
-	result["sig_tail"] = sig[max(0, len(sig)-8):]
-
-	// 解码 payload，取签发时间与签发者
-	if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-		var claims struct {
-			Iss string `json:"iss"`
-			Sub string `json:"sub"`
-			Iat int64  `json:"iat"`
-		}
-		if err := json.Unmarshal(payload, &claims); err == nil {
-			if claims.Iat > 0 {
-				result["iat"] = time.Unix(claims.Iat, 0).Format("2006-01-02 15:04:05")
-			}
-			result["iss"] = claims.Iss
-			result["sub"] = claims.Sub
-		}
-	}
-	return result
 }
 
-// jwtErrorMessage 根据 JWT 真实错误类型生成用户提示，
-// 并将非过期原因记录日志。此前所有解析错误都被统一显示为"登录已过期"，
-// 导致签名密钥变化（signature is invalid）等关键问题被掩盖、无法定位。
-func jwtErrorMessage(ctx *gin.Context, err error) string {
+// authErrorMessage 根据凭证错误类型生成用户提示
+//
+// 会话不存在 / 已过期 / 被踢下线 / 改密后失效都属于「需要重新登录」；
+// 其它异常（用户被冻结、封禁、密码校验不通过）原样返回具体原因，便于用户自助排查。
+func authErrorMessage(ctx *gin.Context, err error) string {
 	if err == nil {
 		return facade.Lang(ctx, "禁止非法操作！")
 	}
-	if errors.Is(err, JWTLIB.ErrTokenExpired) {
+	if errors.Is(err, facade.ErrSessionInvalid) {
 		return facade.Lang(ctx, "登录已过期，请重新登录！")
 	}
 
-	return facade.Lang(ctx, "登录状态异常，请重新登录！")
+	return err.Error()
 }
 
-// logJwtFailure - 记录 JWT 校验失败的详细上下文（含 token 指纹），便于定位 token 来源
-func logJwtFailure(ctx *gin.Context, token string, err error) {
+// logAuthFailure - 记录凭证校验失败的上下文（含载荷指纹），便于排查会话异常
+func logAuthFailure(ctx *gin.Context, token string, err error) {
 	facade.Log.Warn(map[string]any{
-		"error":  err.Error(),
-		"token":  tokenFingerprint(token),
-		"ip":     ctx.ClientIP(),
-		"path":   ctx.Request.URL.Path,
-		"origin": ctx.Request.Header.Get("Origin"),
+		"error":   err.Error(),
+		"token":   tokenFingerprint(token),
+		"ip":      ctx.ClientIP(),
+		"path":    ctx.Request.URL.Path,
+		"origin":  ctx.Request.Header.Get("Origin"),
 		"referer": ctx.Request.Header.Get("Referer"),
-	}, "JWT 校验失败（非过期原因）：若 iat 早于本实例密钥启用时间或签名与最近签发的 token 不一致，说明该 token 由其他后端实例或旧密钥签发")
+	}, "登录凭证校验失败（非会话过期原因）")
 }
 
 // getUserInfoWithCache 获取用户信息（带缓存逻辑）
-func getUserInfoWithCache(uid any, jwtValid int64) (map[string]any, error) {
+func getUserInfoWithCache(uid any, valid int64) (map[string]any, error) {
 	cacheName := fmt.Sprintf(cacheUserPrefix, uid)
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
@@ -114,7 +90,7 @@ func getUserInfoWithCache(uid any, jwtValid int64) (map[string]any, error) {
 	}
 
 	if cacheState {
-		go facade.Cache.Set(cacheName, user, time.Duration(jwtValid)*time.Second)
+		go facade.Cache.Set(cacheName, user, time.Duration(valid)*time.Second)
 	}
 
 	return user, nil
@@ -167,8 +143,8 @@ func validateUserStatus(user map[string]any) error {
 }
 
 // validatePasswordHash 验证密码哈希是否匹配
-func validatePasswordHash(jwtHash, userPassword any) error {
-	if utils.Hash.Sum32(userPassword) != jwtHash {
+func validatePasswordHash(hash, userPassword any) error {
+	if utils.Hash.Sum32(userPassword) != hash {
 		return fmt.Errorf("登录已过期，请重新登录！")
 	}
 	return nil
@@ -185,20 +161,45 @@ func abortWithError(ctx *gin.Context, tokenName string, code int, msg string) {
 	ctx.Abort()
 }
 
-// Jwt - JWT 校验中间件（容错模式）
+// authenticateToken - 校验登录凭证并取回用户
+//
+// 凭证是服务端会话 id（缓存里的 session:{sid}）。取到会话后统一做：
+// 密码哈希校验（改密 / 重置密码后旧会话立即失效）与状态校验（冻结 / 封禁）。
+func authenticateToken(token string) (map[string]any, error) {
+	identity, err := facade.AuthenticateToken(token)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := getUserInfoWithCache(identity.Uid, identity.Valid)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validatePasswordHash(identity.Hash, user["password"]); err != nil {
+		return nil, err
+	}
+
+	if err := validateUserStatus(user); err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+// Auth - 登录凭证校验中间件（容错模式）
 //
 // 语义设计：本中间件只负责「身份识别」，不负责「访问控制」。
 //   - 无 token           → 按匿名放行（是否允许由 Rule() 依据接口类型决定）
 //   - token 有效         → 校验用户存在/状态后写入 ctx["user"]
-//   - token 无效（坏/过期/他实例签发）→ 不中断请求，
-//     仅记录日志并把错误暂存 ctx[jwtErrorKey]，交给 Rule() 决策：
+//   - token 无效（过期 / 被踢下线 / 坏数据）→ 不中断请求，
+//     仅记录日志并把错误暂存 ctx[authErrorKey]，交给 Rule() 决策：
 //     公共接口（type=common）即使携带坏 token 也正常返回；
 //     真正需要登录的接口才会 401，并顺带清除客户端无效 cookie。
 //
-// 此前的实现是「有 token 就必须有效，否则 401」，导致携带旧/跨实例 cookie
-// 的匿名访问（含公共 GET 与登录接口本身）全部被拒，表现为"无论是否登录，
-// 所有接口都返回登录状态异常"，用户连重新登录的入口都没有。
-func Jwt() gin.HandlerFunc {
+// 注意：项目已完全移除 JWT，凭证是 Redis 里的服务端会话 id（见 facade/session.go），
+// 旧 JWT token 不再被接受，升级后所有用户需要重新登录一次。
+func Auth() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		token := getTokenFromHeaderOrCookie(ctx, getTokenName())
 
@@ -207,24 +208,13 @@ func Jwt() gin.HandlerFunc {
 			return
 		}
 
-		jwtResult := facade.Jwt().Parse(token)
-		if jwtResult.Error != nil {
-			// 记录失败上下文（含 token 指纹，便于定位是否由他实例/旧密钥签发）
-			logJwtFailure(ctx, token, jwtResult.Error)
-			ctx.Set(jwtErrorKey, jwtResult.Error)
-			ctx.Next()
-			return
-		}
-
-		user, err := getUserInfoWithCache(jwtResult.Data["uid"], jwtResult.Valid)
+		user, err := authenticateToken(token)
 		if err != nil {
-			ctx.Set(jwtErrorKey, err)
-			ctx.Next()
-			return
-		}
-
-		if err := validateUserStatus(user); err != nil {
-			ctx.Set(jwtErrorKey, err)
+			// 会话过期 / 被踢属于正常现象，不刷 warn 日志；其它异常保留排查上下文
+			if !errors.Is(err, facade.ErrSessionInvalid) {
+				logAuthFailure(ctx, token, err)
+			}
+			ctx.Set(authErrorKey, err)
 			ctx.Next()
 			return
 		}

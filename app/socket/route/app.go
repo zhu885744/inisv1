@@ -9,7 +9,7 @@ import (
 )
 
 func Route(engine *gin.Engine) {
-	socket := engine.Group("/socket", apimiddleware.Jwt(), socketmiddleware.App)
+	socket := engine.Group("/socket", apimiddleware.Auth(), socketmiddleware.App)
 	{
 		class := controller.Index{}
 		socket.GET("", class.Connect)

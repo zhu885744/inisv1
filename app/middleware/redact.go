@@ -219,7 +219,7 @@ func castToText(value any) string {
 
 // dumpRequestSanitized - 导出请求（仅请求行 + 头部）时抹掉凭据类头部
 //
-// panic 时的 request 导出原本会把 Authorization（裸 JWT）与 Cookie 一起写进
+// panic 时的 request 导出原本会把 Authorization（登录会话 id）与 Cookie 一起写进
 // 错误日志，等价于把可用登录凭据落盘；这里复制一份请求再抹掉这些头部。
 func dumpRequestSanitized(ctx *gin.Context) string {
 	if ctx == nil || ctx.Request == nil {
