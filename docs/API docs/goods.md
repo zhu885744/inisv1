@@ -64,16 +64,27 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 
 **说明**：获取商品列表（公开接口，无需登录）。普通用户仅返回上架商品；管理员默认返回全部，可传 `status` 参数过滤。
 
+> 非管理员查询会被强制附加 `deliver_type != "decoration"`（`app/api/controller/goods.go:399`）：
+> **装扮商品不会出现在积分商城里**，装扮走 `/api/decoration/shop`。
+
 **请求参数**：
 
 | 参数名 | 类型 | 必填 | 默认值 | 说明 |
 |--------|------|------|--------|------|
 | page | int | 否 | 1 | 页码 |
-| limit | int | 否 | 系统配置 | 每页数量 |
-| order | string | 否 | sort desc, id desc | 排序（白名单：sort/price/stock/sold/create_time/id 的 desc/asc） |
+| limit | int | 否 | 10 | 每页数量；受 `SYSTEM_PAGE_LIMIT` 限制（默认配置 `{Value:"1", Text:"50"}` → **最大 50**），传 `<=0` 会被改回 10 |
+| order | string | 否 | sort desc, id desc | 排序，仅白名单生效，**非法值静默回退默认**（见下方白名单） |
 | status | int | 否 | - | 商品状态过滤（仅管理员有效） |
 | category | string | 否 | - | 分类筛选 |
 | keyword | string | 否 | - | 商品名称关键词搜索 |
+
+`order` 白名单（`app/api/controller/goods.go:47-53`，**大小写与逗号都必须一致**）：
+`sort desc, id desc`、`sort asc, id desc`、`create_time desc`、`create_time asc`、
+`price asc`、`price desc`、`stock desc`、`stock asc`、`sold desc`、`id desc`、`id asc`。
+
+**响应体**：`{ data: [...], count: <总条数>, page: <总页数> }`。
+
+> ⚠️ `page` 是**总页数**（`math.Ceil(count / limit)`），不是当前页码（`app/api/controller/goods.go:429`）。
 
 **响应字段**（数组项）：
 
@@ -88,6 +99,10 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 | sold | int | 已兑换数量 |
 | status | int | 状态（0下架 1上架） |
 | type | string | 商品类型（virtual/physical） |
+| deliver_type | string | 发货方式（`text` 文本 / `card` 卡密 / `decoration` 装扮 / `""` 无） |
+| decoration_id | int | `deliver_type = "decoration"` 时关联的装扮 ID |
+| decoration_name / decoration_type | string | 仅装扮商品附加，装扮名称与类型 |
+| decoration_duration / decoration_permanent | int64 / bool | 仅装扮商品附加，有效期（秒）与是否永久 |
 | category | string | 商品分类 |
 | limit_per_user | int | 每人限购（0 = 不限） |
 | min_exp | int | 兑换所需最低经验值（0 = 不限） |
@@ -106,6 +121,10 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 **请求路径**：`/api/goods/one`
 
 **说明**：获取单个商品详情（公开接口），同样会返回 `can_buy` / `buy_reason` / `limit_remain` / `my_bought`，详情页可直接据此渲染按钮。
+
+> ⚠️ `one` 只接受 `id`（`goodsAllowQuerySlice = []any{"id"}`，`goods.go:44`），且**不校验 `status`**：
+> 只要知道 id，非管理员也能读到已下架商品的详情（`all` / `count` 看不到）。
+> 无数据返回 **204** `无数据！`。
 
 **请求参数**：
 
@@ -450,7 +469,8 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 | stock | int | 是 | 库存 |
 | status | int | 否 | 状态（0下架 1上架，默认 1） |
 | type | string | 否 | 商品类型（virtual/physical，默认 virtual） |
-| deliver_type | string | 否 | 发货方式（text/card，仅虚拟商品） |
+| deliver_type | string | 否 | 发货方式：`text` 文本 / `card` 卡密 / `decoration` 装扮 / `""` 无发货 |
+| decoration_id | int | 否 | `deliver_type = "decoration"` 时必填，关联的装扮 ID |
 | deliver_content | string | 否 | 文本发货内容（text 类型） |
 | cards | string | 否 | 卡密池 JSON 数组（card 类型） |
 | **category** | string | 否 | 商品分类（自由字符串，用于前台分组） |
@@ -474,6 +494,17 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 
 1. **虚拟商品**（text/card）：用户点击兑换 → 确认 → 立即发货 → 订单状态为「已完成」，发货内容展示在订单中。
 2. **实物商品**：用户点击兑换 → 填写收货地址 → 生成「待发货」订单 → 管理员后台发货（可填物流）→「已发货」→ 用户确认收货 / 管理员置为「已完成」。
+3. **装扮商品**（`deliver_type = "decoration"`）：同一事务内扣 `goods.price` 积分 →
+   `GrantDecorationTx(tx, uid, decoration_id, "shop", 0, order.Id)` 发放装扮 → 生成订单
+   （`app/model/goods.go:356-364`）。
+
+> ⚠️ 装扮有**两条购买路径，不要混用**：
+> - 装扮商城（前台「装扮」页）走 `POST /api/decoration/buy`，价格/库存/经验门槛取自装扮自身，
+>   **不写 `goods` / `goods_order`**；
+> - 只有把装扮作为「商品」售卖时才走 `POST /api/goods/buy` + `deliver_type = "decoration"`。
+>
+> 另外 `goods/all` 对非管理员强制排除 `deliver_type = "decoration"`（`goods.go:399`），
+> 所以装扮商品不会出现在积分商城列表里。
 
 ### 取消与退款流程
 
@@ -504,8 +535,8 @@ Goods 控制器负责积分商城功能，包含商品管理、订单管理、�
 | type | 含义 | 接口 |
 | :--- | :--- | :--- |
 | `common` | 公开接口，无需登录 | `all`、`one`、`categories`、`count` |
-| `login` | 需登录 | `orders`、`order-one`、`my-stats`、`buy`、`cancel-order`、`receive` |
-| `root` | 需管理员权限点 | `orders-all`、`stats`、`save`/`create`、`update`/`restore`、`order-status`、`remove`/`delete`/`clear` |
+| `login` | 需登录（未登录由中间件拦 **401**） | `orders`、`order-one`、`my-stats`、`buy`、`cancel-order`、`receive` |
+| `default` | 需权限点（控制器内 `meta.permit` 判 **403**） | `orders-all`、`stats`、`save`/`create`、`update`/`restore`、`order-status`、`remove`/`delete`/`clear` |
 
 > 新增接口必须在 `createAuthRules()` 的 `goods` 分组中登记，否则中间件会走「默认」分支要求权限点，普通用户将直接收到 403。
 
