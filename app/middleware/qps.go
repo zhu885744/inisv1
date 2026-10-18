@@ -18,8 +18,28 @@ import (
 const (
 	qpsPointCacheName  = "config[SYSTEM_QPS]"
 	qpsBlockCacheName  = "config[SYSTEM_QPS_BLOCK]"
-	defaultPointSpeed  = 10
-	defaultGlobalSpeed = 50
+	defaultPointSpeed  = 120
+	defaultGlobalSpeed = 600
+
+	// qpsWarnDedupWindow - 同一 IP 的超限记录去重窗口
+	//
+	// 一次页面加载可能并发几十个请求，全部被拒时不应该记几十条超限：
+	// 旧版（进程内 rate.Limiter，100/s 补充）几乎不会触发，掩盖了这个问题；
+	// 改成按秒严格计数后，一次刷新的并发就够把 count=3 的阈值击穿。
+	qpsWarnDedupWindow = 10 * time.Second
+
+	// qpsWarnMinCount - 封禁阈值的兜底下限
+	//
+	// 老库里的默认值是「1 小时 3 次」，那是配合旧限流实现的；手机 App 上线后
+	// 同一出口 IP（NAT）会承载大量正常请求，封禁只应针对持续攻击流量，
+	// 所以即使管理员没改过配置，也至少按 30 次算。
+	qpsWarnMinCount int64 = 30
+
+	// qpsWarnDefaultWindow - 统计窗口解析失败时的兜底值
+	qpsWarnDefaultWindow = time.Hour
+
+	// qpsWarnCountKey - 窗口内超限次数（按 IP，带 TTL，封禁成功后清零）
+	qpsWarnCountKey = "qps:warn:count:%s"
 )
 
 // qpsOnce - 确保后台协程（IP 自动解封）只启动一次
@@ -69,6 +89,49 @@ func qpsAllow(scope, id string, speed int, now time.Time) bool {
 	}
 
 	return count <= int64(speed)
+}
+
+// qpsWarnDedup - 同一 IP 在去重窗口内只处理一次超限
+//
+// 返回 true 表示本次需要记录/判定，false 表示窗口内已经处理过，直接跳过。
+// 没有缓存时退化为「每次都处理」，与改造前行为一致（不会更差）。
+func qpsWarnDedup(ip string, now time.Time) bool {
+	if facade.Cache == nil {
+		return true
+	}
+
+	bucket := now.Unix() / int64(qpsWarnDedupWindow/time.Second)
+	key := fmt.Sprintf("qps:warn:dedup:%s:%d", ip, bucket)
+
+	// TTL 略大于窗口：保证同一桶在整个窗口内都能命中
+	return facade.Cache.SetNX(key, 1, qpsWarnDedupWindow+5*time.Second)
+}
+
+// qpsWarnCount - 统计窗口内该 IP 的超限次数（去重后）
+//
+// 计数放在缓存里而不是每次都 COUNT qps_warn：
+//   - 历史记录不会把新窗口的计数顶高（旧实现封禁后记录仍在，解封即二次封禁、等级一路升级）；
+//   - 高频超限时避免每次都对告警表做范围统计。
+//
+// 缓存不可用时回落到数据库统计，保证单实例 / 缓存故障时功能不失效。
+func qpsWarnCount(ip string, window time.Duration) int64 {
+	if facade.Cache != nil {
+		key := fmt.Sprintf(qpsWarnCountKey, ip)
+		count, ok := facade.Cache.Incr(key)
+		if ok {
+			if count == 1 && !facade.Cache.Expire(key, window) {
+				// 过期时间没设上：这个键会永久累积，之后所有超限都会直接命中封禁阈值。
+				// 宁可丢掉本次计数，也不能留下一个只增不减的键。
+				facade.Cache.Del(key)
+			}
+			return count
+		}
+	}
+
+	since := time.Now().Add(-window).Unix()
+	count, _ := facade.DB.Model(&model.QpsWarn{}).Where("ip", ip).Where("create_time", ">", since).Count()
+
+	return count
 }
 
 // QpsPoint - 单接口限流器
@@ -203,6 +266,11 @@ func QpsWarn(ctx *gin.Context) {
 		return
 	}
 
+	// 去重：同一 IP 在窗口内只判定一次，避免并发风暴一次写出几十条告警
+	if !qpsWarnDedup(ip, time.Now()) {
+		return
+	}
+
 	var QpsBlock map[string]any
 
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
@@ -226,14 +294,32 @@ func QpsWarn(ctx *gin.Context) {
 	}
 
 	config := cast.ToStringMap(QpsBlock["json"])
-	unix := time.Now().Add(-cast.ToDuration(utils.Calc(config["second"])) * time.Second).Unix()
-	count, _ := facade.DB.Model(&model.QpsWarn{}).Where("ip", ip).Where("create_time", ">", unix).Count()
+
+	window := cast.ToDuration(utils.Calc(config["second"])) * time.Second
+	if window <= 0 {
+		window = qpsWarnDefaultWindow
+	}
+
+	// 阈值兜底：老库默认「1 小时 3 次」是配合旧版 rate.Limiter 的，
+	// 在按秒严格计数后一次正常访问就能击穿，这里至少按 10 次算。
+	limit := cast.ToInt64(config["count"])
+	if limit < qpsWarnMinCount {
+		limit = qpsWarnMinCount
+	}
+
+	count := qpsWarnCount(ip, window)
 
 	// 达到封禁阈值
-	if count >= cast.ToInt64(config["count"]) {
+	if count >= limit {
 		// 查询是否已在黑名单中
 		var existingBan model.IpBlack
 		facade.DB.Model(&model.IpBlack{}).Where("ip", ip).Scan(&existingBan)
+
+		// 已在封禁期内：保持原判，不再升级等级
+		// （否则封禁期内的每次判定都会 GetNextBanLevel，一路升到永久）
+		if existingBan.Id > 0 && existingBan.IsBanned() {
+			return
+		}
 
 		var newLevel int
 		var cause string
@@ -273,6 +359,12 @@ func QpsWarn(ctx *gin.Context) {
 			facade.DB.Model(&model.IpBlack{}).Create(ipBlack)
 		}
 
+		// 清零窗口计数：本次封禁已生效，解封后应重新累计，
+		// 否则上一个窗口的计数会让下一次超限立刻二次封禁并升级等级。
+		if facade.Cache != nil {
+			facade.Cache.Del(fmt.Sprintf(qpsWarnCountKey, ip))
+		}
+
 		// 清除缓存
 		if cacheState {
 			facade.Cache.Del("[GET][ip-black][column]")
@@ -302,57 +394,36 @@ func QpsWarn(ctx *gin.Context) {
 }
 
 // sendBanNotification - 发送封禁通知
+//
+// 走统一邮件通知（SYSTEM_MAIL_NOTIFY）的 security.qps_ban 场景：
+// 场景开关、管理员收件邮箱、发送队列与失败重试都由邮件模块处理，
+// 这里只负责组织正文。原来的 SYSTEM_QPS_NOTIFY（邮件/Webhook）从未实现，
+// 只有两条 TODO 日志，已下线。
 func sendBanNotification(ctx *gin.Context, ip string, level int, duration int64, isPermanent bool) {
-	// 获取通知配置
-	var notifyConfig map[string]any
-	notifyCacheName := "config[SYSTEM_QPS_NOTIFY]"
-
-	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
-
-	if cacheState && facade.Cache.Has(notifyCacheName) {
-		notifyConfig = cast.ToStringMap(facade.Cache.Get(notifyCacheName))
-	} else {
-		notifyConfig, _ = facade.DB.Model(&model.Config{}).Where("key", "SYSTEM_QPS_NOTIFY").Find()
-		if cacheState {
-			go facade.Cache.Set(notifyCacheName, notifyConfig)
-		}
-	}
-
-	if utils.Is.Empty(notifyConfig) || !cast.ToBool(notifyConfig["value"]) {
-		return
-	}
-
-	config := cast.ToStringMap(notifyConfig["json"])
-
-	// 构建通知内容
 	durationStr := "永久"
 	if !isPermanent {
 		if duration >= 24*7 {
 			durationStr = fmt.Sprintf("%d天", duration/24)
-		} else if duration >= 24 {
-			durationStr = fmt.Sprintf("%d小时", duration)
 		} else {
 			durationStr = fmt.Sprintf("%d小时", duration)
 		}
 	}
 
-	message := fmt.Sprintf("IP %s 已被封禁\n封禁等级: %d级\n封禁时长: %s\n原因: 触发QPS警告上限", ip, level, durationStr)
-
-	// 发送邮件通知
-	if !utils.Is.Empty(config["email"]) {
-		// TODO: 实现邮件发送
-		facade.Log.Info(map[string]any{
-			"email":   config["email"],
-			"message": message,
-		}, "QPS封禁邮件通知")
+	lines := []string{
+		"IP：" + ip,
+		fmt.Sprintf("封禁等级：%d 级", level),
+		"封禁时长：" + durationStr,
+		"原因：触发 QPS 警告上限",
+		"时间：" + time.Now().Format("2006-01-02 15:04:05"),
 	}
 
-	// 发送Webhook通知
-	if !utils.Is.Empty(config["webhook"]) {
-		// TODO: 实现Webhook发送
-		facade.Log.Info(map[string]any{
-			"webhook": config["webhook"],
-			"message": message,
-		}, "QPS封禁Webhook通知")
+	if agent := strings.TrimSpace(ctx.GetHeader("User-Agent")); agent != "" {
+		lines = append(lines, "User-Agent："+agent)
 	}
+
+	if path := ctx.Request.URL.Path; path != "" {
+		lines = append(lines, "触发路径："+path)
+	}
+
+	model.MailNotifyAdmin("security.qps_ban", "IP 已被自动封禁", lines...)
 }

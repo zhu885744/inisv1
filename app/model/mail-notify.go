@@ -100,6 +100,7 @@ func MailNotifyScenes() []MailNotifyScene {
 
 		// ---------- 系统监控 ----------
 		{Key: "stats.alert", Label: "资源告警", Group: "系统监控", Target: MailTargetAdmin, Default: 1, Desc: "CPU / 内存 / 磁盘使用率超过后台设定的阈值时通知管理员（阈值在「数据统计」页设置）"},
+		{Key: "security.qps_ban", Label: "IP 被自动封禁", Group: "系统监控", Target: MailTargetAdmin, Default: 1, Desc: "触发 QPS 警告上限导致 IP 被自动加入黑名单时通知管理员（含等级、时长、触发路径）"},
 	}
 }
 

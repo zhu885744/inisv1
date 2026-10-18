@@ -18,6 +18,11 @@ theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
 # 留空则用最近一次请求的 Host 自动推导（含后台任务发出的邮件）；
 # 前端与接口不同域时必须显式配置
 domain      = ""
+# 可信代理（Nginx / CDN 回源地址），多个用英文逗号分隔，支持 CIDR
+# 只有来自这些地址的请求，X-Forwarded-For / X-Real-IP 才会被当作真实客户端 IP。
+# 默认只信任本机（同机 Nginx）；留空表示不信任任何代理，填 * 表示信任所有（不推荐）。
+# 用 CDN 时必须把 CDN 回源段加进来，否则所有访客会被识别成同一个节点 IP，一起触发限流。
+trusted_proxies = "127.0.0.1,::1"
 
 # rss配置
 url = "博客链接"

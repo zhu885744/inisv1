@@ -39,15 +39,11 @@ func InitConfig() {
 		// 判定见 app/api/middleware/api-key.go 的 isLocalRequest；关掉即「所有请求都必须带密钥」
 		{Key: "SYSTEM_API_KEY_LOCAL", Value: "1", Remark: "API KEY放行本站同源/内网请求"},
 		{Key: "SYSTEM_QPS", Value: "1", Json: utils.Json.Encode(facade.H{
-			"point": 15, "global": 50,
+			"point": 120, "global": 600,
 		}), Remark: "接口限流器（QPS）"},
 		{Key: "SYSTEM_QPS_BLOCK", Value: "0", Json: utils.Json.Encode(facade.H{
-			"count": 3, "second": "60 * 60",
+			"count": 200, "second": "60 * 60",
 		}), Remark: "满足QPS阈值后自动拦截"},
-		{Key: "SYSTEM_QPS_NOTIFY", Value: "0", Json: utils.Json.Encode(facade.H{
-			"email":   "",
-			"webhook": "",
-		}), Remark: "QPS自动封禁通知（邮件/Webhook）"},
 		{Key: "SYSTEM_MAIL_NOTIFY", Value: "1", Json: utils.Json.Encode(MailNotifyDefaultConfig()), Remark: "统一邮件通知（各场景开关 + 管理员收件邮箱）"},
 		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
 		// 账号（用户名）修改规则：开关 / 冷却天数 / 是否要求绑定联系方式与身份验证
@@ -131,6 +127,101 @@ func InitConfig() {
 
 	// 兼容旧库：清理历史配置里残留的签到规则（签到已独立到 SYSTEM_CHECKIN_RULES）
 	cleanupLegacyCheckinRules()
+
+	// 兼容旧库：把仍是旧默认值的限流配置放宽一次，避免升级后被误封 IP
+	migrateQpsLimits()
+
+	// 兼容旧库：清理已下线的配置项
+	removeDeprecatedConfigs()
+}
+
+// removeDeprecatedConfigs - 删除已下线的配置项（幂等）
+func removeDeprecatedConfigs() {
+	// SYSTEM_QPS_NOTIFY：早期预留的封禁通知（邮件/Webhook），
+	// 两个分支都只有 TODO 日志、从未真正发送，已并入统一邮件通知的 security.qps_ban 场景
+	removeConfigByKey("SYSTEM_QPS_NOTIFY")
+}
+
+// removeConfigByKey - 按 key 删除一条配置，并清掉它的缓存
+func removeConfigByKey(key string) {
+	item, _ := facade.DB.Model(&Config{}).Where("key", key).Find()
+	id := cast.ToInt(cast.ToStringMap(item)["id"])
+	if id <= 0 {
+		return
+	}
+
+	if _, err := facade.DB.Model(&Config{}).Where("key", key).Delete([]int{id}); err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error(), "key": key}, "删除下线配置项失败")
+		return
+	}
+
+	if facade.Cache != nil {
+		facade.Cache.Del("config[" + key + "]")
+	}
+
+	facade.Log.Info(map[string]any{"key": key}, "已删除下线配置项")
+}
+
+// migrateQpsLimits - 把仍是历史默认值的限流配置升级到当前默认（幂等）
+//
+// 背景：
+//  1. 最早的默认 point=15 / global=50 / count=3 / second=1h 是配合进程内
+//     rate.Limiter（100 次/秒补充令牌）使用的；改成按秒严格计数后，一次页面并发
+//     就能触发超限，1 小时内 3 次即自动拉黑，表现为「什么都没做就被封 IP」。
+//  2. 手机 App 上线后同一出口 IP 会有大量请求（通知轮询、NAT 共享地址），
+//     封禁阈值必须放得足够高，只拦截持续攻击流量。
+//
+// 只迁移「值与某个历史默认完全一致」的记录：管理员自己调过的配置一律不动。
+func migrateQpsLimits() {
+	migrateQpsConfig("SYSTEM_QPS", func(data map[string]any) bool {
+		point, global := cast.ToInt(data["point"]), cast.ToInt(data["global"])
+		if (point != 15 || global != 50) && (point != 60 || global != 200) {
+			return false
+		}
+		data["point"] = 120
+		data["global"] = 600
+		return true
+	})
+
+	migrateQpsConfig("SYSTEM_QPS_BLOCK", func(data map[string]any) bool {
+		count, second := cast.ToInt(data["count"]), cast.ToString(data["second"])
+		oldCount := count == 3 || count == 30
+		oldWindow := second == "60 * 60" || second == "60 * 30"
+		if !oldCount || !oldWindow {
+			return false
+		}
+		data["count"] = 200
+		data["second"] = "60 * 60"
+		return true
+	})
+}
+
+// migrateQpsConfig - 读取配置 JSON，交给回调判断是否需要迁移
+func migrateQpsConfig(key string, apply func(map[string]any) bool) {
+	item, _ := facade.DB.Model(&Config{}).Where("key", key).Find()
+	if utils.Is.Empty(item) {
+		return
+	}
+
+	// json 可能是已解码的对象，也可能是原始字符串，两种都兼容
+	data := asStringMap(item["json"])
+	if len(data) == 0 {
+		if raw := cast.ToString(item["json"]); !utils.Is.Empty(raw) {
+			data = asStringMap(utils.Json.Decode(raw))
+		}
+	}
+	if len(data) == 0 || !apply(data) {
+		return
+	}
+
+	if _, err := facade.DB.Model(&Config{}).Where("key", key).Update(map[string]any{
+		"json": utils.Json.Encode(data),
+	}); err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error(), "key": key}, "更新限流默认配置失败")
+		return
+	}
+
+	facade.Log.Info(map[string]any{"key": key}, "限流配置仍是旧默认值，已自动放宽")
 }
 
 // cleanupLegacyCheckinRules - 删除经验 / 积分规则里残留的 `check-in` 配置（幂等）

@@ -58,6 +58,7 @@ func start() {
 	Notification.Run()
 	Decoration.Run()
 	Stats.Run()
+	QpsWarnClean.Run()
 
 	go func() {
 		<-Timer.Start()

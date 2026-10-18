@@ -115,6 +115,20 @@ func InitApp() {
 	// 属于白白的 CPU 与内存开销。
 	Gin = gin.New()
 
+	// 可信代理：默认只信本机
+	//
+	// Gin 默认信任所有来源，任何客户端都能伪造 X-Forwarded-For：
+	// 既能随意换 IP 绕过限流，也能把别人的 IP 顶进黑名单。
+	// 只有来自可信代理的请求，ClientIP 才会采信 XFF / X-Real-IP。
+	proxies := trustedProxies()
+	if err := Gin.SetTrustedProxies(proxies); err != nil {
+		facade.Log.Error(map[string]any{
+			"error":   err.Error(),
+			"proxies": proxies,
+		}, "可信代理配置无效，已回退为仅信任本机")
+		_ = Gin.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
+
 	// 上传表单在内存里的阈值：超过这个大小的文件由 net/http 落到临时文件，
 	// 避免大图上传整块堆在内存里（与 middleware 的 multipart 解析阈值保持一致）
 	Gin.MaxMultipartMemory = 8 << 20
@@ -130,6 +144,37 @@ func InitApp() {
 	}
 
 	Gin.Use(middleware.GinLogger(), middleware.GinRecovery(true))
+}
+
+// trustedProxies - 读取可信代理列表（app.toml 的 app.trusted_proxies）
+//
+// 语义：
+//   - 留空：不信任任何代理，ClientIP 直接取 RemoteAddr；
+//   - "*"：信任所有来源（仅建议在 CDN 会回源到固定内网段且无法枚举时使用）；
+//   - 其它：英文逗号分隔的 IP / CIDR，默认只信任本机（同机 Nginx 反代）。
+func trustedProxies() []string {
+	raw := ""
+	if AppToml != nil {
+		raw = strings.TrimSpace(cast.ToString(AppToml.Get("app.trusted_proxies", "127.0.0.1,::1")))
+	}
+
+	if raw == "" {
+		return nil
+	}
+
+	if raw == "*" {
+		return []string{"0.0.0.0/0", "::/0"}
+	}
+
+	result := make([]string, 0, 4)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+
+	return result
 }
 
 // Use 注册配置
