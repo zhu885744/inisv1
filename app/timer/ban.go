@@ -16,8 +16,16 @@ type BanStruct struct{}
 var Ban *BanStruct
 
 func (this *BanStruct) Run() {
-	// 每分钟执行一次自动解封检查
-	_ = Timer.Every(1).Minute().Do(autoUnban)
+	// 每分钟执行一次自动解封检查。
+	// 多实例下必须抢锁：autoUnban 是「查到期记录 -> 改状态 -> 发通知」，
+	// 两个实例同时查到同一批记录会重复发解封通知。锁 TTL 略小于间隔，
+	// 抢锁实例崩溃后 50 秒自动释放，不影响下一轮。
+	_ = Timer.Every(1).Minute().Do(func() {
+		if !tryLock("ban", 50*time.Second) {
+			return
+		}
+		autoUnban()
+	})
 }
 
 // autoUnban 自动解封到期用户

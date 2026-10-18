@@ -18,8 +18,15 @@ var Decoration *DecorationStruct
 const decorationScanLimit = 200
 
 func (this *DecorationStruct) Run() {
-	// 每小时检查一次装扮到期情况
-	_ = Timer.Every(1).Hour().Do(decorationExpireScan)
+	// 每小时检查一次装扮到期情况。
+	// 多实例下抢锁执行：扫描会改状态 + 发「即将过期 / 已过期」站内信，
+	// 每个实例各跑一遍就是每个用户收 N 条重复提醒。
+	_ = Timer.Every(1).Hour().Do(func() {
+		if !tryLock("decoration", 55*time.Minute) {
+			return
+		}
+		decorationExpireScan()
+	})
 }
 
 // decorationExpireScan - 装扮有效期扫描

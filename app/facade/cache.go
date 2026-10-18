@@ -65,6 +65,21 @@ type CacheInterface interface {
 	Stats() CacheStats
 	IncrementHits()
 	IncrementMisses()
+
+	// ---- 原子操作 ----
+	//
+	// 这三个方法是为「限流 / 分布式锁 / 跨实例计数」准备的：
+	// 之前的 Get -> 计算 -> Set 写法在 Redis 下是两次网络往返，多实例并发必然算错。
+	//
+	// Redis 驱动走原生命令（INCRBY / SET NX / EXPIRE），真正的跨实例原子；
+	// file / ram 驱动没有跨进程能力，只能用进程内锁模拟，**仅单实例部署下语义正确**。
+
+	// Incr 自增（delta 省略时为 1），返回自增后的值；失败时 ok=false
+	Incr(key any, delta ...int64) (value int64, ok bool)
+	// SetNX 仅当 key 不存在时写入（用于抢占锁）；expire 语义同 Set
+	SetNX(key any, value any, expire ...any) bool
+	// Expire 给已存在的 key 重新设置过期时间（key 不存在返回 false）
+	Expire(key any, expire any) bool
 }
 
 // CacheStats - 缓存统计信息
@@ -145,10 +160,12 @@ func initCache() {
 type RedisCacheStruct struct {
 	Client *redis.Client
 	Prefix string
-	Expire time.Duration
-	hits   int64
-	misses int64
-	mutex  sync.Mutex
+	// DefaultExpire 默认过期时间（cache.toml 的 redis.expire）
+	// 不能叫 Expire：与 RedisCacheStruct.Expire(key, expire) 方法同名会编译失败
+	DefaultExpire time.Duration
+	hits          int64
+	misses        int64
+	mutex         sync.Mutex
 }
 
 func (this *RedisCacheStruct) init() {
@@ -161,7 +178,7 @@ func (this *RedisCacheStruct) init() {
 		DB:       cast.ToInt(CacheToml.Get("redis.database")),
 		Password: cast.ToString(CacheToml.Get("redis.password")),
 	})
-	this.Expire = time.Duration(cast.ToInt(utils.Calc(CacheToml.Get("redis.expire", 7200)))) * time.Second
+	this.DefaultExpire = time.Duration(cast.ToInt(utils.Calc(CacheToml.Get("redis.expire", 7200)))) * time.Second
 }
 
 func (this *RedisCacheStruct) Has(key any) bool {
@@ -209,22 +226,82 @@ func (this *RedisCacheStruct) IncrementMisses() {
 	this.misses++
 }
 
-func (this *RedisCacheStruct) Set(key any, value any, expire ...any) bool {
-	ctx := context.Background()
-	expiration := this.Expire
-
-	if len(expire) > 0 {
-		if !utils.Is.Empty(expire[0]) {
-			if reflect.ValueOf(expire[0]).Kind() == reflect.Int64 && expire[0] != 0 {
-				expiration = time.Duration(cast.ToInt(expire[0])) * time.Second
-			} else if reflect.TypeOf(expire[0]).String() == "time.Duration" {
-				expiration = expire[0].(time.Duration)
-			}
-		}
+// expireOf 把调用方传入的 expire 参数归一化成 time.Duration
+//
+// 兼容三类写法：
+//   - time.Duration（推荐）：直接使用；
+//   - 数字（int / int64 / float64 …）：按「秒」处理；
+//   - 字符串："7200" 或 "2 * 60 * 60" 这类表达式（与 cache.toml 里的写法一致）。
+//
+// 未传 / 传 0 / 解析失败 → 回落到驱动默认过期时间（cache.toml 的 redis.expire）。
+// 注意：这与「0 表示永不过期」的直觉不同；要长期缓存请传足够大的时长。
+func (this *RedisCacheStruct) expireOf(expire ...any) time.Duration {
+	if len(expire) == 0 || utils.Is.Empty(expire[0]) {
+		return this.DefaultExpire
 	}
 
-	err := this.Client.Set(ctx, this.Prefix+cast.ToString(key), utils.Json.Encode(value), expiration).Err()
+	if value, ok := expire[0].(time.Duration); ok {
+		if value <= 0 {
+			return this.DefaultExpire
+		}
+		return value
+	}
+
+	if seconds := cast.ToInt64(utils.Calc(expire[0])); seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	return this.DefaultExpire
+}
+
+func (this *RedisCacheStruct) Set(key any, value any, expire ...any) bool {
+	ctx := context.Background()
+	err := this.Client.Set(ctx, this.Prefix+cast.ToString(key), utils.Json.Encode(value), this.expireOf(expire...)).Err()
 	return utils.Ternary[bool](err != nil, false, true)
+}
+
+// Incr 自增（Redis INCRBY，跨实例原子）
+func (this *RedisCacheStruct) Incr(key any, delta ...int64) (int64, bool) {
+	if this.Client == nil {
+		return 0, false
+	}
+
+	step := int64(1)
+	if len(delta) > 0 {
+		step = delta[0]
+	}
+
+	result, err := this.Client.IncrBy(context.Background(), this.Prefix+cast.ToString(key), step).Result()
+	if err != nil {
+		return 0, false
+	}
+
+	return result, true
+}
+
+// SetNX 仅当 key 不存在时写入（Redis SET NX，分布式锁的基础）
+func (this *RedisCacheStruct) SetNX(key any, value any, expire ...any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	ok, err := this.Client.SetNX(context.Background(), this.Prefix+cast.ToString(key), utils.Json.Encode(value), this.expireOf(expire...)).Result()
+	return utils.Ternary[bool](err != nil, false, ok)
+}
+
+// Expire 给已存在的 key 重新设置过期时间
+func (this *RedisCacheStruct) Expire(key any, expire any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	expiration := this.expireOf(expire)
+	if expiration <= 0 {
+		return false
+	}
+
+	ok, err := this.Client.Expire(context.Background(), this.Prefix+cast.ToString(key), expiration).Result()
+	return utils.Ternary[bool](err != nil, false, ok)
 }
 
 func (this *RedisCacheStruct) Del(key any) bool {
@@ -233,51 +310,73 @@ func (this *RedisCacheStruct) Del(key any) bool {
 	return utils.Ternary[bool](err != nil, false, true)
 }
 
-func (this *RedisCacheStruct) DelPrefix(prefix ...any) bool {
+// deleteByPattern 按模式批量删除（SCAN + UNLINK）
+//
+// 不用 KEYS：KEYS 是 O(N) 且阻塞 Redis 单线程，key 多的时候一次「后台保存配置」
+// 就能把整站所有请求卡住；SCAN 是游标式遍历，不会长时间占住服务端。
+// 也不用 DEL：UNLINK 在后台线程回收内存，批量删除大 key 时不阻塞。
+func (this *RedisCacheStruct) deleteByPattern(patterns []string) bool {
 	ctx := context.Background()
-	var keys []string
-	var prefixes []string
 
+	for _, pattern := range patterns {
+		iter := this.Client.Scan(ctx, 0, pattern, 200).Iterator()
+		batch := make([]string, 0, 200)
+
+		for iter.Next(ctx) {
+			batch = append(batch, iter.Val())
+			if len(batch) >= 200 {
+				this.unlink(ctx, batch)
+				batch = batch[:0]
+			}
+		}
+
+		if err := iter.Err(); err != nil {
+			return false
+		}
+
+		this.unlink(ctx, batch)
+	}
+
+	return true
+}
+
+// unlink 批量异步删除（低版本 Redis 不支持 UNLINK，回退到 DEL）
+func (this *RedisCacheStruct) unlink(ctx context.Context, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+
+	if err := this.Client.Unlink(ctx, keys...).Err(); err != nil {
+		_ = this.Client.Del(ctx, keys...).Err()
+	}
+}
+
+func (this *RedisCacheStruct) DelPrefix(prefix ...any) bool {
 	if len(prefix) == 0 {
 		return false
 	}
 
+	var patterns []string
+
 	for _, value := range prefix {
 		if reflect.ValueOf(value).Kind() == reflect.Slice {
 			for _, val := range cast.ToSlice(value) {
-				prefixes = append(prefixes, this.Prefix+cast.ToString(val)+"*")
+				patterns = append(patterns, this.Prefix+cast.ToString(val)+"*")
 			}
 		} else {
-			prefixes = append(prefixes, this.Prefix+cast.ToString(value)+"*")
+			patterns = append(patterns, this.Prefix+cast.ToString(value)+"*")
 		}
 	}
 
-	for _, val := range prefixes {
-		item, err := this.Client.Keys(ctx, val).Result()
-		if err != nil {
-			return false
-		}
-		keys = append(keys, item...)
-	}
-
-	keys = cast.ToStringSlice(utils.ArrayEmpty(utils.ArrayUnique(keys)))
-	if len(keys) > 0 {
-		err := this.Client.Del(ctx, keys...).Err()
-		if err != nil {
-			return false
-		}
-	}
-	return true
+	return this.deleteByPattern(patterns)
 }
 
 func (this *RedisCacheStruct) DelTags(tag ...any) bool {
-	ctx := context.Background()
-	var keys []string
-	var tags []string
-
 	if len(tag) == 0 {
 		return false
 	}
+
+	var tags []string
 
 	for _, value := range tag {
 		var item string
@@ -293,28 +392,23 @@ func (this *RedisCacheStruct) DelTags(tag ...any) bool {
 		tags = append(tags, fmt.Sprintf("%s*%s*", this.Prefix, item))
 	}
 
-	for _, val := range tags {
-		item, err := this.Client.Keys(ctx, val).Result()
-		if err != nil {
-			return false
-		}
-		keys = append(keys, item...)
-	}
-
-	keys = cast.ToStringSlice(utils.ArrayEmpty(utils.ArrayUnique(keys)))
-	if len(keys) > 0 {
-		err := this.Client.Del(ctx, keys...).Err()
-		if err != nil {
-			return false
-		}
-	}
-	return true
+	return this.deleteByPattern(tags)
 }
 
+// Clear 清空本应用的缓存
+//
+// 原来直接 FlushDB：会把**同一个 Redis DB 里所有数据**清掉（别的应用、甚至本应用
+// 其它命名空间的数据都会一起没），cluster 模式下 FLUSHDB 还不可用。
+// 现在改为只删除带 prefix 的键；没配 prefix 时拒绝执行，避免误伤。
 func (this *RedisCacheStruct) Clear() bool {
-	ctx := context.Background()
-	err := this.Client.FlushDB(ctx).Err()
-	return utils.Ternary[bool](err != nil, false, true)
+	if this.Prefix == "" {
+		Log.Error(map[string]any{
+			"cache_driver": CacheModeRedis,
+		}, "拒绝清空缓存：未配置 redis.prefix，按前缀删除会误删整个 DB，请在 cache.toml 里配置前缀")
+		return false
+	}
+
+	return this.deleteByPattern([]string{this.Prefix + "*"})
 }
 
 // ==================== 文件缓存 ====================
@@ -324,6 +418,9 @@ type FileCacheStruct struct {
 	hits   int64
 	misses int64
 	mutex  sync.Mutex
+	// atomicMu 串行化 Incr / SetNX / Expire 的「读改写」，
+	// 与 stats 的 mutex 分开，避免嵌套调用 Get 时自锁
+	atomicMu sync.Mutex
 }
 
 func (this *FileCacheStruct) init() {
@@ -422,6 +519,62 @@ func (this *FileCacheStruct) Clear() bool {
 	return this.Client.Clear()
 }
 
+// Incr 自增：文件缓存没有原生原子操作，这里用进程内锁包住「读 -> 加 -> 写」。
+// 单实例部署语义正确；多实例部署请使用 redis 驱动（跨进程无法互斥）。
+func (this *FileCacheStruct) Incr(key any, delta ...int64) (int64, bool) {
+	if this.Client == nil {
+		return 0, false
+	}
+
+	step := int64(1)
+	if len(delta) > 0 {
+		step = delta[0]
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	next := cast.ToInt64(this.Get(key)) + step
+	if !this.Set(key, next) {
+		return 0, false
+	}
+
+	return next, true
+}
+
+// SetNX 仅当 key 不存在时写入（进程内互斥，多实例请用 redis 驱动）
+func (this *FileCacheStruct) SetNX(key any, value any, expire ...any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	if this.Has(key) {
+		return false
+	}
+
+	return this.Set(key, value, expire...)
+}
+
+// Expire 重新设置过期时间：文件缓存只能通过「按新 TTL 重写」实现
+func (this *FileCacheStruct) Expire(key any, expire any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	value := this.Get(key)
+	if value == nil {
+		return false
+	}
+
+	return this.Set(key, value, expire)
+}
+
 // ==================== 内存缓存 ====================
 
 type BigCacheStruct struct {
@@ -429,6 +582,8 @@ type BigCacheStruct struct {
 	hits   int64
 	misses int64
 	mutex  sync.Mutex
+	// atomicMu 串行化 Incr / SetNX / Expire 的「读改写」（理由同 FileCacheStruct）
+	atomicMu sync.Mutex
 }
 
 func (this *BigCacheStruct) init() {
@@ -517,6 +672,61 @@ func (this *BigCacheStruct) Clear() bool {
 		return false
 	}
 	return this.Client.Clear()
+}
+
+// Incr 自增（内存驱动用进程内锁模拟，仅单实例语义）
+func (this *BigCacheStruct) Incr(key any, delta ...int64) (int64, bool) {
+	if this.Client == nil {
+		return 0, false
+	}
+
+	step := int64(1)
+	if len(delta) > 0 {
+		step = delta[0]
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	next := cast.ToInt64(this.Get(key)) + step
+	if !this.Set(key, next) {
+		return 0, false
+	}
+
+	return next, true
+}
+
+// SetNX 仅当 key 不存在时写入（内存驱动用进程内锁模拟）
+func (this *BigCacheStruct) SetNX(key any, value any, expire ...any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	if this.Has(key) {
+		return false
+	}
+
+	return this.Set(key, value, expire...)
+}
+
+// Expire 重新设置过期时间（内存驱动只能按新 TTL 重写）
+func (this *BigCacheStruct) Expire(key any, expire any) bool {
+	if this.Client == nil {
+		return false
+	}
+
+	this.atomicMu.Lock()
+	defer this.atomicMu.Unlock()
+
+	value := this.Get(key)
+	if value == nil {
+		return false
+	}
+
+	return this.Set(key, value, expire)
 }
 
 // BigCacheClient 缓存

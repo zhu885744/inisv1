@@ -436,23 +436,16 @@ func (hub *hub) run() {
 				}
 			}
 		case message := <-hub.notice:
-			content := Json(message)
-			msgType := cast.ToString(content["type"])
-			if msgType == "status" {
-				// 系统状态：仅推送给管理员（非管理员不推送）
-				hub.recordMessage("broadcast")
-				hub.broadcastToAdmin(message)
-			} else if utils.Is.Empty(msgType) || msgType == "broadcast" {
-				// 客户端广播：发给所有在线客户端（含管理员）
-				hub.recordMessage("broadcast")
-				hub.broadcast(message)
-			} else if msgType == "single" || msgType == "notification" {
-				hub.recordMessage("single")
-				hub.singlecast(message)
-			} else if msgType == "private" {
-				hub.recordMessage("single")
-				hub.privatecast(message)
-			}
+			// 本实例产生的消息：本地分发 + 转发给其它实例
+			hub.dispatch(message, true)
+			// 转发是网络操作，放协程里做，避免阻塞 hub goroutine
+			go hub.publish(message)
+		case message := <-hub.cluster:
+			// 来自其它实例的消息：只做本地分发。
+			// 这里**不能再 publish**，否则 A 转发给 B、B 又转发出去，形成回环。
+			hub.dispatch(message, false)
+		case targetId := <-hub.clusterKick:
+			hub.kickRemote(targetId)
 		case status := <-hub.status:
 			// 该通道当前无写入方（系统状态统一走 notice 通道），
 			// 保留此分支但仅推送给管理员，防止未来误用导致敏感信息泄露给非管理员
@@ -584,6 +577,14 @@ func (hub *hub) handleKick(req *kickRequest) {
 
 	target, ok := hub.clients[req.to]
 	if !ok || target == nil {
+		// 目标不在本实例：多实例部署时客户端可能连在别的节点，转发出去让持有连接的实例处理
+		if clusterEnabled() {
+			socketLog("踢下线目标不在本实例，转发: %s", req.to)
+			// 发布是网络操作，不能在 hub goroutine 里同步做
+			go clusterPublish("kick", []byte(req.to))
+			hub.trySend(req.from, `{"type":"kicked","content":"已发送断开指令（目标可能连接在其它节点）"}`)
+			return
+		}
 		socketLog("踢下线目标已离线: %s", req.to)
 		hub.trySend(req.from, `{"type":"kicked","content":"目标客户端已离线"}`)
 		return
@@ -614,7 +615,69 @@ func (hub *hub) trySend(client *client, message string) {
 	}
 }
 
-func (hub *hub) singlecast(message []byte) {
+// dispatch 按消息类型分发到本地连接
+//
+// allowOffline：目标不在线时是否缓存离线消息。
+//   - 本实例产生的消息（true）：保持一致的老行为，离线缓存等重连补发；
+//   - 其它实例转发来的消息（false）：不在本实例就跳过 —— 否则 N 个实例各存一份，
+//     目标重连时会收到 N 条重复消息。
+func (hub *hub) dispatch(message []byte, allowOffline bool) {
+	content := Json(message)
+	msgType := cast.ToString(content["type"])
+
+	switch {
+	case msgType == "status":
+		// 系统状态：仅推送给管理员（非管理员不推送）
+		hub.recordMessage("broadcast")
+		hub.broadcastToAdmin(message)
+	case utils.Is.Empty(msgType) || msgType == "broadcast":
+		// 客户端广播：发给所有在线客户端（含管理员）
+		hub.recordMessage("broadcast")
+		hub.broadcast(message)
+	case msgType == "single" || msgType == "notification":
+		hub.recordMessage("single")
+		hub.singlecast(message, allowOffline)
+	case msgType == "private":
+		hub.recordMessage("single")
+		hub.privatecast(message, allowOffline)
+	}
+}
+
+// publish 把本实例的消息转发给其它实例
+//
+// status 不转发：它是「本机」的 CPU / 内存 / 表计数快照，
+// 转发出去会让管理员看到随机某个实例的资源数据。
+func (hub *hub) publish(message []byte) {
+	if !clusterEnabled() {
+		return
+	}
+
+	msgType := cast.ToString(Json(message)["type"])
+	if msgType == "status" {
+		return
+	}
+
+	clusterPublish("msg", message)
+}
+
+// kickRemote 处理其它实例转发来的踢下线请求（目标连在本实例上时才会命中）
+func (hub *hub) kickRemote(targetId string) {
+	target, ok := hub.clients[targetId]
+	if !ok || target == nil {
+		return
+	}
+
+	socketLog("执行跨实例踢下线: %s", targetId)
+	hub.trySend(target, `{"type":"kicked","content":"您已被管理员断开连接"}`)
+
+	// 稍等片刻再关闭，给上面那条消息留出写出的时间（理由同 handleKick）
+	go func(client *client) {
+		time.Sleep(200 * time.Millisecond)
+		_ = client.conn.Close()
+	}(target)
+}
+
+func (hub *hub) singlecast(message []byte, allowOffline bool) {
 	content := Json(message)
 	to := content["to"]
 	socketLog("单播消息: %v", content)
@@ -633,7 +696,7 @@ func (hub *hub) singlecast(message []byte) {
 			close(client.send)
 			delete(hub.clients, client.info.ID)
 		}
-	} else {
+	} else if allowOffline {
 		socketLog("目标客户端离线，缓存消息: %s", targetId)
 		hub.storeOfflineMessage(targetId, message)
 	}
@@ -687,7 +750,7 @@ func (hub *hub) cleanupClientStateAfterTimeout(clientId string) {
 	}
 }
 
-func (hub *hub) privatecast(message []byte) {
+func (hub *hub) privatecast(message []byte, allowOffline bool) {
 	content := Json(message)
 	from := cast.ToString(content["id"])
 	to := cast.ToString(content["to"])
@@ -717,9 +780,13 @@ func (hub *hub) privatecast(message []byte) {
 			socketLog("私聊消息发送成功: %s -> %s", from, to)
 		default:
 			socketLog("私聊发送队列满: %s", to)
-			hub.storeOfflineMessage(to, message)
+			if allowOffline {
+				hub.storeOfflineMessage(to, message)
+			}
 		}
-	} else {
+	} else if allowOffline {
+		// 跨实例转发来的消息不在本实例缓存：目标可能连在别的实例上，
+		// 每台都存一份会导致重连后收到 N 条重复消息
 		socketLog("目标客户端离线，缓存私聊消息: %s", to)
 		hub.storeOfflineMessage(to, message)
 	}

@@ -135,11 +135,29 @@ func StatsAlertConfig() map[string]any {
 	return StatsAlertMergeConfig(config)
 }
 
-// 告警冷却记在进程内存里（不依赖缓存服务，缓存没开也要能防抖）
+// 告警冷却：优先放缓存（redis 下跨实例互斥 —— 多实例部署时同一指标只通知一次），
+// 缓存不可用时退回进程内 map（保证缓存没开 / 缓存故障时也能防抖，单实例语义）。
 var (
 	statsAlertMu     sync.Mutex
 	statsAlertLastAt = map[string]int64{}
 )
+
+// acquireStatsAlertSlot 抢占某类告警的冷却额度；返回 false 表示仍在冷却期，本次不通知
+func acquireStatsAlertSlot(key string, now int64, cooldown int64) bool {
+	if facade.Cache != nil {
+		return facade.Cache.SetNX("stats:alert:"+key, now, time.Duration(cooldown)*time.Second)
+	}
+
+	statsAlertMu.Lock()
+	defer statsAlertMu.Unlock()
+
+	if last := statsAlertLastAt[key]; last > 0 && now-last < cooldown {
+		return false
+	}
+
+	statsAlertLastAt[key] = now
+	return true
+}
 
 // checkStatsAlert 检查一份采样是否越过阈值，命中则通知管理员
 //
@@ -180,14 +198,9 @@ func checkStatsAlert(sample StatsSample) {
 			continue
 		}
 
-		statsAlertMu.Lock()
-		last := statsAlertLastAt[item.key]
-		if last > 0 && now-last < cooldown {
-			statsAlertMu.Unlock()
+		if !acquireStatsAlertSlot(item.key, now, cooldown) {
 			continue
 		}
-		statsAlertLastAt[item.key] = now
-		statsAlertMu.Unlock()
 
 		title := "资源告警：" + item.label
 		content := fmt.Sprintf("%s 达到 %.2f%%，超过阈值 %.2f%%（采样时间 %s）",

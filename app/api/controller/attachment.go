@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"inis/app/facade"
@@ -235,26 +234,27 @@ func (this *Attachment) tryAcquireUploadSlot(count int) bool {
 		return true
 	}
 
-	// 优先使用 Redis 分布式计数器（支持多实例部署）
-	if facade.Redis != nil && facade.Redis.Client != nil {
-		ctx := context.Background()
-		key := "inis:attachment:upload_concurrent_counter"
-		current, err := facade.Redis.Client.IncrBy(ctx, key, int64(count)).Result()
-		if err == nil {
+	// 优先使用共享计数器（redis 下多实例共享）
+	//
+	// 之前直接操作 facade.Redis.Client：既绕过了缓存驱动的 prefix 与故障降级，
+	// 又因为 facade.Redis 永远非 nil（initCache 无条件创建），在「没部署 redis、
+	// 驱动是 file」的站点上每次上传都会先连一次 Redis 失败、打一条 Warn 再降级。
+	if facade.Cache != nil {
+		key := "attachment:upload_concurrent_counter"
+		if current, ok := facade.Cache.Incr(key, int64(count)); ok {
 			if current > int64(config.ConcurrentLimit) {
-				_ = facade.Redis.Client.DecrBy(ctx, key, int64(count)).Err()
+				facade.Cache.Incr(key, -int64(count))
 				return false
 			}
 			if current == int64(count) {
-				_ = facade.Redis.Client.Expire(ctx, key, 5*time.Minute).Err()
+				facade.Cache.Expire(key, 5*time.Minute)
 			}
 			return true
 		}
-		// Redis 操作失败（未启动/连接失败），降级为本地计数器
-		facade.Log.Warn(map[string]any{"error": err}, "Redis并发计数器不可用，降级为本地计数器")
+		facade.Log.Warn(map[string]any{}, "缓存计数器不可用，上传并发计数降级为本地计数器")
 	}
 
-	// Redis 不可用时降级为本地计数器，避免因缓存服务故障导致上传被错误拒绝
+	// 缓存不可用时降级为本地计数器，避免因缓存服务故障导致上传被错误拒绝
 	return this.tryAcquireUploadSlotLocal(count)
 }
 
@@ -276,11 +276,10 @@ func (this *Attachment) tryAcquireUploadSlotLocal(count int) bool {
 }
 
 func (this *Attachment) releaseUploadSlot(count int) {
-	// 优先释放 Redis 分布式计数器
-	if facade.Redis != nil && facade.Redis.Client != nil {
-		ctx := context.Background()
-		key := "inis:attachment:upload_concurrent_counter"
-		if err := facade.Redis.Client.DecrBy(ctx, key, int64(count)).Err(); err == nil {
+	// 优先释放共享计数器（key 已过期时不再自减，避免留下负数）
+	key := "attachment:upload_concurrent_counter"
+	if facade.Cache != nil && facade.Cache.Has(key) {
+		if _, ok := facade.Cache.Incr(key, -int64(count)); ok {
 			return
 		}
 	}

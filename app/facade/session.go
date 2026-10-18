@@ -251,10 +251,17 @@ func SessionDestroyUser(uid int) bool {
 		return false
 	}
 
-	version := SessionVersion(uid) + 1
-	ok := Cache.Set(sessionVerKey(uid), version, sessionVerTTL)
+	// 用缓存的原子自增：多实例同时踢同一个人时不会算出同一个版本号（旧实现是读改写）
+	version, ok := Cache.Incr(sessionVerKey(uid))
+	if !ok {
+		return false
+	}
+
+	// Incr 不会带 TTL，这里补上；每次踢人顺带续期，不会因为版本号过期导致旧会话「复活」
+	Cache.Expire(sessionVerKey(uid), sessionVerTTL)
+
 	Log.Info(map[string]any{"uid": uid, "session_version": version}, "已失效该用户的全部登录会话")
-	return ok
+	return true
 }
 
 // AuthenticateToken 校验登录凭证（只认服务端会话）

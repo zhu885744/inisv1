@@ -19,8 +19,11 @@ package facade
  * 5. 超时：单封邮件发送超过 send_timeout 秒按失败处理，避免 SMTP 卡死拖住整个队列；
  * 6. 上限：pending 数超过 queue_size 时，普通任务直接丢弃并记日志（验证码类始终受理）。
  *
- * 注意：队列在内存中，进程重启后未发送的任务会丢失（邮件通知属于尽力而为，可接受）。
- * 若需要更强投递保证，应改为「任务落库 + 定时任务投递」的方案。
+ * 注意：
+ *  1. 队列在内存中，进程重启后未发送的任务会丢失（邮件通知属于尽力而为，可接受）。
+ *     若需要更强投递保证，应改为「任务落库 + 定时任务投递」的方案。
+ *  2. 批次窗口：启用 redis 缓存时额度记在缓存里（batch_size 是**全局**的，多实例共用一个窗口）；
+ *     file / ram 驱动下仍按进程内记账（每实例一份额度），与改造前行为一致。
  */
 
 import (
@@ -131,6 +134,9 @@ type mailQueueStruct struct {
 	// 当前批次窗口
 	windowStart time.Time
 	windowSent  int
+	// 共享窗口熔断截止时间：缓存不可用时暂停使用共享窗口，
+	// 避免缓存挂了以后每封邮件都先等一次连接超时
+	windowDownUntil time.Time
 
 	// 统计（atomic 读写）
 	sent    int64 // 发送成功
@@ -293,8 +299,14 @@ func (this *mailQueueStruct) Stats() map[string]any {
 	windowSent := this.windowSent
 	this.mu.Unlock()
 
+	windowMode := "local"
+	if this.sharedWindow() {
+		windowMode = "redis"
+	}
+
 	return map[string]any{
 		"pending":       pending,
+		"window_mode":   windowMode,
 		"window_sent":   windowSent,
 		"batch_size":    cfg.batchSize,
 		"batch_interval": cfg.batchInterval.String(),
@@ -337,15 +349,82 @@ func (this *mailQueueStruct) run() {
 	}
 }
 
+// sharedWindow 是否使用缓存里的「全局批次窗口」
+//
+// 旧实现只在进程内记账：多实例部署时 batch_size / batch_interval 变成「每实例」的额度，
+// 5 个实例就是 5 倍发信速率，容易被 SMTP 服务商限流甚至封号。
+// 启用 redis 缓存时改成共享计数，batch_size 才是真正全局生效的。
+func (this *mailQueueStruct) sharedWindow() bool {
+	return Cache != nil && cast.ToString(CacheToml.Get("default")) == CacheModeRedis
+}
+
+// acquireRemoteWindow 在缓存里抢一个普通邮件的批次额度
+//
+// 返回 (是否抢到, 需要等待多久)。窗口按 batch_interval 秒切桶，桶号 = unix / interval，
+// 所以各实例算出的桶天然一致；第一个请求负责给计数键设置过期时间。
+// 缓存不可用时放行 —— 限速是保护性功能，不能因为缓存故障导致邮件全部发不出去。
+func (this *mailQueueStruct) acquireRemoteWindow(now time.Time) (bool, time.Duration) {
+	this.mu.Lock()
+	batchSize, interval := this.cfg.batchSize, this.cfg.batchInterval
+	if now.Before(this.windowDownUntil) {
+		this.mu.Unlock()
+		return true, 0
+	}
+	this.mu.Unlock()
+
+	if batchSize <= 0 {
+		return true, 0
+	}
+
+	seconds := int64(interval.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+
+	bucket := now.Unix() / seconds
+	key := fmt.Sprintf("mail:window:%d", bucket)
+
+	count, ok := Cache.Incr(key)
+	if !ok {
+		// 缓存不可用：熔断 1 分钟，期间按进程内窗口发信，保证邮件不被卡片
+		this.mu.Lock()
+		this.windowDownUntil = now.Add(time.Minute)
+		this.mu.Unlock()
+		return true, 0
+	}
+
+	if count == 1 {
+		// 多留一个窗口，避免窗口边界上「刚建好就过期」
+		Cache.Expire(key, time.Duration(seconds*2)*time.Second)
+	}
+
+	if count <= int64(batchSize) {
+		return true, 0
+	}
+
+	// 超出全局额度：把刚抢到的这一点还回去，然后等到下一个窗口
+	Cache.Incr(key, -1)
+
+	wait := time.Duration((bucket+1)*seconds-now.Unix()) * time.Second
+	if wait <= 0 {
+		wait = interval
+	}
+
+	return false, wait
+}
+
 // pick 取出下一个可发送的任务（返回 nil 时 wait 表示建议的等待时长）
 //
 // 选取顺序：urgent 任务优先（不受批次窗口限制）-> 普通任务（窗口还有额度时）
 // 同优先级按入队时间先后；未到发送时间的任务（延迟重试中）只参与计算等待时长。
+//
+// 注意：这里不再用 defer 解锁 —— 普通任务需要先释放锁再访问缓存（网络往返），
+// 抢不到全局额度时还要把任务放回队列。
 func (this *mailQueueStruct) pick(now time.Time) (*MailTask, time.Duration) {
 	this.mu.Lock()
-	defer this.mu.Unlock()
 
 	if len(this.tasks) == 0 {
+		this.mu.Unlock()
 		return nil, defaultMailIdleWait
 	}
 
@@ -377,14 +456,29 @@ func (this *mailQueueStruct) pick(now time.Time) (*MailTask, time.Duration) {
 		}
 	}
 
-	index := urgentIndex
-	if index < 0 {
-		index = normalIndex
+	if urgentIndex >= 0 {
+		task := this.tasks[urgentIndex]
+		this.tasks = append(this.tasks[:urgentIndex], this.tasks[urgentIndex+1:]...)
+		this.mu.Unlock()
+		return task, 0
 	}
 
-	if index >= 0 {
-		task := this.tasks[index]
-		this.tasks = append(this.tasks[:index], this.tasks[index+1:]...)
+	if normalIndex >= 0 {
+		task := this.tasks[normalIndex]
+		this.tasks = append(this.tasks[:normalIndex], this.tasks[normalIndex+1:]...)
+		shared := this.sharedWindow()
+		this.mu.Unlock()
+
+		if shared {
+			if ok, wait := this.acquireRemoteWindow(now); !ok {
+				// 全局额度已用完：放回队列尾部，等下一个窗口（createdAt 排序仍生效）
+				this.mu.Lock()
+				this.tasks = append(this.tasks, task)
+				this.mu.Unlock()
+				return nil, wait
+			}
+		}
+
 		return task, 0
 	}
 
@@ -397,6 +491,7 @@ func (this *mailQueueStruct) pick(now time.Time) (*MailTask, time.Duration) {
 		wait = defaultMailIdleWait
 	}
 
+	this.mu.Unlock()
 	return nil, wait
 }
 
@@ -429,7 +524,9 @@ func (this *mailQueueStruct) markWindow(now time.Time) {
 func (this *mailQueueStruct) deliver(task *MailTask) {
 	task.Attempts++
 
-	if task.Priority == MailNormal {
+	if task.Priority == MailNormal && !this.sharedWindow() {
+		// 共享窗口模式下，额度已经在 pick 阶段从缓存里扣过了（见 acquireRemoteWindow），
+		// 这里只管进程内兜底（file / ram 驱动）
 		this.mu.Lock()
 		this.markWindow(time.Now())
 		this.mu.Unlock()

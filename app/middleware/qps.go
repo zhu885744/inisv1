@@ -6,12 +6,12 @@ import (
 	"inis/app/model"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
-	"golang.org/x/time/rate"
 )
 
 // QPS常量
@@ -20,26 +20,60 @@ const (
 	qpsBlockCacheName  = "config[SYSTEM_QPS_BLOCK]"
 	defaultPointSpeed  = 10
 	defaultGlobalSpeed = 50
-	qpsWarnInterval    = 10 * time.Millisecond
 )
 
-// QoSPoint - 单接口限流器
-var QoSPoint = make(map[string]*rate.Limiter)
-
-// QoSGlobal - 全局接口限流器
-var QoSGlobal = make(map[string]*rate.Limiter)
-
-// qpsMutex - 互斥锁
-var qpsMutex = &sync.Mutex{}
-
-// qpsOnce - 确保后台协程只启动一次
+// qpsOnce - 确保后台协程（IP 自动解封）只启动一次
 var qpsOnce = &sync.Once{}
+
+// qpsCacheDown 熔断截止时间（unix 秒）
+//
+// 限流在**每个请求**上都要访问缓存；如果 Redis 挂了，每次请求都要等一次连接超时，
+// 整站会被限流中间件拖死。这里失败一次就熔断 30 秒，期间直接放行。
+var qpsCacheDown atomic.Int64
+
+// qpsWindowKey 限流计数的键：按「秒」分桶
+//
+// 用秒级时间戳分桶而不是「一个键 + TTL」，好处是窗口边界固定、不需要重置逻辑，
+// 旧桶由缓存过期自然回收（见 qpsAllow 里的 Expire）。
+func qpsWindowKey(scope, id string, now time.Time) string {
+	return fmt.Sprintf("qps:%s:%d:%s", scope, now.Unix(), id)
+}
+
+// qpsAllow 判断本次请求是否放行（每 scope+id 每秒最多 speed 次）
+//
+// 旧实现用的是进程内 rate.Limiter：多实例部署时实际阈值被放大 N 倍，
+// 进程重启后所有桶清零，等于限流可以被「重启 / 轮询实例」绕过。
+// 现在改成缓存的原子自增（redis 下跨实例共享），语义是「每 scope+id 每秒 speed 次」。
+//
+// 缓存不可用时直接放行：限流是保护性功能，不能因为缓存故障把整站打成 429。
+func qpsAllow(scope, id string, speed int, now time.Time) bool {
+	if speed <= 0 || facade.Cache == nil {
+		return true
+	}
+
+	// 缓存刚失败过：熔断期内不再尝试（见 qpsCacheDown）
+	if qpsCacheDown.Load() > now.Unix() {
+		return true
+	}
+
+	key := qpsWindowKey(scope, id, now)
+	count, ok := facade.Cache.Incr(key)
+	if !ok {
+		qpsCacheDown.Store(now.Unix() + 30)
+		return true
+	}
+
+	// 第一个请求负责给计数键设置过期时间；留 2 秒让窗口内的后续请求都能读到同一个桶
+	if count == 1 {
+		facade.Cache.Expire(key, 2*time.Second)
+	}
+
+	return count <= int64(speed)
+}
 
 // QpsPoint - 单接口限流器
 func QpsPoint() gin.HandlerFunc {
 	qpsOnce.Do(func() {
-		go qpsDelete()
-		go qpsReset()
 		go qpsAutoUnban()
 	})
 
@@ -70,15 +104,7 @@ func QpsPoint() gin.HandlerFunc {
 		method := ctx.Request.Method
 		key := fmt.Sprintf("ip=%s&path=%s&method=%s", ip, path, method)
 
-		qpsMutex.Lock()
-		limit := QoSPoint[key]
-		if limit == nil {
-			limit = rate.NewLimiter(rate.Every(qpsWarnInterval), speed)
-			QoSPoint[key] = limit
-		}
-		qpsMutex.Unlock()
-
-		if !limit.Allow() {
+		if !qpsAllow("point", key, speed, time.Now()) {
 			go QpsWarn(ctx)
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
@@ -112,15 +138,7 @@ func QpsGlobal() gin.HandlerFunc {
 		speed = utils.Ternary[int](utils.Is.Empty(speed), defaultGlobalSpeed, speed)
 
 		ip := ctx.ClientIP()
-		qpsMutex.Lock()
-		limit := QoSGlobal[ip]
-		if limit == nil {
-			limit = rate.NewLimiter(rate.Every(qpsWarnInterval), speed)
-			QoSGlobal[ip] = limit
-		}
-		qpsMutex.Unlock()
-
-		if !limit.Allow() {
+		if !qpsAllow("global", ip, speed, time.Now()) {
 			go QpsWarn(ctx)
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
@@ -130,49 +148,16 @@ func QpsGlobal() gin.HandlerFunc {
 	}
 }
 
-// qpsDelete - 监控QPSPoint和QoSGlobal的协程
-func qpsDelete() {
-	for {
-		time.Sleep(time.Second)
-		qpsMutex.Lock()
-		for key, item := range QoSPoint {
-			if item.Allow() {
-				delete(QoSPoint, key)
-			}
-		}
-		for key, item := range QoSGlobal {
-			if item.Allow() {
-				delete(QoSGlobal, key)
-			}
-		}
-		qpsMutex.Unlock()
-	}
-}
-
-// qpsReset - 重置QPSPoint和QoSGlobal的协程
-func qpsReset() {
-	ticker := time.NewTicker(time.Minute)
-	for range ticker.C {
-		qpsMutex.Lock()
-		if len(QoSPoint) == 0 {
-			for key := range QoSPoint {
-				delete(QoSPoint, key)
-			}
-		}
-		if len(QoSGlobal) == 0 {
-			for key := range QoSGlobal {
-				delete(QoSGlobal, key)
-			}
-		}
-		qpsMutex.Unlock()
-	}
-}
-
 // qpsAutoUnban - 自动解封协程
 func qpsAutoUnban() {
 	ticker := time.NewTicker(5 * time.Minute)
 	for range ticker.C {
 		if facade.DB == nil {
+			continue
+		}
+
+		// 多实例只需一个实例扫描：删除本身是幂等的，但没必要 N 个实例同时扫全表
+		if facade.Cache != nil && !facade.Cache.SetNX("qps:auto_unban", time.Now().Unix(), 4*time.Minute) {
 			continue
 		}
 

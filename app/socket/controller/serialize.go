@@ -184,6 +184,9 @@ type hub struct {
 	ipBanThreshold int
 	ipBanDuration  time.Duration
 	ipBanRecords   map[string]*ipBanRecord
+	// 跨实例消息（redis pub/sub 订阅侧投递进来，只做本地分发、不再二次发布，见 cluster.go）
+	cluster     chan []byte
+	clusterKick chan string
 }
 
 // IP封禁记录
@@ -211,6 +214,8 @@ var Hub = func() *hub {
 		chatSessions:         make(map[string]*chatSession),
 		messageStatuses:      make(map[string]*messageStatus),
 		ipBanRecords:         make(map[string]*ipBanRecord),
+		cluster:              make(chan []byte, 1024),
+		clusterKick:          make(chan string, 256),
 		ackTimeout:           time.Duration(cast.ToInt(getSocketConfig("ack_timeout", 10))) * time.Second,
 		maxRetries:           cast.ToInt(getSocketConfig("max_retries", 3)),
 		offlineMsgTTL:        time.Duration(cast.ToInt(getSocketConfig("offline_msg_ttl", 300))) * time.Second,

@@ -26,7 +26,6 @@ require (
 	github.com/unrolled/secure v1.17.0
 	github.com/unti-io/go-utils v1.3.6
 	go.uber.org/zap v1.28.0
-	golang.org/x/time v0.15.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2

@@ -3,6 +3,7 @@ package timer
 import (
 	"inis/app/facade"
 	"inis/app/model"
+	"time"
 
 	"github.com/jasonlvhit/gocron"
 )
@@ -27,8 +28,14 @@ func Run() {
 	// 1. 补齐缺失的权限规则（新增接口在旧库里没有规则会被中间件判为「需权限点」）
 	// 2. 纠正历史脏数据（规则类型 root → default）
 	// 3. 清理已下线接口残留的权限规则（见 model.PruneAuthRules）
-	// 以上三步都由 EnsureAuthRules 内部串起来执行
-	go model.EnsureAuthRules()
+	// 以上三步都由 EnsureAuthRules 内部串起来执行。
+	// 多实例同时重启时会抢锁：规则补齐本身幂等，但没必要 N 个实例同时写规则表。
+	go func() {
+		if !tryLock("auth-rules", 10*time.Minute) {
+			return
+		}
+		model.EnsureAuthRules()
+	}()
 
 	Log.Run()
 	Device.Run()

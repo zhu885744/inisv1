@@ -3,6 +3,7 @@ package timer
 import (
 	"inis/app/facade"
 	"inis/app/model"
+	"time"
 
 	"github.com/spf13/cast"
 )
@@ -12,8 +13,14 @@ type NotificationStruct struct{}
 var Notification *NotificationStruct
 
 func (this *NotificationStruct) Run() {
-	// 每天凌晨 04:00:00 执行一次通知过期清理
-	_ = Timer.Every(1).Day().At("04:00:00").Do(cleanExpiredNotifications)
+	// 每天凌晨 04:00:00 执行一次通知过期清理。
+	// 多实例下抢锁执行：清理是幂等的，但没必要让每个实例都扫一遍全表。
+	_ = Timer.Every(1).Day().At("04:00:00").Do(func() {
+		if !tryLock("notification-clean", 10*time.Minute) {
+			return
+		}
+		cleanExpiredNotifications()
+	})
 }
 
 // cleanExpiredNotifications 清理过期的已读通知与广播通知
