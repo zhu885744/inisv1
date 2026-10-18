@@ -358,7 +358,7 @@ EXP 控制器负责用户经验值管理，支持经验值的增删改查、统�
 
 ```bash
 curl -X POST "/api/exp/give" \
-  -H "Authorization: Bearer <管理员Token>" \
+  -H "Authorization: <管理员会话token>" \
   -H "Content-Type: application/json" \
   -d '{"uid": 1, "value": 100, "description": "活动奖励"}'
 ```
@@ -367,10 +367,13 @@ curl -X POST "/api/exp/give" \
 
 ```bash
 curl -X POST "/api/exp/give" \
-  -H "Authorization: Bearer <管理员Token>" \
+  -H "Authorization: <管理员会话token>" \
   -H "Content-Type: application/json" \
   -d '{"uid": 1, "value": -50, "description": "违规处罚"}'
 ```
+
+> 鉴权只认**原始会话 token**（`Authorization` 头或 Cookie `INIS_LOGIN_TOKEN`），
+> 不要加 `Bearer ` 前缀 —— 服务端会把整串当作 token 去查会话，加了前缀会直接 401。
 
 ---
 

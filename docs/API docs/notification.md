@@ -2,7 +2,7 @@
 
 ## 接口概述
 
-`notification` 控制器用于管理系统通知，支持通知列表查询、未读计数、标记已读、批量操作等功能。当用户收到新回复、被点赞、被收藏、被关注时，系统自动创建通知（仅落库），前端通过 API 拉取列表与未读数。所有接口均需登录，数据按用户隔离。
+`notification` 控制器用于管理系统通知，支持通知列表查询、未读计数、标记已读、批量操作等功能。当用户收到新回复、被点赞、被收藏、被关注、被 打赏（积分打赏，见 [tip.md](./tip.md)）时，系统自动创建通知（仅落库），前端通过 API 拉取列表与未读数。所有接口均需登录，数据按用户隔离。
 
 ### 可见范围与权限模型（重要）
 
@@ -39,6 +39,7 @@
 | 文章/页面/动态被收藏 | `collect` | 内容作者 | "xxx 收藏了你的{内容类型}「{内容标题}」" |
 | 被用户关注 | `follow` | 被关注者 | "xxx 关注了你" |
 | 付费内容被兑换（积分） | `unlock` | 内容作者 | "xxx 兑换了你的文章《{标题}》内容查看权限"（内容另附：对方消耗 N 积分，积分已转入你的账户；`bind_type` 为 article/moments/page，点击跳到该内容） |
+| 收到积分打赏 | `tip` | 内容作者 / 被 打赏用户 | "xxx 打赏了你 N 积分（{对象}），积分已存入你的账户。"，有留言时追加「留言：…」（见 [tip.md](./tip.md)；`bind_type` 为 article/moments/comment/page/user，点击跳到对应内容或作者主页） |
 | 文章进入待审核 / 审核结果 | `article` | 管理员 / 文章作者 | "有新的文章待审核" / "您的文章已通过审核 / 未通过审核"（驳回时内容带「驳回原因：xxx」，邮件见 `article.*`） |
 | 独立页面进入待审核 / 审核结果 | `page` | 管理员 / 作者 | 同文章，文案为「独立页面」，驳回带原因（邮件见 `page.*`） |
 | 友链进入待审核 / 审核结果 | `links` | 管理员 / 申请者 | 同文章，文案为「友链」，驳回带原因（邮件见 `links.*`） |
@@ -88,7 +89,7 @@
 | `id` | int | 主键，自增 |
 | `uid` | int | 接收通知的用户ID |
 | `from_uid` | int | 触发通知的用户ID |
-| `type` | string | 通知类型：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/system（管理员调整积分触发的积分变动通知归入 `system`） |
+| `type` | string | 通知类型：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/tip/system（管理员调整积分触发的积分变动通知归入 `system`） |
 | `title` | string | 通知标题 |
 | `content` | string | 通知内容 |
 | `bind_id` | int | 关联实体ID（文章/评论/用户等） |
@@ -134,7 +135,7 @@
 | `page` | int | 否 | 页码，默认1 |
 | `size` | int | 否 | 每页数量 |
 | `order` | string | 否 | 排序字段，默认 `create_time desc` |
-| `type` | string | 否 | 通知类型过滤：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/system |
+| `type` | string | 否 | 通知类型过滤：comment/like/collect/follow/article/page/links/moments/decoration/mention/unlock/tip/system |
 | `is_read` | int | 否 | 已读状态过滤：0=未读，1=已读；**不传 / 传空串 / 传 null 均表示「全部」** |
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
@@ -988,15 +989,35 @@ await request.delete('/api/notification/remove-all', {
 ### 场景七：跳转到关联内容
 
 ```javascript
-// 根据 bind_type 和 bind_id 构建跳转链接
-function getActionLink(notif) {
+// 官方主题 Mellow 的实现见 Mellow/src/utils/notification.js
+// 内容类直接拼详情；comment 需要先查评论拿到所属内容；其余为固定页面
+function contentLink(bindType, bindId, commentId = 0) {
+    const id = Number(bindId) || 0
+    if (!id) return ''
+    const hash = commentId ? `?comment=${commentId}` : ''
+    switch (bindType) {
+        case 'article': return `/archives/${id}${hash}`
+        case 'moments': return `/moments/${id}${hash}`
+        case 'page':    return `/page/${id}${hash}`
+        default:        return ''
+    }
+}
+
+async function notificationLink(notif) {
     switch (notif.bind_type) {
-        case 'article': return `/blog/${notif.bind_id}`
-        case 'moments': return `/moment/${notif.bind_id}`
-        case 'page':     return `/page/${notif.bind_id}`
-        case 'comment':  return null // 需要额外查询评论所属内容
-        case 'user':     return `/user/${notif.bind_id}`
-        default:         return null
+        case 'links':         return '/manage/links'
+        case 'integral-card': return '/user/integral'
+        case 'decoration':    return '/user/decorations'
+        case 'user':          return `/author/${notif.bind_id}`
+        case 'comment': {
+            // comment/one 是公开接口（field=id,bind_type,bind_id），据此定位所属内容
+            const res = await request.get('/api/comment/one', {
+                params: { id: notif.bind_id, field: 'id,bind_type,bind_id' }
+            })
+            return contentLink(res.data.bind_type, res.data.bind_id, notif.bind_id)
+        }
+        default:
+            return contentLink(notif.bind_type, notif.bind_id)
     }
 }
 ```
@@ -1025,9 +1046,15 @@ function getActionLink(notif) {
 
 | 类型 | 值 | 触发时机 | bind_type | bind_id |
 | :--- | :--- | :--- | :--- | :--- |
-| 回复通知 | `comment` | 收到新评论 | article/page/moments | 内容ID |
+| 回复通知 | `comment` | 收到新评论 / 评论待审核 / 审核结果 | article/page/moments | 内容ID |
+| @ 提及 | `mention` | 在内容或评论里 @ 了用户 | article/moments/comment | 内容或评论ID |
+| 收到打赏 | `tip` | 积分打赏到账（见 [tip.md](./tip.md)） | article/moments/comment/page/user | 内容ID / 用户ID |
+| 付费内容被兑换 | `unlock` | 他人用积分兑换了你的内容 | article/moments/page | 内容ID |
 | 点赞通知 | `like` | 评论被点赞 | comment | 评论ID |
+| 收藏通知 | `collect` | 内容被收藏 | article/moments | 内容ID |
 | 关注通知 | `follow` | 被用户关注 | user | 关注者ID |
+| 装扮通知 | `decoration` | 获得 / 续期 / 回收 / 过期 | decoration | 装扮ID |
+| 内容审核 | `article` / `page` / `links` / `moments` | 进入待审核 / 审核结果 | 同名实体 | 实体ID |
 | 系统通知 | `system` | 平台/管理员发送（含注册欢迎消息、账号登录通知） | 自定义 | 自定义 |
 | 系统消息（全体可见） | `system` | 管理员 `send-system` 且 `target_type=all`（uid=0 一条记录） | — | — |
 

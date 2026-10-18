@@ -73,6 +73,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &UserBanRecords{}
 	case "notification":
 		item = &Notification{}
+	case "tip":
+		item = &Tip{}
 	default:
 		return errors.New("未知的验证器！")
 	}

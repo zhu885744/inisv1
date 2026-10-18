@@ -65,6 +65,7 @@ var controllers = map[string]controller.ApiInterface{
 	"user-follows":  &controller.UserFollows{},
 	"notification":  &controller.Notification{},
 	"integral":      &controller.Integral{},
+	"tip":           &controller.Tip{},
 	"goods":         &controller.Goods{},
 	"decoration":    &controller.Decoration{},
 	"log":           &controller.Log{},

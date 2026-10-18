@@ -30,6 +30,8 @@ const (
 	IntegralTypeGive          = "give"           // 管理员调整
 	IntegralTypeCard          = "card"           // 卡密兑换（获得）
 	IntegralTypeUnlock        = "unlock"         // 兑换内容可见权限（消耗 / 作者收入）
+	IntegralTypeTip           = "tip"            // 打赏他人（消耗）
+	IntegralTypeTipIncome     = "tip-income"     // 收到打赏（获得）
 )
 
 // defaultIntegralRules - 默认积分任务规则（作为配置缺失时的兜底）

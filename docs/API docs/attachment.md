@@ -718,7 +718,7 @@ categories.forEach(category => {
 
 #### 2.4 检查文件类型 [特殊接口]
 
-- **路径**: `/api/attachment/checkType`
+- **路径**: `/api/attachment/checktype`（服务端会把 `:method` 转小写，写 `checkType` 也能命中，但建议统一小写）
 - **方法**: `POST`
 - **描述**: 检查文件类型是否允许上传，支持批量检查
 
@@ -1052,11 +1052,11 @@ categories.forEach(category => {
 - **文件哈希算法**：使用 SHA-256 计算文件哈希，防止碰撞攻击
 
 ### 3. 并发上传限制
-- 使用 Redis 计数器实现分布式并发控制
-- Redis 不可用时拒绝上传（防止分布式环境下限流失效）
-- Redis key 使用命名空间前缀 `inis:attachment:`
-- Redis key 仅首次创建时设置过期，防止持续上传场景下永不过期
-- 服务异常崩溃时自动归零（过期时间 5 分钟）
+- 并发计数走缓存层的原子自增（`facade.Cache.Incr`）：`redis` 驱动下多实例共享，
+  `file` / `ram` 驱动只在单实例内有效
+- 缓存不可用时**降级为进程内计数器并放行**（不会因为缓存故障拒绝上传），同时打一条 warn 日志
+- 计数 key 为 `attachment:upload_concurrent_counter`，最终键名前缀由 `cache.toml` 的 `redis.prefix` 决定
+- key 仅首次创建时设置 5 分钟过期，防止持续上传场景下永不过期；释放时若 key 已过期则不再自减，避免留下负数
 
 ### 4. 查询安全
 - **column 接口**：普通用户必须携带筛选条件（where/or/like/not/null/notNull/ids），最多返回100条记录
@@ -1137,7 +1137,10 @@ concurrent_limit = 5
 - 软删除（`remove`）只标记记录、不碰存储文件，属于回收站语义（可用 `restore` 还原）
 
 ### 10. 上传限制说明
-- **并发上传限制**：同时进行的上传请求数不能超过 `concurrent_limit` 配置值，使用互斥锁保证并发安全
+- **并发上传限制**：同时进行的上传请求数不能超过 `concurrent_limit` 配置值；计数走缓存原子自增
+  （redis 下多实例共享，缓存故障时降级为本地计数并放行）
 - **批量上传**：批量上传时，会先检查总数是否超过限制和并发限制，再逐个处理
 - **秒传文件**：秒传文件（已存在相同MD5）不计入上传数量限制，但会占用并发上传计数
 - **错误提示**：超过限制时会返回对应的错误信息，如"并发上传数量已达上限（5个）！"
+- **大文件与内存**：multipart 请求在参数中间件阶段就按流式解析，超过 8MB 的文件部分落临时文件
+  （`Gin.MaxMultipartMemory` 同步为 8MB），不会整份读进内存；控制器侧通过 `ctx.MultipartForm()` 取文件

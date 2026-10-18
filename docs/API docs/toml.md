@@ -172,6 +172,25 @@
 }
 ```
 
+#### 1.6 获取通知配置
+
+- **路径**: `/api/toml/notification`
+- **方法**: `GET`
+- **描述**: 获取站内通知配置（`config/app.toml` 的 `[notification] retention_days`）
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "数据请求成功！",
+    "data": {
+        "retention_days": 30
+    }
+}
+```
+
+> `retention_days` 为站内通知保留天数，读取时缺省 30（配置文件里没有该键时按默认值返回）。
+
 ---
 
 ### 2. POST 请求接口（测试服务）
@@ -843,6 +862,49 @@
 {
     "code": 400,
     "msg": "batch_size 取值范围 1 ~ 1000！",
+    "data": null
+}
+```
+
+#### 3.17 更新通知配置
+
+- **路径**: `/api/toml/notification`
+- **方法**: `PUT`
+- **描述**: 更新站内通知保留天数，写入 `config/app.toml` 的 `[notification]` 段
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `retention_days` | int | 是 | 通知保留天数，必须大于 0 |
+
+**行为说明**:
+
+- 配置文件已有 `retention_days` 时按行替换；有 `[notification]` 段但无该键时插入到段名下；
+  两者都没有时追加 `[notification]` 段到文件末尾；
+- 保存后由配置文件监听热更新，无需重启。
+
+**请求示例**:
+```json
+{
+    "retention_days": 60
+}
+```
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "修改成功！",
+    "data": null
+}
+```
+
+**失败响应** (400):
+```json
+{
+    "code": 400,
+    "msg": "retention_days 必须大于 0！",
     "data": null
 }
 ```

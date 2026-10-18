@@ -316,7 +316,6 @@ flowchart TD
 #### 2. 用户中心（`/user`）
 - 个人资料（`/user/profile`）、隐私设置（`/user/settings`）、联系方式（`/user/contact`）
 - 账号安全（`/user/security`）：重置密码、第三方账号绑定 / 解绑、账号注销、安全提示
-- 我的奖励（`/user/reward`）：经验 / 积分 / 卡密等奖励明细
 - 等级与经验（`/user/exp`）、我的积分（`/user/integral`）
 - 我的装扮（`/user/decorations`）：佩戴 / 卸下头衔与头像框、自定义头衔文字
 - 消息通知（`/user/notifications`）：站内信、未读计数、一键跳转对应内容
@@ -341,7 +340,7 @@ flowchart TD
 - 实时通信：WebSocket（`/socket`，在线状态与消息推送）
 - 定时任务：封禁到期解封、装扮到期、日志清理、通知清理
 - 多语言：中 / 英 / 韩 / 俄（由 `i18n-assets.go` 内嵌）
-- 接口文档：`docs/API docs/` 共 46 篇，覆盖全部模块
+- 接口文档：`docs/API docs/` 共 49 篇，覆盖全部模块
 
 ## 配置说明
 
@@ -396,8 +395,8 @@ inisv1/
 │   ├── i18n-assets.go      # 语言包内嵌（go:embed）
 │   └── i18n/               # 国际化语言包：zh-cn / en-us / ko-kr / ru-ru
 │
-├── docs/                   # 文档（55 篇）
-│   ├── API docs/           # 接口文档（48 篇，按模块划分）
+├── docs/                   # 文档（56 篇）
+│   ├── API docs/           # 接口文档（49 篇，按模块划分）
 │   │   ├── api-keys.md                 # 接口密钥
 │   │   ├── article-group.md            # 文章分组
 │   │   ├── article.md                  # 文章
@@ -437,6 +436,7 @@ inisv1/
 │   │   ├── search.md                   # 搜索
 │   │   ├── stats.md                    # 数据统计（资源告警阈值）
 │   │   ├── tags.md                     # 标签（含话题主持人 / 精选字段）
+│   │   ├── tip.md                      # 积分打赏（概览 / 统计 / 记录 / 打赏）
 │   │   ├── topics.md                   # 话题（Hashtag）：榜 / 聚合 / 关注 / 主持人治理
 │   │   ├── toml.md                     # TOML 配置读写
 │   │   ├── unlock.md                   # 内容可见权限查询 / 积分兑换
@@ -449,7 +449,7 @@ inisv1/
 │   ├── cache.md                        # 缓存机制说明
 │   ├── database-index.md               # 数据库索引说明
 │   ├── mention.md                      # 用户 @ 提及（候选仅限已关注的人、通知与渲染）
-│   ├── socket.md                       # Socket 实时通道与系统状态推送
+│   ├── socket.md                       # Socket 实时通道：准入、消息协议、ACK/离线、限流、集群、前端封装
 │   ├── topics.md                       # 话题 / 标签社区（#话题#：聚合、关注、热度榜、主持人）
 │   ├── 二次开发规范.md                  # 二次开发规范
 │   └── 前端主题开发及API调用规范.md      # 前端主题开发及 API 调用规范

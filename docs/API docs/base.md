@@ -83,6 +83,15 @@ func (this base) headers(ctx *gin.Context) map[string]any
 
 **说明**: 获取所有请求头信息
 
+#### 关于 multipart 请求
+
+`params` 在参数中间件阶段就按**流式**解析 multipart：文件部分超过 8MB 会自动落临时文件
+（`Gin.MaxMultipartMemory = 8MB`），不会把整个上传文件读进内存。因此：
+
+- 控制器里不要再用 `ctx.Request.ParseMultipartForm(...)` 重复解析，直接 `ctx.MultipartForm()` 取文件即可；
+- 一次请求只解析一次，后续 `params` / `ctx.PostForm` 都是读已解析好的结果；
+- 大文件上传的峰值内存由这个 8MB 阈值决定，与文件总大小无关。
+
 ---
 
 ### 3. 缓存管理

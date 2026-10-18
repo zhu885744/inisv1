@@ -152,6 +152,9 @@ var deprecatedAuthRules = [][2]string{
 	{"POST", "/api/comm/send-verify-mail"}, // 重发注册验证邮件
 	{"GET", "/api/stats/history"},          // 统计数据历史趋势（功能已移除：实时趋势 + 资源告警已覆盖需求）
 	{"GET", "/api/stats/spans"},            // 统计数据跨度列表（同上）
+	{"PUT", "/api/attachment/bind"},        // 附件绑定业务类型（控制器从未实现，调用只会返回 405）
+	{"PUT", "/api/user-collects/restore"},  // 收藏恢复（controller 的 IPUT 只有 update / uncollect）
+	{"PUT", "/api/user-likes/restore"},     // 点赞恢复（controller 的 IPUT 只有 update / unlike）
 }
 
 // PruneAuthRules - 清理已下线接口残留的权限规则
@@ -226,6 +229,20 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"POST": {
 				"path=alert&name=保存统计告警阈值&type=default",
+			},
+		},
+		"tip": {
+			// 积分打赏：
+			//   - summary / stats 是内容页与用户主页的公开展示（次数 / 积分合计），免登录；
+			//   - list 需要登录（自己的收发记录，或他人打赏墙）；
+			//   - send 需要登录：扣的是当前用户的积分，收款人由后端按内容作者解析。
+			"GET": {
+				"path=summary&name=打赏概览&type=common",
+				"path=stats&name=收到打赏统计&type=common",
+				"path=list&name=打赏记录&type=login",
+			},
+			"POST": {
+				"path=send&name=积分打赏&type=login",
 			},
 		},
 		"comm": {
@@ -808,7 +825,6 @@ func createAuthRules() (result []AuthRules) {
 			"PUT": {
 				"path=update&type=login&name=更新数据",
 				"path=restore&type=login&name=恢复数据",
-				"path=bind&type=login&name=绑定业务类型",
 			},
 			"DELETE": {
 				"path=remove&type=login&name=软删除",
@@ -837,7 +853,6 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"PUT": {
 				"path=update&type=login",
-				"path=restore&type=login",
 				"path=uncollect&type=login&name=取消收藏",
 			},
 			"DELETE": {
@@ -901,7 +916,6 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"PUT": {
 				"path=update&type=login",
-				"path=restore&type=login",
 				"path=unlike&type=login&name=取消点赞",
 			},
 			"DELETE": {

@@ -91,6 +91,8 @@ func InitTable() {
 		{"Notification", InitNotification},
 		{"NotificationRead", InitNotificationRead},
 		{"Integral", InitIntegral},
+		// 积分打赏记录（依赖 Users / Integral 两套表）
+		{"Tip", InitTip},
 		{"Goods", InitGoods},
 		// Decoration 必须排在 Goods 之后：首次运行会为默认装扮生成关联的商品记录
 		{"Decoration", InitDecoration},

@@ -34,6 +34,10 @@ const (
 	// 内容被兑换（付费可见）：其他用户消耗积分兑换后通知作者
 	// bind_type/bind_id 指向被兑换的内容，点击跳到该内容；发送见 model.SendUnlockNotify
 	NotificationTypeUnlock = "unlock"
+	// 收到积分打赏
+	// bind_type/bind_id 指向被打赏的内容（用户主页打赏时 bind_type=user、bind_id=接收者 uid），
+	// 发送见 model.SendTipNotify
+	NotificationTypeTip = "tip"
 )
 
 type Notification struct {
