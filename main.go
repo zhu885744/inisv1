@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 	api "inis/app/api/route"
@@ -22,6 +23,14 @@ import (
 func main() {
 	watch()
 	run()
+
+	// 启动后回收一次初始化阶段的堆内存：模型注册、配置解析、主题资源、
+	// 缓存驱动等一次性对象在启动完成后就是垃圾，FreeOSMemory 能把它们尽快还给系统，
+	// 让常驻 RSS 落到真实水位（否则要等若干轮 GC 之后才慢慢下降）。
+	go func() {
+		time.Sleep(10 * time.Second)
+		debug.FreeOSMemory()
+	}()
 
 	// 阻塞主 goroutine，等待系统信号优雅退出（替代原 app.Run 内的 select{}，
 	// 避免配置热更新回调因 select{} 永久阻塞导致 goroutine 泄漏）

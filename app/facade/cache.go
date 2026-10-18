@@ -734,18 +734,58 @@ type BigCacheClient struct {
 	mutex  sync.Mutex
 	prefix string
 	expire int64
-	items  map[string]*bigcache.BigCache
+	// items 记录每个 key 的过期时间（unix 秒，0 表示长期有效）
+	//
+	// 旧实现是 items map[string]*bigcache.BigCache —— **每个 key 建一个 bigcache 实例**：
+	// bigcache 默认 1024 个 shard，一个空实例光骨架就要上百 KB，几千个缓存键就能吃掉几十 MB；
+	// 而且每次 Set 都会新建实例并把旧的丢给 GC，写入路径一直在制造垃圾。
+	// 现在整个驱动共用一个 bigcache 实例，过期时间单独记账。
+	items map[string]int64
+	// cache 懒加载：initCache 会无条件构造三种驱动，
+	// 但实际只用其中一种。如果在这里直接 bigcache.New()，
+	// 用 file / redis 驱动的站点也会白白多出几百 KB~几 MB 的 shard 骨架。
+	once  sync.Once
+	cache *bigcache.BigCache
 }
 
 func NewBigCache(expire any, prefix ...string) *BigCacheClient {
+	seconds := cast.ToInt64(utils.Calc(expire))
+	if seconds <= 0 {
+		seconds = 100 * 365 * 24 * 60 * 60
+	}
+
 	var cache BigCacheClient
-	cache.expire = cast.ToInt64(expire)
-	cache.items = make(map[string]*bigcache.BigCache)
+	cache.expire = seconds
+	cache.items = make(map[string]int64)
 	cache.prefix = "cache_"
 	if len(prefix) > 0 {
 		cache.prefix = prefix[0]
 	}
+
 	return &cache
+}
+
+// instance 首次使用时才创建 bigcache 实例
+func (this *BigCacheClient) instance() *bigcache.BigCache {
+	this.once.Do(func() {
+		// 单个实例、有界内存：HardMaxCacheSize 让 bigcache 在超限时自动淘汰旧条目，
+		// 避免「ram 驱动被打满把进程撑爆」。
+		instance, err := bigcache.New(context.Background(), bigcache.Config{
+			Shards:             256,
+			LifeWindow:         time.Duration(this.expire) * time.Second,
+			CleanWindow:        time.Minute,
+			MaxEntriesInWindow: 1024,
+			MaxEntrySize:       512,
+			HardMaxCacheSize:   64,
+		})
+		if err != nil {
+			// 极端情况下（参数非法）退回默认配置，保证缓存可用
+			instance, _ = bigcache.New(context.Background(), bigcache.DefaultConfig(time.Duration(this.expire)*time.Second))
+		}
+		this.cache = instance
+	})
+
+	return this.cache
 }
 
 func (this *BigCacheClient) Get(key any) []byte {
@@ -754,8 +794,23 @@ func (this *BigCacheClient) Get(key any) []byte {
 }
 
 func (this *BigCacheClient) Has(key any) bool {
-	_, ok := this.items[this.name(key)]
-	return ok
+	name := this.name(key)
+
+	this.mutex.Lock()
+	expiredAt, ok := this.items[name]
+	this.mutex.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	// 过期时间由自己记账（bigcache 的 LifeWindow 是实例级的，做不到逐 key 精确过期）
+	if expiredAt > 0 && time.Now().Unix() > expiredAt {
+		_ = this.DelE(key)
+		return false
+	}
+
+	return true
 }
 
 func (this *BigCacheClient) Set(key any, value []byte, expire ...any) bool {
@@ -793,56 +848,59 @@ func (this *BigCacheClient) DelTags(tags ...any) bool {
 }
 
 func (this *BigCacheClient) GetE(key any) ([]byte, error) {
+	name := this.name(key)
+
 	this.mutex.Lock()
-	defer this.mutex.Unlock()
+	expiredAt, ok := this.items[name]
+	this.mutex.Unlock()
 
-	item, ok := this.items[this.name(key)]
 	if !ok {
-		delete(this.items, this.name(key))
-		return nil, fmt.Errorf("cache %s not exists", this.name(key))
+		return nil, fmt.Errorf("cache %s not exists", name)
 	}
 
-	value, err := item.Get(this.name(key))
-	if err != nil {
-		return nil, err
+	if expiredAt > 0 && time.Now().Unix() > expiredAt {
+		_ = this.DelE(key)
+		return nil, fmt.Errorf("cache %s expired", name)
 	}
 
-	return value, nil
+	return this.instance().Get(name)
 }
 
 func (this *BigCacheClient) SetE(key any, value []byte, expire int64) error {
-	duration := time.Duration(100 * 365 * 24 * 60 * 60 * 1e9) // 100 years
-	if expire != 0 {
-		duration = time.Duration(expire) * time.Second
+	name := this.name(key)
+
+	// expire <= 0 表示长期有效（与原实现「100 年」的语义一致）
+	expiredAt := int64(0)
+	if expire > 0 {
+		expiredAt = time.Now().Unix() + expire
 	}
 
-	item, _ := bigcache.New(context.Background(), bigcache.DefaultConfig(duration))
-	err := item.Set(this.name(key), value)
-	if err != nil {
+	if err := this.instance().Set(name, value); err != nil {
 		return err
 	}
 
 	this.mutex.Lock()
-	defer this.mutex.Unlock()
-	this.items[this.name(key)] = item
+	this.items[name] = expiredAt
+	this.mutex.Unlock()
+
 	return nil
 }
 
 func (this *BigCacheClient) DelE(key any) error {
+	name := this.name(key)
+
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
-	item, ok := this.items[this.name(key)]
-	if !ok {
-		return fmt.Errorf("cache %s not exists", this.name(key))
+	if _, ok := this.items[name]; !ok {
+		return fmt.Errorf("cache %s not exists", name)
 	}
 
-	err := item.Delete(this.name(key))
-	if err != nil {
+	if err := this.instance().Delete(name); err != nil {
 		return err
 	}
 
-	delete(this.items, this.name(key))
+	delete(this.items, name)
 	return nil
 }
 
@@ -850,28 +908,31 @@ func (this *BigCacheClient) ClearE() error {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
-	for _, item := range this.items {
-		err := item.Reset()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	this.items = make(map[string]int64)
+
+	// 单个实例直接 Reset，比遍历 N 个实例各自 Reset 便宜得多
+	return this.instance().Reset()
 }
 
 func (this *BigCacheClient) DelPrefixE(prefix ...any) error {
+	if len(prefix) == 0 {
+		return nil
+	}
+
+	// 旧实现是 cast.ToString(prefix)（把整个切片转成 "[xxx]"），永远匹配不上任何 key；
+	// 这里按第一个前缀参数处理
+	value := cast.ToString(prefix[0])
+
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
-	for key, item := range this.items {
-		if strings.HasPrefix(key, cast.ToString(prefix)) {
-			err := item.Reset()
-			if err != nil {
-				return err
-			}
+	for key := range this.items {
+		if strings.HasPrefix(key, value) {
+			_ = this.instance().Delete(key)
 			delete(this.items, key)
 		}
 	}
+
 	return nil
 }
 
@@ -897,22 +958,19 @@ func (this *BigCacheClient) DelTagsE(tag ...any) error {
 		tags = append(tags, fmt.Sprintf("*%s*", item))
 	}
 
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
 	for key := range this.items {
 		keys = append(keys, key)
 	}
 
 	keys = this.fuzzyMatch(keys, tags)
 	for _, key := range keys {
-		item, ok := this.items[key]
-		if !ok {
-			continue
-		}
-		err := item.Reset()
-		if err != nil {
-			return err
-		}
+		_ = this.instance().Delete(key)
 		delete(this.items, key)
 	}
+
 	return nil
 }
 

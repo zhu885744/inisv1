@@ -21,6 +21,10 @@ var MySQL *MySqlStruct
 // 字段名白名单正则：仅允许字母、数字、下划线，以及用于联表查询的点号
 var columnNameRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$`)
 
+// fieldSplitPattern 字段列表分隔符（逗号 / 空白 / 竖线）
+// Field / WithoutField 在每次查询构建时都会用到，必须是包级编译
+var fieldSplitPattern = regexp.MustCompile(`[,\s|]+`)
+
 // 操作符白名单：防止通过操作符拼接注入 SQL
 var allowedOperators = map[string]bool{
 	"=": true, "!=": true, "<>": true, ">": true, "<": true,
@@ -900,11 +904,8 @@ func (this *ModelStruct) Field(args ...any) *ModelStruct {
 		for _, val := range args {
 			if utils.Is.String(val) {
 
-				// 构建我们的正则表达式模式
-				pattern := regexp.MustCompile(`[,\s|]+`)
-
 				// 使用正则表达式模式来分隔字符串
-				result := pattern.Split(cast.ToString(val), -1)
+				result := fieldSplitPattern.Split(cast.ToString(val), -1)
 				// 使用 strings.TrimSpace 将分隔后的字符串数组中的元素进行 trim 处理
 				for index, item := range result {
 					result[index] = strings.TrimSpace(item)
@@ -943,10 +944,8 @@ func (this *ModelStruct) WithoutField(args ...any) *ModelStruct {
 		for _, val := range args {
 			if utils.Is.String(val) {
 
-				// 构建我们的正则表达式模式
-				pattern := regexp.MustCompile(`[,\s|]+`)
 				// 使用正则表达式模式来分隔字符串
-				result := pattern.Split(cast.ToString(val), -1)
+				result := fieldSplitPattern.Split(cast.ToString(val), -1)
 
 				// 使用 strings.TrimSpace 将分隔后的字符串数组中的元素进行 trim 处理
 				for index, item := range result {

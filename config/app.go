@@ -47,9 +47,17 @@ var (
 // 图片动态处理结果缓存（进程内），避免每次请求重复读盘+解码+编码
 var imageCache = &sync.Map{}
 var imageCacheLen atomic.Int64
+var imageCacheBytes atomic.Int64
 
-// imageCacheMaxLen 图片缓存最大条目数，超过则整体清空，防止无限制增长
-const imageCacheMaxLen = 1024
+// 图片缓存上限
+//
+// 只按条目数限流是不够的：1024 张 100KB 的缩略图就是 100MB，
+// 一个图片稍多的站点能轻松把常驻内存撑到几百 MB。
+// 这里同时限制总字节数，并且单张超过 1/4 预算的大图直接不进缓存。
+const (
+	imageCacheMaxLen   = 1024
+	imageCacheMaxBytes = 16 << 20 // 16MB
+)
 
 // Gin - gin引擎
 var Gin *gin.Engine
@@ -101,9 +109,25 @@ func InitApp() {
 		gin.DefaultWriter = io.Discard
 	}
 
-	Gin = gin.Default()
+	// 用 gin.New() 而不是 gin.Default()：
+	// gin.Default() 自带 Logger + Recovery，而下面又注册了一套自己的
+	// GinLogger / GinRecovery —— 每个请求都会走两遍日志与两遍 recover 包装，
+	// 属于白白的 CPU 与内存开销。
+	Gin = gin.New()
+
+	// 上传表单在内存里的阈值：超过这个大小的文件由 net/http 落到临时文件，
+	// 避免大图上传整块堆在内存里（与 middleware 的 multipart 解析阈值保持一致）
+	Gin.MaxMultipartMemory = 8 << 20
+
 	notRoute(Gin)
 	console()
+
+	// 调试模式才挂 pprof：内存问题靠猜没意义，
+	// go tool pprof http://127.0.0.1:8642/debug/pprof/heap 能直接看到真实分配来源。
+	// 生产环境 app.debug 必须保持 false（pprof 会暴露进程内部信息）。
+	if debug {
+		registerPprof()
+	}
 
 	Gin.Use(middleware.GinLogger(), middleware.GinRecovery(true))
 }
@@ -388,16 +412,23 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 
 	data := buffer.Bytes()
 
-	// 写入缓存（带简单条目上限，超过则整体清空）
-	if imageCacheLen.Load() < imageCacheMaxLen {
+	// 写入缓存：条目数 + 总字节数双重上限，超过则整体清空（策略简单但内存可控）
+	size := int64(len(data))
+
+	switch {
+	case size > imageCacheMaxBytes/4:
+		// 单张大图不进缓存：否则一张图就能顶掉整个缓存预算
+	case imageCacheLen.Load() < imageCacheMaxLen && imageCacheBytes.Load()+size <= imageCacheMaxBytes:
 		imageCache.Store(cacheKey, data)
 		imageCacheLen.Add(1)
-	} else {
+		imageCacheBytes.Add(size)
+	default:
 		imageCache.Range(func(key, _ any) bool {
 			imageCache.Delete(key)
 			return true
 		})
 		imageCacheLen.Store(1)
+		imageCacheBytes.Store(size)
 		imageCache.Store(cacheKey, data)
 	}
 

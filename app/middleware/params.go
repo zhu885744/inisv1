@@ -2,14 +2,11 @@ package middleware
 
 import (
 	"bytes"
-	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/unti-io/go-utils/utils"
 	"inis/app/facade"
 	"io"
-	"mime/multipart"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -17,125 +14,122 @@ import (
 
 // Params常量
 const (
-	contentTypeJSON            = "application/json"
-	contentTypeFormURLEncoded  = "application/x-www-form-urlencoded"
-	contentTypeMultipartForm   = "multipart/form-data"
-	maxMultipartFormMemory     = 32 << 20
-	storageConfigFile         = "config/storage.toml"
-	domainCacheKey           = "domain"
+	contentTypeJSON           = "application/json"
+	contentTypeFormURLEncoded = "application/x-www-form-urlencoded"
+	contentTypeMultipartForm  = "multipart/form-data"
+	// maxMultipartFormMemory multipart 表单在内存里的上限，超出部分由 net/http 落到临时文件
+	//
+	// 原来是 32MB：一个 30MB 的图片上传会整块留在堆上，加上下面那次重复读取，
+	// 峰值内存是文件大小的 2~3 倍。降到 8MB 后大文件走磁盘，小图仍然在内存里。
+	maxMultipartFormMemory = 8 << 20
+	storageConfigFile      = "config/storage.toml"
+	domainCacheKey         = "domain"
 )
+
+// domainVarPattern storage.toml 模板里的 ${xxx} 占位符
+var domainVarPattern = regexp.MustCompile(`\${(.+?)}`)
 
 // Params - 参数处理中间件
 func Params() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		go domain(ctx)
-		go clientIP(ctx)
-		go port(ctx)
+		// 这三个值都很便宜，同步算即可。
+		// 旧实现是 go domain(ctx) / go clientIP(ctx) / go port(ctx)：
+		// 每个请求 3~4 个 goroutine（domain 内部还再开一个），既浪费栈内存，
+		// 又和后续 handler 读 ctx 形成数据竞争（goroutine 的写入可能晚于 handler 的读取）。
+		clientIP(ctx)
+		port(ctx)
+		domain(ctx)
 
-		method := ctx.Request.Method
 		params := make(map[string]any)
+		contentType := ctx.GetHeader("Content-Type")
+
+		// multipart 交给 net/http 自己流式解析，不再整体读进内存。
+		//
+		// 旧实现：io.ReadAll 把整个请求体（含文件字节）读进堆 -> string(body) 再复制一份
+		// -> multipart.ReadForm(0) 又完整解析一次（文件部分同样在内存）。
+		// 现在只解析表单字段到 params，文件本身留给上传控制器用 ctx.MultipartForm()，
+		// 超过内存阈值的部分由 net/http 自动落临时文件。
+		if strings.Contains(contentType, contentTypeMultipartForm) {
+			if err := ctx.Request.ParseMultipartForm(maxMultipartFormMemory); err == nil && ctx.Request.MultipartForm != nil {
+				values := url.Values{}
+				for key, list := range ctx.Request.MultipartForm.Value {
+					for _, value := range list {
+						values.Add(key, value)
+					}
+				}
+				mergeParams(params, parseFormValues(values))
+			}
+
+			mergeParams(params, parseQuery(ctx.Request.URL.Query()))
+			ctx.Set("params", params)
+			return
+		}
 
 		body, _ := io.ReadAll(ctx.Request.Body)
 
-		content := map[string]any{
-			"type":  ctx.GetHeader("Content-Type"),
-			"body":  string(body),
-			"form":  ctx.Request.Form,
-			"query": ctx.Request.URL.Query(),
-		}
-
-		if utils.Is.Empty(content["type"]) {
-			if method == "GET" || method == "DELETE" {
-				content["type"] = contentTypeFormURLEncoded
-			} else {
-				if !utils.Is.Empty(content["body"]) {
-					content["type"] = contentTypeJSON
-				} else if !utils.Is.Empty(content["query"]) && !utils.Is.Empty(content["form"]) {
-					content["type"] = contentTypeFormURLEncoded
-				}
-			}
-		}
-
-		if utils.In.Array(method, []any{"POST", "PUT", "DELETE", "PATCH"}) {
-			if err := ctx.Request.ParseMultipartForm(maxMultipartFormMemory); err != nil {
-				if !errors.Is(err, http.ErrNotMultipart) {
-				}
-			}
-		}
-
-		contentType := cast.ToString(content["type"])
-
-		if !utils.Is.Empty(content["body"]) {
-			var item map[string]any
-
+		if len(body) > 0 {
 			switch {
 			case strings.Contains(contentType, contentTypeJSON):
-				item = cast.ToStringMap(utils.Json.Decode(string(body)))
+				item := cast.ToStringMap(utils.Json.Decode(body))
 				// 兜底：有些客户端会把表单体配上 JSON 头发出来
 				// （axios 对 URLSearchParams 用的是「不覆盖实例默认头」，而实例默认头恰好是 application/json），
 				// 此时 JSON 解不出来，若直接放过会导致「全部参数静默丢失」，表现为「xxx 不能为空！」。
 				// 解不出 JSON 就退一步按表单解析。
 				if utils.Is.Empty(item) {
-					if values, err := url.ParseQuery(string(body)); err == nil {
-						item = utils.Parse.Params(utils.Parse.ParamsBefore(values))
-					}
+					item = parseFormBody(body)
 				}
-				if !utils.Is.Empty(item) {
-					for key, val := range item {
-						params[key] = val
-					}
-				}
+				mergeParams(params, item)
 
 			case strings.Contains(contentType, contentTypeFormURLEncoded):
-				values, err := url.ParseQuery(string(body))
-				if err != nil {
-					break
-				}
-				item = utils.Parse.Params(utils.Parse.ParamsBefore(values))
-				if !utils.Is.Empty(item) {
-					for key, val := range item {
-						params[key] = val
-					}
-				}
+				mergeParams(params, parseFormBody(body))
 
-			case strings.Contains(contentType, contentTypeMultipartForm):
-				bodyBuffer := bytes.NewBufferString(string(body))
-				boundary := strings.Split(contentType, "boundary=")
-
-				if len(boundary) != 2 {
-					break
+			default:
+				// 未声明 Content-Type：先按 JSON 试，解不出来再按表单试（与原兜底逻辑一致）
+				item := cast.ToStringMap(utils.Json.Decode(body))
+				if utils.Is.Empty(item) {
+					item = parseFormBody(body)
 				}
-
-				multipartReader := multipart.NewReader(bodyBuffer, boundary[1])
-				formData, err := multipartReader.ReadForm(0)
-				if err != nil {
-					break
-				}
-
-				values := url.Values{}
-				for key, valuesList := range formData.Value {
-					for _, value := range valuesList {
-						values.Add(key, value)
-					}
-				}
-
-				item = utils.Parse.Params(utils.Parse.ParamsBefore(values))
-				if !utils.Is.Empty(item) {
-					for key, val := range item {
-						params[key] = val
-					}
-				}
+				mergeParams(params, item)
 			}
 		}
 
-		if !utils.Is.Empty(content["query"]) {
-			item := utils.Parse.Params(utils.Parse.ParamsBefore(ctx.Request.URL.Query()))
-			for key, val := range item {
-				params[key] = val
-			}
-		}
-		ctx.Request.Body = io.NopCloser(strings.NewReader(string(body)))
+		mergeParams(params, parseQuery(ctx.Request.URL.Query()))
+
+		// 归还请求体，保证后续 handler 还能读（bytes.NewReader 不复制底层数组）
+		ctx.Request.Body = io.NopCloser(bytes.NewReader(body))
 		ctx.Set("params", params)
+	}
+}
+
+// parseFormBody 解析 urlencoded 请求体
+func parseFormBody(body []byte) map[string]any {
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil
+	}
+	return parseFormValues(values)
+}
+
+// parseQuery 解析 URL query
+func parseQuery(values url.Values) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	return parseFormValues(values)
+}
+
+// parseFormValues 统一走 go-utils 的类型转换（"1,2,3" -> 切片、JSON 字符串 -> 结构等）
+func parseFormValues(values url.Values) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	return utils.Parse.Params(utils.Parse.ParamsBefore(values))
+}
+
+// mergeParams 把 src 合并进 dst
+func mergeParams(dst map[string]any, src map[string]any) {
+	for key, val := range src {
+		dst[key] = val
 	}
 }
 
@@ -161,16 +155,26 @@ func domain(ctx *gin.Context) (result string) {
 		result += ":" + info[1]
 	}
 
-	go func() {
-		if cast.ToBool(facade.CacheToml.Get("open")) {
-			facade.Cache.Set(domainCacheKey, result, 0)
-		}
-		ctx.Set(domainCacheKey, result)
-		facade.Var.Set(domainCacheKey, result)
-		go saveStorageDomain(result)
-	}()
+	ctx.Set(domainCacheKey, result)
 
-	return result
+	// 只在域名变化时写缓存 / 全局变量 / storage.toml。
+	//
+	// 旧实现是每个请求都 go func(){ Cache.Set(...); Var.Set(...); saveStorageDomain(...) }：
+	// 一次页面几十个静态请求就是几十次缓存写；local.domain 为空时还会每个请求重写一次
+	// storage.toml（几十次磁盘写）。这些值只跟 Host 有关，没必要每请求都刷新。
+	if cast.ToString(facade.Var.Get(domainCacheKey)) == result {
+		return
+	}
+
+	facade.Var.Set(domainCacheKey, result)
+
+	if cast.ToBool(facade.CacheToml.Get("open")) {
+		facade.Cache.Set(domainCacheKey, result, 0)
+	}
+
+	saveStorageDomain(result)
+
+	return
 }
 
 // clientIP - 获取客户端IP
@@ -202,7 +206,12 @@ func port(ctx *gin.Context) (result int) {
 	}
 
 	ctx.Set("port", result)
-	facade.Var.Set("port", result)
+
+	// 同样只在变化时写全局变量：这个值每个请求都会算一遍，但几乎从不改变
+	if cast.ToInt(facade.Var.Get("port")) != result {
+		facade.Var.Set("port", result)
+	}
+
 	return result
 }
 
@@ -218,8 +227,7 @@ func saveStorageDomain(domain any) {
 		"${local.domain}": domain,
 	})
 
-	reg := regexp.MustCompile(`\${(.+?)}`)
-	matches := reg.FindAllStringSubmatch(temp, -1)
+	matches := domainVarPattern.FindAllStringSubmatch(temp, -1)
 
 	for _, match := range matches {
 		temp = strings.Replace(temp, match[0], cast.ToString(facade.StorageToml.Get(match[1])), -1)

@@ -19,6 +19,10 @@ type Comm struct {
 	base
 }
 
+// gorgonPattern X-Gorgon 头解析：空格分隔的两段 16 位密文
+// （包级编译一次，避免每次登录都重新编译正则）
+var gorgonPattern = regexp.MustCompile(`^([\w+]{16})\D+([\w+]{16})$`)
+
 // IGET - GET请求本体
 func (this *Comm) IGET(ctx *gin.Context) {
 	// 转小写
@@ -115,8 +119,7 @@ func (this *Comm) login(ctx *gin.Context) {
 	}
 
 	// 正则表达式，匹配通过空格分割的两个16位任意字符 `^(\w{16}) (\w{16})$`
-	reg := regexp.MustCompile(`^([\w+]{16})\D+([\w+]{16})$`)
-	match := reg.FindStringSubmatch(cast.ToString(headers["X-Gorgon"]))
+	match := gorgonPattern.FindStringSubmatch(cast.ToString(headers["X-Gorgon"]))
 
 	// 密文解密
 	if match != nil {

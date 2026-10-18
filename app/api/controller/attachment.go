@@ -25,6 +25,24 @@ import (
 var uploadConcurrentCounter int
 var uploadCounterMutex sync.Mutex
 
+// 文件名 / SVG 清洗用的正则：包级只编译一次
+//
+// 原来是在 sanitizeFileName / sanitizeSVG 里 MustCompile：每上传一次文件
+// 就要重新编译 1 + 9 个正则，编译产物用完即弃，纯属不必要的 CPU 与内存抖动
+// （SVG 那几个正则的表达式编译结果都不小）。
+var (
+	fileNameIllegalPattern = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1F]`)
+	svgScriptPattern       = regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`)
+	svgScriptTagPattern    = regexp.MustCompile(`(?i)<script[^>]*\/?>`)
+	svgCDataPattern        = regexp.MustCompile(`<!\[CDATA\[.*?\]\]>`)
+	svgOnAttrQuotedPattern = regexp.MustCompile(`(?i)on\w+\s*=\s*["'][^"']*["']`)
+	svgOnAttrPattern       = regexp.MustCompile(`(?i)on\w+\s*=\s*[^\s>]+`)
+	svgForeignPattern      = regexp.MustCompile(`(?i)<foreignObject[^>]*>.*?</foreignObject>`)
+	svgForeignTagPattern   = regexp.MustCompile(`(?i)<foreignObject[^>]*\/?>`)
+	svgJavascriptPattern   = regexp.MustCompile(`(?i)javascript:`)
+	svgVbscriptPattern     = regexp.MustCompile(`(?i)vbscript:`)
+)
+
 type Attachment struct{ base }
 
 var attachmentAllowFieldsSlice = []any{"original_name", "target_type", "target_id"}
@@ -67,8 +85,7 @@ func (this *Attachment) sanitizeFileName(fileName string) string {
 	fileName = strings.TrimSpace(fileName)
 	fileName = path.Base(fileName)
 	fileName = filepath.Clean(fileName)
-	reg := regexp.MustCompile(`[<>:"/\\|?*\x00-\x1F]`)
-	fileName = reg.ReplaceAllString(fileName, "_")
+	fileName = fileNameIllegalPattern.ReplaceAllString(fileName, "_")
 	return fileName
 }
 
@@ -194,15 +211,15 @@ func (this *Attachment) sniffFileExt(headerBytes []byte) (ext string, label stri
 }
 
 func (this *Attachment) sanitizeSVG(content string) string {
-	content = regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)<script[^>]*\/?>`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`<!\[CDATA\[.*?\]\]>`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)on\w+\s*=\s*["'][^"']*["']`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)on\w+\s*=\s*[^\s>]+`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)<foreignObject[^>]*>.*?</foreignObject>`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)<foreignObject[^>]*\/?>`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)javascript:`).ReplaceAllString(content, "")
-	content = regexp.MustCompile(`(?i)vbscript:`).ReplaceAllString(content, "")
+	content = svgScriptPattern.ReplaceAllString(content, "")
+	content = svgScriptTagPattern.ReplaceAllString(content, "")
+	content = svgCDataPattern.ReplaceAllString(content, "")
+	content = svgOnAttrQuotedPattern.ReplaceAllString(content, "")
+	content = svgOnAttrPattern.ReplaceAllString(content, "")
+	content = svgForeignPattern.ReplaceAllString(content, "")
+	content = svgForeignTagPattern.ReplaceAllString(content, "")
+	content = svgJavascriptPattern.ReplaceAllString(content, "")
+	content = svgVbscriptPattern.ReplaceAllString(content, "")
 	return content
 }
 

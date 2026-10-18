@@ -28,6 +28,9 @@ import (
 // 预编译正则表达式
 var tomlVarRegex = regexp.MustCompile(`\${(.+?)}`)
 
+// retentionDaysPattern 通知保留天数配置行（每次保存配置都会用到，包级编译一次）
+var retentionDaysPattern = regexp.MustCompile(`(?m)^retention_days\s*=.*$`)
+
 // Toml - 配置管理控制器
 // @Summary 配置管理API
 // @Description 提供系统配置相关的API接口，包括短信、缓存、加密、存储等配置管理
@@ -1745,8 +1748,7 @@ func (this *Toml) putNotification(ctx *gin.Context) {
 	switch {
 	case strings.Contains(content, "retention_days"):
 		// 已有 retention_days 键，替换其值
-		reg := regexp.MustCompile(`(?m)^retention_days\s*=.*$`)
-		content = reg.ReplaceAllString(content, newValue)
+		content = retentionDaysPattern.ReplaceAllString(content, newValue)
 	case strings.Contains(content, "[notification]"):
 		// 有 [notification] 段但无 retention_days，在段名后插入
 		content = strings.Replace(content, "[notification]", fmt.Sprintf("[notification]\n%s", newValue), 1)

@@ -67,17 +67,25 @@ func InitUsers() {
 	facade.DB.Drive().Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_account ON inis_users(account)")
 }
 
+// QQ 邮箱头像解析用的正则
+//
+// AfterFind 会在**每一条用户记录**查询后执行，原来是在钩子里 MustCompile 两次，
+// 列表页查 20 个用户就要编译 40 次正则 —— 包级编译一次即可。
+var (
+	qqEmailPattern  = regexp2.MustCompile(`[1-9]\d+@qq.com`)
+	qqNumberPattern = regexp2.MustCompile(`[1-9]\d+`)
+)
+
 // AfterFind - 查询后的钩子
 func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 
 	if utils.Is.Empty(this.Avatar) {
 
 		// 正则匹配邮箱 [1-9]\d+@qq.com 是否匹配
-		reg := regexp2.MustCompile(`[1-9]\d+@qq.com`).MatchString(this.Email)
-		if reg {
+		if qqEmailPattern.MatchString(this.Email) {
 
 			// 获取QQ号
-			qq := regexp2.MustCompile(`[1-9]\d+`).FindString(this.Email)
+			qq := qqNumberPattern.FindString(this.Email)
 			this.Avatar = "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=100"
 
 		} else {
