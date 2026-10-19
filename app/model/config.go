@@ -71,6 +71,12 @@ func InitConfig() {
 		{Key: "MOMENTS", Json: utils.Json.Encode(facade.H{
 			"editor": "tinymce", "comment": facade.H{"allow": 1, "show": 1}, "audit": 1,
 		}), Remark: "动态配置"},
+		{Key: "DOCS", Json: utils.Json.Encode(facade.H{
+			// 文档站模块总开关：与article / page / moments 对称。
+			// 项目级的「启用评论」见 model/docs-project.go 的 CommentEnabled，
+			// 优先级：全局 COMMENT.allow < DOCS.comment < 项目 CommentEnabled。
+			"comment": facade.H{"allow": 1, "show": 1},
+		}), Remark: "文档配置"},
 		{Key: "COMMENT", Json: utils.Json.Encode(facade.H{
 			// 评论审核开关：1 开启（前台评论进入待审核，管理员在「评论管理」里通过/驳回）0 关闭（直接通过）
 			"audit":            1,

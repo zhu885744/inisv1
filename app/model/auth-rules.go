@@ -245,6 +245,110 @@ func createAuthRules() (result []AuthRules) {
 				"path=send&name=积分打赏&type=login",
 			},
 		},
+		"docs": {
+			// 文档站：
+			//   - 前台阅读（详情 / 列表 / 目录树 / 搜索）免登录，可见性由文档自身的 visible 控制；
+			//   - 反馈允许匿名提交（同一 IP 只记一条）；
+			//   - 其余均为后台写操作，需要权限点。
+			"GET": {
+				"path=one&name=文档详情&type=common",
+				"path=all&name=文档列表&type=common",
+				"path=tree&name=文档目录树&type=common",
+				"path=search&name=文档搜索&type=common",
+				"path=count&name=文档统计&type=default",
+				"path=history&name=文档历史&type=default",
+				"path=feedback-stats&name=文档反馈统计&type=default",
+			},
+			"POST": {
+				"path=save&name=保存文档&type=default",
+				"path=create&name=创建文档&type=default",
+				"path=update&name=更新文档&type=default",
+				"path=remove&name=删除文档&type=default",
+				"path=restore&name=恢复文档&type=default",
+				"path=delete&name=彻底删除文档&type=default",
+				"path=sort&name=文档排序&type=default",
+				"path=move&name=移动文档&type=default",
+				"path=rollback&name=回滚文档&type=default",
+				"path=feedback&name=文档反馈&type=common",
+				"path=import&name=导入文档&type=default",
+			},
+			"PUT": {
+				"path=save&name=保存文档&type=default",
+				"path=update&name=更新文档&type=default",
+				"path=sort&name=文档排序&type=default",
+				"path=move&name=移动文档&type=default",
+				"path=rollback&name=回滚文档&type=default",
+				"path=restore&name=恢复文档&type=default",
+			},
+			"DELETE": {
+				"path=remove&name=删除文档&type=default",
+				"path=delete&name=彻底删除文档&type=default",
+				"path=restore&name=恢复文档&type=default",
+			},
+		},
+		"docs-project": {
+			// 文档项目：前台项目列表（list）与单项目只读详情免登录，可见性由项目自身 visible 控制；
+			// 其余为后台写操作，需要权限点。
+			"GET": {
+				"path=one&name=文档项目详情&type=common",
+				"path=list&name=文档项目列表&type=common",
+				"path=all&name=文档项目列表(后台)&type=default",
+				"path=count&name=文档项目统计&type=default",
+			},
+			"POST": {
+				"path=save&name=保存文档项目&type=default",
+				"path=create&name=创建文档项目&type=default",
+				"path=update&name=更新文档项目&type=default",
+				"path=remove&name=删除文档项目&type=default",
+				"path=restore&name=恢复文档项目&type=default",
+				"path=delete&name=彻底删除文档项目&type=default",
+				"path=sort&name=文档项目排序&type=default",
+			},
+			"PUT": {
+				"path=save&name=保存文档项目&type=default",
+				"path=update&name=更新文档项目&type=default",
+				"path=restore&name=恢复文档项目&type=default",
+				"path=sort&name=文档项目排序&type=default",
+			},
+			"DELETE": {
+				"path=remove&name=删除文档项目&type=default",
+				"path=delete&name=彻底删除文档项目&type=default",
+				"path=restore&name=恢复文档项目&type=default",
+			},
+		},
+		"docs-group": {
+			// 文档目录：树与版本列表对前台公开，写操作需要权限点
+			"GET": {
+				"path=one&name=文档目录详情&type=common",
+				"path=tree&name=文档目录树&type=common",
+				"path=versions&name=文档版本列表&type=common",
+				"path=all&name=文档目录列表&type=default",
+				"path=count&name=文档目录统计&type=default",
+			},
+			"POST": {
+				"path=save&name=保存文档目录&type=default",
+				"path=create&name=创建文档目录&type=default",
+				"path=update&name=更新文档目录&type=default",
+				"path=remove&name=删除文档目录&type=default",
+				"path=restore&name=恢复文档目录&type=default",
+				"path=delete&name=彻底删除文档目录&type=default",
+				"path=sort&name=目录排序&type=default",
+				"path=move&name=移动目录&type=default",
+				"path=copy-version&name=复制文档版本&type=default",
+			},
+			"PUT": {
+				"path=save&name=保存文档目录&type=default",
+				"path=update&name=更新文档目录&type=default",
+				"path=sort&name=目录排序&type=default",
+				"path=move&name=移动目录&type=default",
+				"path=restore&name=恢复文档目录&type=default",
+			},
+			"DELETE": {
+				"path=remove&name=删除文档目录&type=default",
+				"path=delete&name=彻底删除文档目录&type=default",
+				"path=restore&name=恢复文档目录&type=default",
+			},
+		},
 		"comm": {
 			"GET": {
 				// 滑块验证题：发送验证码被判定为频繁时前端弹窗用（公开接口）
@@ -996,6 +1100,9 @@ func createAuthRules() (result []AuthRules) {
 		"goods":         "【商品 API】",
 		"decoration":    "【装扮 API】",
 		"checkin":       "【签到 API】",
+		"docs":          "【文档 API】",
+		"docs-group":    "【文档目录 API】",
+		"docs-project":  "【文档项目 API】",
 	}
 
 	// 基础方法

@@ -4,9 +4,9 @@ import "os"
 
 const (
 	// Version - 版本号
-	Version = "1.0.0"
+	Version = "1.0.1"
 	// Uri - 服务地址
-	Uri = "https://cs.zhuxu.asia"
+	Uri = "https://inis.zhuxu.asia"
 	// DefaultToken - 设备签名盐值默认值（可通过环境变量 INIS_DEVICE_TOKEN 覆盖）
 	DefaultToken = "(unti.io)"
 )

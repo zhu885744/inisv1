@@ -457,6 +457,8 @@ func commentBindTitle(bindType string, bindId int) string {
 		table = &model.Pages{}
 	case "moments":
 		table = &model.Moments{}
+	case "docs":
+		table = &model.Docs{}
 	default:
 		return ""
 	}
@@ -578,6 +580,33 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 		comment = cast.ToStringMap(cast.ToStringMap(moments["json"])["comment"])
 		moduleComment = this.config("moments", "comment")
+	case "docs":
+		// 文档：开关来自项目级「启用评论」，同时必须校验文档真实存在、已发布且当前访客可见，
+		// 否则可以对不存在的 id、或「登录可见 / 指定角色组」的文档匿名发评论
+		var docs model.Docs
+		facade.DB.Model(&model.Docs{}).Where("id", params["bind_id"]).Scan(&docs)
+
+		if docs.Id == 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "不存在的文档！"), 400)
+			return
+		}
+		if docs.Status != 1 {
+			this.json(ctx, nil, facade.Lang(ctx, "文档未发布！"), 400)
+			return
+		}
+		if !docsCanView(ctx, &docs) {
+			this.json(ctx, nil, facade.Lang(ctx, "请先登录后查看！"), 401)
+			return
+		}
+
+		moduleComment = this.config("docs", "comment")
+
+		// 项目级开关直接落成 allow/show，不走「0 继承」那套：
+		// 项目禁用评论就是 2，启用就是 1，优先级低于模块总开关
+		comment = facade.H{"allow": 1, "show": 1}
+		if !model.DocsProjectCommentEnabled(docs.Version) {
+			comment["allow"] = 2
+		}
 	default:
 		comment = this.config("comment")
 	}
@@ -798,7 +827,13 @@ func (this *Comment) create(ctx *gin.Context) {
 					}
 				}
 				bindLabel = "动态"
-			}
+						case "docs":
+							docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
+							if !utils.Is.Empty(docs) {
+								title = cast.ToString(cast.ToStringMap(docs)["title"])
+							}
+							bindLabel = "文档"
+						}
 
 			createdAt := time.Now().Format("2006-01-02 15:04:05")
 			facade.Log.Info(map[string]any{"local_time": createdAt}, "获取服务器本地时间")
@@ -849,7 +884,17 @@ func (this *Comment) create(ctx *gin.Context) {
 					facade.Log.Info(map[string]any{"moment_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取动态作者信息")
 				} else {
 					facade.Log.Warn(map[string]any{"moment_id": table.BindId}, "动态不存在，跳过发送给作者")
-				}
+								}
+							case "docs":
+								docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
+								if !utils.Is.Empty(docs) {
+									authorId := cast.ToInt(cast.ToStringMap(docs)["uid"])
+									author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+									authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+									facade.Log.Info(map[string]any{"docs_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文档作者信息")
+								} else {
+									facade.Log.Warn(map[string]any{"docs_id": table.BindId}, "文档不存在，跳过发送给作者")
+								}
 			default:
 				facade.Log.Warn(map[string]any{"bind_type": table.BindType}, "未知绑定类型，跳过发送给作者")
 			}
@@ -914,6 +959,12 @@ func (this *Comment) create(ctx *gin.Context) {
 				} else {
 					bindTitle = content
 				}
+			}
+		case "docs":
+			docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
+			if !utils.Is.Empty(docs) {
+				authorId = cast.ToInt(cast.ToStringMap(docs)["uid"])
+				bindTitle = cast.ToString(cast.ToStringMap(docs)["title"])
 			}
 		}
 
@@ -1382,6 +1433,9 @@ func (this *Comment) config(key ...any) (json map[string]any) {
 		configKey = "PAGE"
 	} else if len(key) > 0 && cast.ToString(key[0]) == "article" {
 		configKey = "ARTICLE"
+	} else if len(key) > 0 && cast.ToString(key[0]) == "docs" {
+		// 文档站模块总开关，见 app/model/config.go 的 DOCS 配置项
+		configKey = "DOCS"
 	}
 
 	cacheName := "config[" + configKey + "]"

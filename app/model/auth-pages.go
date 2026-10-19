@@ -85,6 +85,8 @@ func InitAuthPages() {
 		{Name: "数据统计", Icon: "bi bi-graph-up-arrow", Path: "/admin/stats", Size: "14px"},
 		{Name: "独立页面", Icon: "bi bi-window", Path: "/admin/pages", Size: "14px"},
 		{Name: "撰写独立页面", Icon: "bi bi-file-earmark-plus", Path: "/admin/pages/write", Size: "14px"},
+		// 文档站：先「文档库」选项目，再进项目管目录 + 页面，前台 /docs/:项目 阅读
+		{Name: "文档库", Icon: "bi bi-journal-bookmark", Path: "/admin/docs", Size: "14px"},
 		{Name: "友链分组", Icon: "bi bi-diagram-3", Path: "/admin/links/group", Size: "14px"},
 		{Name: "权限规则", Icon: "bi bi-shield-check", Path: "/admin/auth/rules", Size: "14px"},
 		{Name: "权限分组", Icon: "bi bi-shield-lock", Path: "/admin/auth/group", Size: "14px"},
@@ -146,4 +148,11 @@ func InitAuthPages() {
 	}
 
 	wg.Wait()
+
+	// 兼容旧库：文档多项目化后 /admin/docs 的职责从「直接管文档」变成「文档库入口」，
+	// 这里把仍是旧默认名的记录对齐一次；管理员自定义过名称的不动。
+	facade.DB.Model(&AuthPages{}).
+		Where("path", "/admin/docs").
+		Where("name", "文档管理").
+		Update(map[string]any{"name": "文档库"})
 }

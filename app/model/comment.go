@@ -109,19 +109,21 @@ func (this *Comment) AfterFind(tx *gorm.DB) (err error) {
 // syncResult - 同步返回结果
 func (this *Comment) syncResult() (result map[string]any) {
 
-	var page, author, article, moments any
+	var page, author, article, moments, docs any
 
 	// 同步调用，避免协程开销
 	this.pageSync(&page)
 	this.authorSync(&author)
 	this.articleSync(&article)
 	this.momentsSync(&moments)
+	this.docsSync(&docs)
 
 	return map[string]any{
 		"page":    page,
 		"author":  author,
 		"article": article,
 		"moments": moments,
+		"docs":    docs,
 	}
 }
 
@@ -149,6 +151,16 @@ func (this *Comment) pageSync(result *any) {
 
 	page, _ := facade.DB.Model(&Pages{}).Find(this.BindId)
 	*result = utils.Map.WithField(page, []string{"id", "key", "title"})
+}
+
+// docsSync - 文档来源信息，让后台「评论管理」能显示来源标题并跳转
+func (this *Comment) docsSync(result *any) {
+	if this.BindType != "docs" {
+		return
+	}
+
+	docs, _ := facade.DB.Model(&Docs{}).Find(this.BindId)
+	*result = utils.Map.WithField(docs, []string{"id", "version", "slug", "title"})
 }
 
 func (this *Comment) momentsSync(result *any) {

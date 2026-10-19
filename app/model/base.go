@@ -93,6 +93,14 @@ func InitTable() {
 		{"Integral", InitIntegral},
 		// 积分打赏记录（依赖 Users / Integral 两套表）
 		{"Tip", InitTip},
+		// 文档站：项目 / 目录 / 页面 / 历史 / 反馈 / 301
+		// DocsProject 必须排在最前：它要给存量 docs / docs_group 的 version 补建项目
+		{"DocsProject", InitDocsProject},
+		{"DocsGroup", InitDocsGroup},
+		{"Docs", InitDocs},
+		{"DocsHistory", InitDocsHistory},
+		{"DocsFeedback", InitDocsFeedback},
+		{"DocsRedirect", InitDocsRedirect},
 		{"Goods", InitGoods},
 		// Decoration 必须排在 Goods 之后：首次运行会为默认装扮生成关联的商品记录
 		{"Decoration", InitDecoration},
