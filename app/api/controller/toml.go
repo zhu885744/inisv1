@@ -223,6 +223,12 @@ func (this *Toml) validateStorageRules(ctx *gin.Context, label string, rules map
 }
 
 // saveTomlConfig 保存配置文件
+//
+// 写完必须把对应的内存配置也换成新值，否则前端保存后立刻回读会拿到旧快照
+// （各配置的 Result 是首次 Read 时拍下的，WatchConfig 只刷新 Get，不会刷新 Result）。
+//
+// 两个重载都用同步调用：前端 saveTomlItem 是「保存成功后马上 GET 回填」，
+// 用 go 会和紧接着的回读请求赛跑，表现为偶发地仍然显示旧配置。
 func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, successMsg string) {
 	item := utils.File().Save(strings.NewReader(content), path)
 	if item.Error != nil {
@@ -230,8 +236,11 @@ func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, 
 		return
 	}
 
-	if path == "config/storage.toml" {
-		go facade.ReloadStorageToml()
+	switch path {
+	case "config/storage.toml":
+		facade.ReloadStorageToml()
+	case "config/sms.toml":
+		facade.ReloadSMSToml()
 	}
 
 	this.json(ctx, nil, facade.Lang(ctx, successMsg), 200)
@@ -359,7 +368,19 @@ func (this *Toml) getSMS(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		// 逐段 Get 而不是直接返回 item.Result：
+		// Result 是首次 Read 时拍下的快照，配置文件热更新不会刷新它，
+		// 直接返回会导致「保存成功但回读还是旧值」。Get 走底层 viper，是实时的。
+		result := make(map[string]any, len(item.Result))
+		for key, fallback := range item.Result {
+			if value := item.Get(key); value != nil {
+				result[key] = value
+			} else {
+				result[key] = fallback
+			}
+		}
+
+		this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 
@@ -429,7 +450,17 @@ func (this *Toml) getCache(ctx *gin.Context) {
 
 	// 获取全部
 	if utils.Is.Empty(params["name"]) {
-		this.json(ctx, this.maskSensitiveFields(ctx, item.Result), facade.Lang(ctx, "数据请求成功！"), 200)
+		// 同 getSMS：Result 是启动时的快照，热更新不会刷新它，这里用 Get 实时取值
+		result := make(map[string]any, len(item.Result))
+		for key, fallback := range item.Result {
+			if value := item.Get(key); value != nil {
+				result[key] = value
+			} else {
+				result[key] = fallback
+			}
+		}
+
+		this.json(ctx, this.maskSensitiveFields(ctx, result), facade.Lang(ctx, "数据请求成功！"), 200)
 		return
 	}
 

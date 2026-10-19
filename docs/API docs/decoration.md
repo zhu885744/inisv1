@@ -50,7 +50,7 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 ```json
 { "enabled": 1, "show_in_goods": 1, "currency": "integral",
-  "avatar_frame": { "enabled": 1, "frame_scale": 1.2 },
+  "avatar_frame": { "enabled": 1 },
   "title": { "enabled": 1, "allow_custom": 1, "max_length": 10, "presets": [] } }
 ```
 
@@ -128,13 +128,14 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 {
   "types": [
     { "type": "avatar_frame", "name": "头像框", "icon": "bi-person-badge", "slot": "avatar",
-      "allow_custom_text": 0, "fields": ["image", "scale", "animated"], "description": "展示在头像外圈，可随时切换。" },
+      "allow_custom_text": 0, "fields": ["image", "hole", "offset_x", "offset_y", "animated"],
+      "description": "展示在头像外圈，可随时切换。hole 为洞直径÷素材宽度，offset_x/y 修洞心偏移。" },
     { "type": "title", "name": "头衔", "slot": "title", "allow_custom_text": 1,
       "fields": ["text", "image", "scale", "color", "bg", "border", "glow", "icon", "animated"],
       "description": "展示在昵称旁，支持纯文字配色与图片徽章。" }
   ],
   "config": { "enabled": 1, "show_in_goods": 1, "currency": "integral",
-              "avatar_frame": { "enabled": 1, "frame_scale": 1.2 },
+              "avatar_frame": { "enabled": 1 },
               "title": { "enabled": 1, "allow_custom": 1, "max_length": 10, "presets": [] } }
 }
 ```

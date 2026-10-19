@@ -284,6 +284,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=remove&name=删除文档&type=default",
 				"path=delete&name=彻底删除文档&type=default",
 				"path=restore&name=恢复文档&type=default",
+				"path=clear&name=清空文档回收站&type=default",
 			},
 		},
 		"docs-project": {
@@ -314,6 +315,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=remove&name=删除文档项目&type=default",
 				"path=delete&name=彻底删除文档项目&type=default",
 				"path=restore&name=恢复文档项目&type=default",
+				"path=clear&name=清空文档项目回收站&type=default",
 			},
 		},
 		"docs-group": {

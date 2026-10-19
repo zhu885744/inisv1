@@ -89,16 +89,24 @@ func initStorageToml() {
 }
 
 // ReloadStorageToml - 重新读取存储配置文件
+//
+// 原地刷新同一个 Viper 实例（与 initCache 的处理方式一致）：
+//   - Read() 式的整体替换会换掉 Viper 对象，init() 里挂的 WatchConfig 随之失效，
+//     而且每保存一次就多一个监听 goroutine；
+//   - ReadInConfig() 只重读文件，监听继续有效，Result 也跟着换成磁盘上的新值。
 func ReloadStorageToml() {
-	item := utils.Viper(utils.ViperModel{
-		Path: "config",
-		Mode: "toml",
-		Name: "storage",
-	}).Read()
+	if StorageToml == nil || StorageToml.Viper == nil {
+		// 兜底：Viper 还没建起来（首次加载就失败了），整体重读一次
+		initStorageToml()
+		if StorageToml != nil {
+			initStorage()
+		}
+		return
+	}
 
-	if item.Error != nil {
+	if err := StorageToml.Viper.ReadInConfig(); err != nil {
 		Log.Error(map[string]any{
-			"error":     item.Error,
+			"error":     err,
 			"func_name": utils.Caller().FuncName,
 			"file_name": utils.Caller().FileName,
 			"file_line": utils.Caller().Line,
@@ -106,7 +114,10 @@ func ReloadStorageToml() {
 		return
 	}
 
-	StorageToml = &item
+	// Result 是首次 Read 时的快照，必须显式换新，否则接口回读还是旧值
+	StorageToml.Result = cast.ToStringMap(StorageToml.Viper.AllSettings())
+	StorageToml.Error = nil
+
 	initStorage()
 }
 

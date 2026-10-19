@@ -111,6 +111,11 @@ func (this *DocsProject) all(ctx *gin.Context) {
 		Limit(limit).
 		Page(this.pageValue(params))
 
+	// 回收站：只看已软删除的项目
+	if cast.ToBool(params["onlyTrashed"]) {
+		query = query.OnlyTrashed()
+	}
+
 	if !utils.Is.Empty(params["status"]) {
 		query = query.Where("status", params["status"])
 	}
@@ -365,6 +370,10 @@ func (this *DocsProject) remove(ctx *gin.Context) {
 	docsCount, _ := facade.DB.Model(&model.Docs{}).Where("version", "IN", this.slugsByIds(ids)).Count()
 	groupCount, _ := facade.DB.Model(&model.DocsGroup{}).Where("version", "IN", this.slugsByIds(ids)).Count()
 
+	// 注意：上面的统计走默认作用域，已在「文档回收站」里的文档不计入 ——
+	// 所以项目可能带着一批软删除文档被删掉，彻底删除时要连它们一起清理，
+	// 否则那些文档会指向一个不存在的 version，变成谁也看不到的孤儿数据。
+
 	if docsCount > 0 || groupCount > 0 {
 		this.json(ctx, nil, facade.Lang(ctx, "该项目下还有文档或目录，请先清空！"), 400)
 		return
@@ -387,12 +396,42 @@ func (this *DocsProject) delete(ctx *gin.Context) {
 		return
 	}
 
+	suffix := this.purgeContents(ids)
+
 	if _, err := facade.DB.Model(&model.DocsProject{}).Force().Where("id", "IN", ids).Delete(); err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "彻底删除失败！"), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "彻底删除成功！"), 200)
+	this.json(ctx, gin.H{"ids": ids, "purged": suffix}, facade.Lang(ctx, "彻底删除成功！"), 200)
+}
+
+// purgeContents - 连同该项目的目录与文档一起彻底删除
+//
+// 项目别名就是 docs.version。如果项目下还残留在「文档回收站」里的文档
+// （上面的 remove 统计走默认作用域，看不见它们），只删项目会让这些文档
+// 指向一个不存在的 version，变成谁也访问不到的孤儿数据。
+//
+// 返回被清理的 version 列表，便于前端提示清理范围。
+func (this *DocsProject) purgeContents(ids []any) []string {
+	slugs := this.slugsByIds(ids)
+	if len(slugs) == 0 {
+		return nil
+	}
+
+	// 先取文档 id，历史与反馈要按 docs_id 清理
+	columnData, _ := facade.DB.Model(&model.Docs{}).WithTrashed().Where("version", "IN", slugs).Column("id")
+	docsIds := utils.Unity.Ids(columnData)
+
+	if len(docsIds) > 0 {
+		facade.DB.Model(&model.DocsHistory{}).Where("docs_id", "IN", docsIds).Force().Delete()
+		facade.DB.Model(&model.DocsFeedback{}).Where("docs_id", "IN", docsIds).Force().Delete()
+	}
+
+	facade.DB.Model(&model.Docs{}).WithTrashed().Where("version", "IN", slugs).Force().Delete()
+	facade.DB.Model(&model.DocsGroup{}).WithTrashed().Where("version", "IN", slugs).Force().Delete()
+
+	return slugs
 }
 
 func (this *DocsProject) restore(ctx *gin.Context) {
@@ -410,6 +449,26 @@ func (this *DocsProject) restore(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
+}
+
+// clear - 清空项目回收站
+func (this *DocsProject) clear(ctx *gin.Context) {
+	columnData, _ := facade.DB.Model(&model.DocsProject{}).OnlyTrashed().Column("id")
+	ids := utils.Unity.Ids(columnData)
+
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+		return
+	}
+
+	cleaned := this.purgeContents(ids)
+
+	if _, err := facade.DB.Model(&model.DocsProject{}).OnlyTrashed().Where("id", "IN", ids).Force().Delete(); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+		return
+	}
+
+	this.json(ctx, gin.H{"ids": ids, "purged": cleaned}, facade.Lang(ctx, "回收站已清空！"), 200)
 }
 
 /* ------------------------------ 工具 ------------------------------ */

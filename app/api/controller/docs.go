@@ -168,6 +168,11 @@ func (this *Docs) all(ctx *gin.Context) {
 		Limit(limit).
 		Page(this.pageValue(params))
 
+	// 回收站：只看已软删除的文档（删除后前台不可见，可在回收站恢复或彻底删除）
+	if cast.ToBool(params["onlyTrashed"]) {
+		query = query.OnlyTrashed()
+	}
+
 	// gid=0 表示「一级根 / 未分类」，需要精确过滤（不能用 IsEmpty 判断，0 会被当成未传）
 	if value, ok := params["gid"]; ok && cast.ToString(value) != "" {
 		query = query.Where("gid", cast.ToInt(value))
@@ -607,6 +612,38 @@ func (this *Docs) restore(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
+}
+
+// clear - 清空回收站
+//
+// 传了 version 就只清该项目下的，不传清全部（后台项目页会带上当前项目，
+// 避免在 A 项目里点「清空」把 B 项目的回收站也清了）。
+func (this *Docs) clear(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	query := facade.DB.Model(&model.Docs{}).OnlyTrashed()
+	if !utils.Is.Empty(params["version"]) {
+		query = query.Where("version", params["version"])
+	}
+
+	columnData, _ := query.Column("id")
+	ids := utils.Unity.Ids(columnData)
+
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+		return
+	}
+
+	// 彻底删除时一并清掉历史与反馈，避免孤儿数据（与 delete 保持一致）
+	facade.DB.Model(&model.DocsHistory{}).Where("docs_id", "IN", ids).Force().Delete()
+	facade.DB.Model(&model.DocsFeedback{}).Where("docs_id", "IN", ids).Force().Delete()
+
+	if _, err := facade.DB.Model(&model.Docs{}).OnlyTrashed().Where("id", "IN", ids).Force().Delete(); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+		return
+	}
+
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "回收站已清空！"), 200)
 }
 
 // rollback - 回滚到指定历史快照

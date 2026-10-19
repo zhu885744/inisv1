@@ -43,8 +43,10 @@ func DecorationTypeMeta() []facade.H {
 			"icon":              "bi-person-badge",
 			"slot":              "avatar",
 			"allow_custom_text": 0,
-			"fields":            []string{"image", "scale", "animated"},
-			"description":       "展示在头像外圈，可随时切换。",
+			// hole = 洞直径 ÷ 素材宽度；offset_x / offset_y 修正洞心相对素材中心的偏移
+			// （旧的 scale 仍兼容读取，但不再推荐配置）
+			"fields":      []string{"image", "hole", "offset_x", "offset_y", "animated"},
+			"description": "展示在头像外圈，可随时切换。",
 		},
 		{
 			"type":              DecorationTypeTitle,
@@ -90,9 +92,10 @@ func defaultDecorationConfig() facade.H {
 		"enabled":       1,
 		"show_in_goods": 1,
 		"currency":      DecorationPriceIntegral,
+		// 头像框的缩放/对齐是逐个装扮配置的（payload.hole / offset_x / offset_y），
+		// 这里只保留全局开关，不再提供「默认缩放比例」
 		"avatar_frame": facade.H{
-			"enabled":     1,
-			"frame_scale": 1.2,
+			"enabled": 1,
 		},
 		"title": facade.H{
 			"enabled":      1,
@@ -709,11 +712,28 @@ func backfillDecorationRenderState() {
 
 		changed := false
 
-		// 1) 头像框动效标记
+		// 1) 头像框渲染参数（动效 / 洞大小 / 洞心偏移）
+		//
+		// frame_animated 是后加的；frame_hole 与两个偏移是「洞模型」引入后加的。
+		// 都已佩戴的用户不回填就得重新佩戴一次才生效，所以这里按缺省补齐。
 		if frameId := cast.ToInt(wearing[DecorationTypeAvatarFrame]); frameId > 0 {
 			if payload, ok := payloadMap[frameId]; ok {
 				if _, exist := jsonData["frame_animated"]; !exist {
 					jsonData["frame_animated"] = decorationAnimated(payload)
+					changed = true
+				}
+
+				hole, offsetX, offsetY := frameGeometry(payload)
+				if _, exist := jsonData["frame_hole"]; !exist {
+					jsonData["frame_hole"] = hole
+					changed = true
+				}
+				if _, exist := jsonData["frame_offset_x"]; !exist {
+					jsonData["frame_offset_x"] = offsetX
+					changed = true
+				}
+				if _, exist := jsonData["frame_offset_y"]; !exist {
+					jsonData["frame_offset_y"] = offsetY
 					changed = true
 				}
 			}
@@ -952,6 +972,56 @@ func decorationAnimated(payload map[string]any) int {
 		return 0
 	}
 	return cast.ToInt(payload["animated"])
+}
+
+// 头像框「洞」参数的取值范围
+//
+// hole 太小会让素材被放大到离谱（头像直径 / hole），太大则洞撑不满头像，
+// 两头都限制一下，避免后台填错把页面搞坏。
+const (
+	frameHoleMin     = 0.2
+	frameHoleMax     = 1.5
+	frameOffsetLimit = 0.5
+)
+
+// frameGeometry - 解析头像框的渲染参数（洞大小 + 洞心偏移）
+//
+// 洞 = 框中间透出头像的那个圆。
+//   - hole：洞直径 ÷ 素材宽度。前端据此把素材渲染成「头像直径 / hole」宽，
+//     洞就正好贴合头像 —— 装饰画得再大也不会把洞一起撑大，
+//     这正是旧的等比 scale 做不到的（scale 放大画布时洞会跟着变大）。
+//   - offsetX / offsetY：洞心相对素材中心的偏移，单位是素材宽度的比例。
+//     用于修正「画布透明边距不对称、洞不在正中间」的素材。
+//
+// 兼容旧数据：早期只配了 scale（把整个画布等比放大），
+// 在「洞 = 画布内切圆」的素材上等价于 hole = 1/scale，这里直接换算过来，
+// 老装扮不用重新设置也能按新模型正确渲染。
+func frameGeometry(payload map[string]any) (hole, offsetX, offsetY float64) {
+	switch {
+	case cast.ToFloat64(payload["hole"]) > 0:
+		hole = cast.ToFloat64(payload["hole"])
+	case cast.ToFloat64(payload["scale"]) > 0:
+		hole = 1 / cast.ToFloat64(payload["scale"])
+	default:
+		hole = 1
+	}
+
+	hole = clampFloat(hole, frameHoleMin, frameHoleMax)
+	offsetX = clampFloat(cast.ToFloat64(payload["offset_x"]), -frameOffsetLimit, frameOffsetLimit)
+	offsetY = clampFloat(cast.ToFloat64(payload["offset_y"]), -frameOffsetLimit, frameOffsetLimit)
+
+	return
+}
+
+// clampFloat - 把 value 限制在 [min, max]
+func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 // GrantDecorationTx - 发放装扮（事务内）
@@ -1238,6 +1308,9 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 			case DecorationTypeAvatarFrame:
 				delete(jsonData, "frame")
 				delete(jsonData, "frame_scale")
+				delete(jsonData, "frame_hole")
+				delete(jsonData, "frame_offset_x")
+				delete(jsonData, "frame_offset_y")
 				delete(jsonData, "frame_animated")
 			case DecorationTypeTitle:
 				delete(jsonData, "title_decoration")
@@ -1249,9 +1322,17 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 			switch decoType {
 			case DecorationTypeAvatarFrame:
 				jsonData["frame"] = cast.ToString(payload["image"])
+				// frame_scale 只做向后兼容：新版前端按下面的 hole / offset 渲染，
+				// 留着是为了回滚到旧前端时头像框不会突然变形
 				if scale := cast.ToFloat64(payload["scale"]); scale > 0 {
 					jsonData["frame_scale"] = scale
 				}
+				// 头像框的定位参数一并回写：前端展示时只拿得到 json.frame（图片地址），
+				// 拿不到装扮的 payload，所以洞大小与偏移必须落到 users.json 上
+				hole, offsetX, offsetY := frameGeometry(payload)
+				jsonData["frame_hole"] = hole
+				jsonData["frame_offset_x"] = offsetX
+				jsonData["frame_offset_y"] = offsetY
 				// 动效开关一并回写到 users.json：头衔的 payload 前端能透传拿到，
 				// 但头像框展示时用到的是 json.frame（只有图片地址），
 				// 不回写这个标记前端就无从知道该不该播动效（之前「开启动效没有用」的原因之一）

@@ -170,6 +170,15 @@ func init() {
 	}
 }
 
+// ReloadSMSToml - 保存 config/sms.toml 后立刻让内存配置与磁盘一致
+//
+// 后台「系统配置 → 短信」保存成功后前端会马上 GET 一次回填，
+// 而 initSMS 里已包含 ReadInConfig + Result 刷新，这里直接复用它；
+// 走同步调用（而不是 go）是为了避免与紧接着的 GET 请求竞态。
+func ReloadSMSToml() {
+	initSMS()
+}
+
 // NewSMS - 创建SMS实例
 /**
  * @param mode 驱动模式
@@ -215,6 +224,19 @@ func initSMSToml() {
 
 // initSMS - 初始化所有短信实例
 func initSMS() {
+	// 重新读取配置文件，确保 Result 与磁盘一致（与 initCache 的处理方式一致）
+	//
+	// SMSToml.Result 是首次 utils.Viper(...).Read() 时拍下的快照，
+	// WatchConfig 只会让 Get() 走底层 viper 拿到新值，Result 仍是旧的。
+	// 后台保存配置后前端会立刻 GET 回填，若只刷新 Get() 而 Result 不变，
+	// 接口返回的还是旧配置 —— 表现就是「文件已改成功，表单却退回默认值」。
+	if SMSToml != nil && SMSToml.Viper != nil {
+		if err := SMSToml.Viper.ReadInConfig(); err == nil {
+			// 与 utils.Viper(...).Read() 里的写法保持一致，保证结构相同
+			SMSToml.Result = cast.ToStringMap(SMSToml.Viper.AllSettings())
+		}
+	}
+
 	// 邮件服务
 	GoMail = &GoMailRequest{}
 	GoMail.init()
