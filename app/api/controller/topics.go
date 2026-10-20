@@ -130,7 +130,7 @@ func (this *Topics) IPUT(ctx *gin.Context) {
 // @Success 403 {object} map[string]interface{} "响应信息"
 // @Router /api/topics/{method} [delete]
 func (this *Topics) IDEL(ctx *gin.Context) {
-	this.json(ctx, nil, facade.Lang(ctx, "话题删除请到后台「标签管理」操作！"), 403)
+	this.json(ctx, nil, facade.Lang(ctx, "话题删除请到后台「话题管理」操作！"), 403)
 }
 
 // INDEX - 话题索引接口

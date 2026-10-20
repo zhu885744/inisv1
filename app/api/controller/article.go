@@ -216,7 +216,64 @@ func (this *Article) one(ctx *gin.Context) {
 	// 更新文章浏览量
 	go this.updateViews(ctx, cast.ToStringMap(data))
 
+	// 上一篇 / 下一篇：给详情补上相邻文章，供文末的切换按钮使用
+	data = this.withPrevNext(data)
+
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// withPrevNext - 给文章详情补上一篇 / 下一篇
+//
+// 顺序按 id（= 创建先后，唯一且稳定）：上一篇是更早的一篇、下一篇是更晚的一篇，
+// 与大多数中文博客的阅读顺序一致。
+//
+// 只认「已发布 + 已审核通过」，与列表口径保持一致，避免点过去是一片空白。
+//
+// 注意：必须返回副本。data 可能直接来自缓存（getFromCache），
+// 就地写 prev / next 会连带写进缓存，后面改文章时导航就一直是旧的了。
+func (this *Article) withPrevNext(data any) any {
+	row, ok := data.(map[string]any)
+	if !ok || len(row) == 0 {
+		return data
+	}
+
+	id := cast.ToInt(row["id"])
+	if id <= 0 {
+		return data
+	}
+
+	query := func(direction string) map[string]any {
+		var item model.Article
+
+		q := facade.DB.Model(&model.Article{}).
+			Where("audit", 1).
+			Where("status", 1)
+
+		if direction == "prev" {
+			q = q.Where("id", "<", id).Order("id desc")
+		} else {
+			q = q.Where("id", ">", id).Order("id asc")
+		}
+
+		q.Scan(&item)
+		if item.Id == 0 {
+			return nil
+		}
+
+		return map[string]any{
+			"id":    item.Id,
+			"title": item.Title,
+		}
+	}
+
+	copied := make(map[string]any, len(row)+2)
+	for key, val := range row {
+		copied[key] = val
+	}
+	copied["prev"] = query("prev")
+	copied["next"] = query("next")
+
+	return copied
 }
 
 func (this *Article) all(ctx *gin.Context) {

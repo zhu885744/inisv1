@@ -942,6 +942,9 @@ func (this *Toml) testSMSEmail(ctx *gin.Context) {
 	// 请求参数
 	params := this.params(ctx)
 
+	// 还原脱敏占位值（非管理员看到的密码是 ****，需还原成真实值再测试）
+	this.restoreSecretParams(params, []string{"password"}, cast.ToStringMap(facade.SMSToml.Get("email")))
+
 	if utils.Is.Empty(params["host"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "host"), 400)
 		return
@@ -992,7 +995,8 @@ func (this *Toml) testSMSEmail(ctx *gin.Context) {
 	item := gomail.NewMessage()
 	nickname := cast.ToString(params["nickname"])
 	account := cast.ToString(params["account"])
-	item.SetHeader("From", nickname+"<"+account+">")
+	// 显示名支持中文：必须走 SetAddressHeader，详见 facade.SetMailFrom 的注释
+	facade.SetMailFrom(item, nickname, account)
 	// 发送给多个用户
 	item.SetHeader("To", cast.ToString(params["email"]))
 	// 设置邮件主题
@@ -1016,6 +1020,9 @@ func (this *Toml) testSMSAliyun(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（非管理员看到的密钥是 ****，需还原成真实值再测试）
+	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.SMSToml.Get("aliyun")))
 
 	if utils.Is.Empty(params["access_key_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "access_key_id"), 400)
@@ -1105,6 +1112,9 @@ func (this *Toml) testSMSAliYunNumberVerify(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（非管理员看到的密钥是 ****，需还原成真实值再测试）
+	this.restoreSecretParams(params, []string{"access_key_secret"}, cast.ToStringMap(facade.SMSToml.Get("aliyun_number_verify")))
 
 	// 必传参数校验
 	if utils.Is.Empty(params["access_key_id"]) {
@@ -1207,6 +1217,9 @@ func (this *Toml) testSMSTencent(ctx *gin.Context) {
 
 	// 请求参数
 	params := this.params(ctx)
+
+	// 还原脱敏占位值（非管理员看到的密钥是 ****，需还原成真实值再测试）
+	this.restoreSecretParams(params, []string{"secret_key", "secret_id"}, cast.ToStringMap(facade.SMSToml.Get("tencent")))
 
 	credential := common.NewCredential(
 		cast.ToString(params["secret_id"]),

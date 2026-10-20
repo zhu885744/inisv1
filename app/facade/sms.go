@@ -429,7 +429,7 @@ func (this *GoMailRequest) sendVerifyCode(recipient, code string) (response *SMS
 	item := gomail.NewMessage()
 	nickname := cast.ToString(SMSToml.Get("email.nickname"))
 	account := cast.ToString(SMSToml.Get("email.account"))
-	item.SetHeader("From", nickname+"<"+account+">")
+	SetMailFrom(item, nickname, account)
 	item.SetHeader("To", recipient)
 	item.SetHeader("Subject", "邮箱验证码 - "+site)
 	item.SetBody("text/html", body)
@@ -542,7 +542,7 @@ func (this *GoMailRequest) sendCommentNotify(recipient string, commentInfo map[s
 	item := gomail.NewMessage()
 	nickname := cast.ToString(SMSToml.Get("email.nickname"))
 	account := cast.ToString(SMSToml.Get("email.account"))
-	item.SetHeader("From", nickname+"<"+account+">")
+	SetMailFrom(item, nickname, account)
 	item.SetHeader("To", recipient)
 	item.SetHeader("Subject", "新评论通知 - "+cast.ToString(SMSToml.Get("email.sign_name")))
 
@@ -660,7 +660,7 @@ func (this *GoMailRequest) sendReplyNotify(recipient string, commentInfo map[str
 	item := gomail.NewMessage()
 	nickname := cast.ToString(SMSToml.Get("email.nickname"))
 	account := cast.ToString(SMSToml.Get("email.account"))
-	item.SetHeader("From", nickname+"<"+account+">")
+	SetMailFrom(item, nickname, account)
 	item.SetHeader("To", recipient)
 	item.SetHeader("Subject", "评论回复通知 - "+cast.ToString(SMSToml.Get("email.sign_name")))
 
@@ -799,7 +799,7 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 	item := gomail.NewMessage()
 	nickname := cast.ToString(SMSToml.Get("email.nickname"))
 	account := cast.ToString(SMSToml.Get("email.account"))
-	item.SetHeader("From", nickname+"<"+account+">")
+	SetMailFrom(item, nickname, account)
 	item.SetHeader("To", recipient)
 	item.SetHeader("Subject", title+" - "+site)
 
@@ -823,6 +823,31 @@ func (this *GoMailRequest) sendMessageNotify(recipient string, messageInfo map[s
 	response.Result = "邮件发送成功"
 	smsLog("email", true, map[string]any{"recipient": recipient, "type": "消息通知"})
 	return response
+}
+
+// SetMailFrom - 设置发件人（显示名支持中文）
+//
+// 这里必须用 SetAddressHeader，不能写成 item.SetHeader("From", nickname+"<"+account+">")：
+//
+//	SetHeader 会把整个值交给 mime.QEncoding.Encode 处理。一旦显示名含中文，
+//	`朱某<xx@qq.com>` 这一整串会被编码成**一个** encoded-word，
+//	地址部分也被吞进 encoded-word 里，变成
+//	`=?UTF-8?q?=E6=9C=B1=E6=9F=90=3Cxx@qq.com=3E?=`。
+//	gomail 在发送前会用 mail.ParseAddress 解析 From 拿真实地址，
+//	而这一串已经不是一个合法的 addr-spec，解析直接失败，
+//	返回 `gomail: invalid address ...` —— 连 SMTP 连接都没建立就报错了。
+//
+// 这也解释了「英文昵称能发、中文昵称发不出去」：
+// 纯 ASCII 的值不需要编码，原样是 `Mellow<xx@qq.com>`，能被正确解析。
+//
+// SetAddressHeader → FormatAddress 只对显示名做 RFC 2047 编码，地址原样保留，
+// 收件方看到的仍然是「中文昵称 <xx@qq.com>」。
+func SetMailFrom(item *gomail.Message, nickname, account string) {
+	if item == nil {
+		return
+	}
+
+	item.SetAddressHeader("From", strings.TrimSpace(account), strings.TrimSpace(nickname))
 }
 
 // SendMail - 发送自定义内容的邮件（主题 + 纯文本正文，正文换行会转成 HTML 换行）
@@ -915,7 +940,7 @@ func (this *GoMailRequest) sendCustomMail(recipient string, subject string, cont
 </html>`
 
 	item := gomail.NewMessage()
-	item.SetHeader("From", nickname+"<"+account+">")
+	SetMailFrom(item, nickname, account)
 	item.SetHeader("To", recipient)
 	item.SetHeader("Subject", cast.ToString(subject))
 	item.SetBody("text/html", template)
