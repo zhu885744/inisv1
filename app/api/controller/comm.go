@@ -1083,6 +1083,11 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 	// 并清理封禁记录里的管理侧数据（见 privacy.go）
 	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
 
+	// 头像框的洞大小 / 偏移是「佩戴时」抄进 users.json 的副本，后台改装扮后会过期。
+	// 这里按装扮当前配置重算一次，前端拿到的永远是生效中的值
+	// （不依赖「改装扮 → 同步佩戴者」那条链路是否跑成功）。
+	item = model.ApplyUserFrameRenderState(item)
+
 	this.json(ctx, gin.H{
 		"user":       item,
 		"token":      token,

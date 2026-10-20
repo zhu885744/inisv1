@@ -463,6 +463,17 @@ func (this *Decoration) update(ctx *gin.Context) {
 		return
 	}
 
+	// 样式改完后要同步给正在佩戴这个装扮的用户。
+	// 头像框的洞大小 / 偏移、头衔的配色都是「佩戴时」写进 users.json 的，
+	// 只改装扮本身的话，已佩戴的用户必须卸下再重新佩戴才会更新
+	// （前台拿不到 payload，只能读 users.json 上的回写值）。
+	if synced := model.RefreshDecorationRenderState(cast.ToInt(params["id"])); synced > 0 {
+		facade.Log.Info(
+			map[string]any{"decoration_id": params["id"], "users": synced},
+			"已把装扮新样式同步给佩戴中的用户",
+		)
+	}
+
 	this.json(ctx, gin.H{"id": params["id"]}, facade.Lang(ctx, "更新成功！"), 200)
 }
 

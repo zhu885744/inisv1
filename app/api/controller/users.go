@@ -195,6 +195,9 @@ func (this *Users) one(ctx *gin.Context) {
 		if !utils.Is.Empty(item) {
 			// 原地脱敏（map 为引用类型，无需回写）
 			this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), user.Id)
+			// 头像框的洞大小 / 偏移按装扮当前配置重算，避免 users.json 上的副本过期
+			// （作者主页展示的是别人的头像框，同样走这里）
+			item = model.ApplyUserFrameRenderState(item)
 		}
 
 		// 排除字段

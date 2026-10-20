@@ -712,28 +712,14 @@ func backfillDecorationRenderState() {
 
 		changed := false
 
-		// 1) 头像框渲染参数（动效 / 洞大小 / 洞心偏移）
+		// 1) 头像框渲染参数（图片 / 动效 / 洞大小 / 洞心偏移）
 		//
-		// frame_animated 是后加的；frame_hole 与两个偏移是「洞模型」引入后加的。
-		// 都已佩戴的用户不回填就得重新佩戴一次才生效，所以这里按缺省补齐。
+		// 以装扮当前的 payload 为准做全量同步，而不是「缺了才补」：
+		// 后台改了某个头像框的洞大小后，已佩戴的用户必须跟着变，
+		// 否则要卸下再重新佩戴一次才生效（这就是「后台调了参数前台没反应」的原因）。
 		if frameId := cast.ToInt(wearing[DecorationTypeAvatarFrame]); frameId > 0 {
 			if payload, ok := payloadMap[frameId]; ok {
-				if _, exist := jsonData["frame_animated"]; !exist {
-					jsonData["frame_animated"] = decorationAnimated(payload)
-					changed = true
-				}
-
-				hole, offsetX, offsetY := frameGeometry(payload)
-				if _, exist := jsonData["frame_hole"]; !exist {
-					jsonData["frame_hole"] = hole
-					changed = true
-				}
-				if _, exist := jsonData["frame_offset_x"]; !exist {
-					jsonData["frame_offset_x"] = offsetX
-					changed = true
-				}
-				if _, exist := jsonData["frame_offset_y"]; !exist {
-					jsonData["frame_offset_y"] = offsetY
+				if refreshFrameState(jsonData, payload) {
 					changed = true
 				}
 			}
@@ -1022,6 +1008,162 @@ func clampFloat(value, min, max float64) float64 {
 		return max
 	}
 	return value
+}
+
+// refreshFrameState - 把某个头像框的最新参数同步进用户的 json（有变化返回 true）
+//
+// 头像框的展示信息是「佩戴时」写进 users.json 的：前台只拿得到 json.frame
+// 这张图的地址，拿不到装扮的 payload，所以洞大小 / 偏移必须落在这里。
+// 后台改了装扮参数后，就靠这个函数把新值刷给已佩戴的用户。
+func refreshFrameState(jsonData map[string]any, payload map[string]any) bool {
+	changed := false
+
+	if image := cast.ToString(payload["image"]); cast.ToString(jsonData["frame"]) != image {
+		jsonData["frame"] = image
+		changed = true
+	}
+
+	hole, offsetX, offsetY := frameGeometry(payload)
+	for key, value := range map[string]float64{
+		"frame_hole":     hole,
+		"frame_offset_x": offsetX,
+		"frame_offset_y": offsetY,
+	} {
+		// users.json 里的数字经过一次 JSON 往返，可能存成 float64 也可能存成 int，
+		// 统一用 ToFloat64 比较，避免每次启动都误判成「有变化」而无谓重写
+		if cast.ToFloat64(jsonData[key]) != value {
+			jsonData[key] = value
+			changed = true
+		}
+	}
+
+	if animated := decorationAnimated(payload); cast.ToInt(jsonData["frame_animated"]) != animated {
+		jsonData["frame_animated"] = animated
+		changed = true
+	}
+
+	// frame_scale 只是给旧前端留的兼容值（hole 的倒数）
+	if scale := cast.ToFloat64(payload["scale"]); scale > 0 && cast.ToFloat64(jsonData["frame_scale"]) != scale {
+		jsonData["frame_scale"] = scale
+		changed = true
+	}
+
+	return changed
+}
+
+// ApplyUserFrameRenderState - 读取用户数据时，用头像框的当前配置覆盖 json 里的渲染参数
+//
+// users.json 上的 frame_hole / frame_offset_x / frame_offset_y / frame_animated
+// 只是「佩戴那一刻」抄下来的副本，后台改了装扮参数后它就会过期。
+//
+// 写入时机（佩戴 / 保存装扮 / 启动回填）任何一个环节断掉，前台就会一直显示旧值 ——
+// 与其依赖这些「记得同步」的链路，不如在返回用户数据前按 decorations.avatar_frame
+// 重新算一次，保证读取路径永远拿到最新值。
+//
+// 返回处理后的 item（原地修改 map 中的 json 字段）。
+func ApplyUserFrameRenderState(item map[string]any) map[string]any {
+	if utils.Is.Empty(item) {
+		return item
+	}
+
+	jsonData := jsonMapOf(item["json"])
+	if jsonData == nil {
+		return item
+	}
+
+	wearing := jsonMapOf(jsonData["decorations"])
+	frameId := cast.ToInt(wearing[DecorationTypeAvatarFrame])
+	if frameId <= 0 {
+		return item
+	}
+
+	deco, _ := facade.DB.Model(&Decoration{}).WithTrashed().Where("id", frameId).Find()
+	if utils.Is.Empty(deco) {
+		return item
+	}
+
+	// 只在真的有差异时才回写，避免每次读用户都重写一遍 json 字段
+	if refreshFrameState(jsonData, decorationPayloadMap(deco["payload"])) {
+		item["json"] = utils.Json.Encode(jsonData)
+	}
+
+	return item
+}
+
+// RefreshDecorationRenderState - 装扮被编辑后，把新样式同步给所有正在佩戴它的用户
+//
+// 为什么需要它：头像框的洞大小 / 偏移、头衔的配色样式都写在 users.json 上，
+// 只在「佩戴」那一刻写入。后台改完装扮如果不同步，已佩戴的用户必须
+// 卸下再重新佩戴一次才能看到变化 —— 表现就是「后台调了参数，前台没反应」。
+//
+// 返回被更新的用户数，便于调用方记录日志。
+func RefreshDecorationRenderState(decoId int) int {
+	if decoId <= 0 {
+		return 0
+	}
+
+	item, _ := facade.DB.Model(&Decoration{}).WithTrashed().Where("id", decoId).Find()
+	if utils.Is.Empty(item) {
+		return 0
+	}
+
+	decoType := cast.ToString(item["type"])
+	if decoType != DecorationTypeAvatarFrame && decoType != DecorationTypeTitle {
+		return 0
+	}
+
+	payload := decorationPayloadMap(item["payload"])
+	name := cast.ToString(item["name"])
+
+	// 与 backfillDecorationRenderState 同口径：先用 LIKE 粗筛，再逐条精确比对
+	var users []Users
+	rows, _ := facade.DB.Model(&users).Where("json LIKE ?", "%decorations%").Select()
+
+	updated := 0
+	for _, row := range rows {
+		uid := cast.ToInt(row["id"])
+		jsonData := jsonMapOf(row["json"])
+		if jsonData == nil {
+			continue
+		}
+
+		wearing := jsonMapOf(jsonData["decorations"])
+		if wearing == nil || cast.ToInt(wearing[decoType]) != decoId {
+			continue
+		}
+
+		changed := false
+		switch decoType {
+		case DecorationTypeAvatarFrame:
+			changed = refreshFrameState(jsonData, payload)
+		case DecorationTypeTitle:
+			// 只同步样式本身；用户自填的文字存在 UserDecoration 上，不在这里
+			deco := jsonMapOf(jsonData["title_decoration"])
+			if deco == nil {
+				continue
+			}
+			deco["payload"] = payload
+			deco["name"] = name
+			jsonData["title_decoration"] = deco
+			changed = true
+		}
+
+		if !changed {
+			continue
+		}
+
+		if _, err := facade.DB.Model(&Users{}).Where("id", uid).
+			UpdateColumn("json", utils.Json.Encode(jsonData)); err != nil {
+			facade.Log.Warn(map[string]any{"error": err.Error(), "uid": uid, "decoration_id": decoId}, "同步装扮样式失败")
+			continue
+		}
+
+		// 用户缓存里还是旧数据
+		facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+		updated++
+	}
+
+	return updated
 }
 
 // GrantDecorationTx - 发放装扮（事务内）
