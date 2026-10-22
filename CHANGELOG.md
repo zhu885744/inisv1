@@ -1,4 +1,15 @@
 最新版下载地址：[inisv1/releases](https://github.com/zhu885744/inisv1/releases)
+## INIS v1.0.3
+新增全局图片懒加载
+新增自定义前台左侧边栏菜单功能（/admin/system?tab=site），支持设置名称、图标、跳转类型、链接
+新增图片上传压缩并转换为webp格式（/admin/system?tab=defaults）支持关闭以及强制压缩
+新增了默认头像设置（/admin/system?tab=defaults）可自定义前台个人资料中的默认头像供用户选择
+优化了前台个人资料（/user/profile）默认头像大小
+优化了/admin/logs查看日志的根容器没有间距的问题
+去除了原奇思（/moments）页仅保留内容详情页
+权限分组（app\model\auth-group.go）新增普通用户分组
+全面优化了（/admin/auth/group）权限分组管理功能，支持快捷添加预设权限点
+
 ## INIS v1.0.2
 首页动态/长文支持显示作者头像框
 修复了邮件发件配置发件人昵称设置中文无法使用的问题

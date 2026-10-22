@@ -32,6 +32,99 @@ type AuthGroup struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
+// OrdinaryAuthGroupKey - 系统内置「普通用户」分组的唯一键
+const OrdinaryAuthGroupKey = "ordinary"
+
+// builtinAuthGroup - 系统内置分组定义（安装时播种 / 已安装的库由 EnsureAuthGroups 补齐）
+//
+// 两个内置分组的定位：
+//   - admin（超级管理员）：root=1 + rules/pages=all，校验一律放行，禁止删除；
+//   - ordinary（普通用户）：root=0、pages 为空，只带「发布 / 管理 / 删除自己的
+//     文章与动态」这几个权限点（见 ordinaryAuthPermits），不含任何后台管理能力。
+//     这些接口在控制器里都有 `!meta.root → where uid = 当前用户` 的限定，
+//     所以普通用户只能操作自己的数据；评论 / 友链 / 附件上传是 type=login，
+//     登录即放行，不需要权限点。
+type builtinAuthGroup struct {
+	Id      int
+	Name    string
+	Key     string
+	Uids    string
+	Rules   string
+	Pages   string
+	Root    int
+	Default int
+	Remark  string
+}
+
+// ordinaryAuthPermits - 「普通用户」内置分组自带的权限点（"METHOD /api/模块/动作"）
+//
+// 只给「发布 / 编辑 / 删除自己的内容」，一律不给后台管理类接口
+// （全站列表统计、审核、置顶、清空回收站等）。
+// 评论区与友链的写接口是 type=login（登录即放行），不需要在这里列；
+// 附件上传同样只需登录，普通人发文配图不受影响。
+var ordinaryAuthPermits = []string{
+	// 文章：发布 / 编辑 / 回收站恢复 / 删除（均为本人数据）
+	"POST /api/article/save",
+	"POST /api/article/create",
+	"PUT /api/article/update",
+	"PUT /api/article/restore",
+	"DELETE /api/article/remove",
+	"DELETE /api/article/delete",
+
+	// 动态：同上（置顶 set_top 仍需要额外授权，不给）
+	"POST /api/moments/save",
+	"POST /api/moments/create",
+	"PUT /api/moments/update",
+	"PUT /api/moments/restore",
+	"DELETE /api/moments/remove",
+	"DELETE /api/moments/delete",
+}
+
+// ordinaryAuthRules - 把 ordinaryAuthPermits 换算成权限点 hash 串（逗号分隔）
+//
+// 通过 createAuthRules() 反查真实规则，避免手写 hash 或路由拼错；
+// 只有 type=default / root 的规则才对应「需要权限点」，common / login 直接跳过。
+// 计算结果与 EnsureAuthRules 写入的 hash 完全一致（同为 [METHOD]route 的 Sum32）。
+func ordinaryAuthRules() string {
+
+	permits := make(map[string]bool, len(ordinaryAuthPermits))
+	for _, item := range ordinaryAuthPermits {
+		// 只把请求方法转大写，路由本身区分大小写（/api/article/save）
+		method, route, exist := strings.Cut(item, " ")
+		if !exist {
+			continue
+		}
+		permits[strings.ToUpper(strings.TrimSpace(method))+" "+strings.TrimSpace(route)] = true
+	}
+
+	hashes := make([]string, 0, len(ordinaryAuthPermits))
+	for _, rule := range createAuthRules() {
+		if utils.InArray(rule.Type, []string{"common", "login"}) {
+			continue
+		}
+		method := strings.ToUpper(cast.ToString(rule.Method))
+		if !permits[method+" "+rule.Route] {
+			continue
+		}
+		hashes = append(hashes, utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, rule.Route)))
+	}
+
+	return strings.Join(hashes, ",")
+}
+
+var builtinAuthGroups = []builtinAuthGroup{
+	{
+		Id: 1, Name: "超级管理员", Key: "admin", Uids: "|1|",
+		Rules: "all", Pages: "all", Root: 1, Default: 1,
+		Remark: "超级管理员，拥有所有权限！",
+	},
+	{
+		Id: 2, Name: "普通用户", Key: OrdinaryAuthGroupKey, Uids: "",
+		Rules: ordinaryAuthRules(), Pages: "", Root: 0, Default: 1,
+		Remark: "注册用户的默认分组：可发布 / 编辑 / 删除自己的文章与动态（只能动自己的数据）",
+	},
+}
+
 // InitAuthGroup - 初始化AuthGroup表
 func InitAuthGroup() {
 	// 迁移表
@@ -40,21 +133,73 @@ func InitAuthGroup() {
 		facade.Log.Error(map[string]any{"error": err}, "AuthGroup表迁移失败")
 		return
 	}
-	count, _ := facade.DB.Model(&AuthGroup{}).Count()
-	if count != 0 {
-		return
+	EnsureAuthGroups()
+}
+
+// EnsureAuthGroups - 补齐系统内置分组（幂等，可重复执行）
+//
+// 为什么需要它：原先只在「表为空」时播种超级管理员，
+// 已经装好的库永远拿不到后来新增的内置分组（比如「普通用户」）。
+// 这里按 key 判断是否存在，缺哪个补哪个：
+//   - **已存在的分组一律不改**（名称 / 权限 / 成员可能已被管理员调整过，覆盖等于改坏数据）；
+//   - 内置 ID 被别的分组占用时（老库可能手工建过），改由自增分配，避免主键冲突。
+//
+// 调用时机：InitAuthGroup（安装 / 迁移）与 timer.Run（每次启动的一次性维护）。
+func EnsureAuthGroups() {
+
+	// 这里**不判断 facade.Installed()**：安装向导的 initDB 步骤会直接调 model.InitTable()，
+	// 此时 install.lock 还没删除（Installed 为 false），判断的话全新安装就拿不到
+	// 超级管理员分组。调用方（InitAuthGroup）已经保证「表已迁移、DB 可用」。
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "补齐系统内置权限分组时发生panic")
+		}
+	}()
+
+	for _, builtin := range builtinAuthGroups {
+		// WithTrashed：回收站里的同名分组也算「已存在」，不重复播种
+		exist, _ := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("key", builtin.Key).Exist()
+		if exist {
+			continue
+		}
+
+		table := AuthGroup{
+			Name:    builtin.Name,
+			Key:     builtin.Key,
+			Uids:    builtin.Uids,
+			Rules:   builtin.Rules,
+			Pages:   builtin.Pages,
+			Root:    builtin.Root,
+			Default: builtin.Default,
+			Remark:  builtin.Remark,
+		}
+
+		if taken, _ := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", builtin.Id).Exist(); !taken {
+			table.Id = builtin.Id
+		}
+
+		if _, err := facade.DB.Model(&AuthGroup{}).Create(&table); err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error(), "key": builtin.Key}, "补齐系统内置权限分组失败")
+			continue
+		}
+
+		// 内置分组会影响所有人的权限归属，缓存里的用户权限列表需要失效
+		facade.Cache.DelTags([]any{"user["})
+		facade.Log.Info(map[string]any{"id": table.Id, "key": builtin.Key, "name": builtin.Name}, "已补齐系统内置权限分组")
 	}
-	facade.DB.Model(&AuthGroup{}).Create(&AuthGroup{
-		Id:      1,
-		Name:    "超级管理员",
-		Key:     "admin",
-		Uids:    "|1|",
-		Rules:   "all",
-		Pages:   "all",
-		Root:    1,
-		Default: 1,
-		Remark:  "超级管理员，拥有所有权限！",
-	})
+}
+
+// OrdinaryAuthGroupId - 取「普通用户」分组的 ID（不存在时返回 0）
+//
+// 用途：注册 / 第三方建号时，若「后台 → 注册设置」没有配置默认权限组，
+// 兜底把新用户放进这个空权限组（见 api/controller/comm.go 的 auth()）
+func OrdinaryAuthGroupId() int {
+	item, err := facade.DB.Model(&AuthGroup{}).Where("key", OrdinaryAuthGroupKey).Find()
+	if err != nil || utils.Is.Empty(item) {
+		return 0
+	}
+	return cast.ToInt(item["id"])
 }
 
 // AfterSave - 保存后的Hook（包括 create update）

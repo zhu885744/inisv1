@@ -878,7 +878,7 @@ func createAuthRules() (result []AuthRules) {
 			"GET": {
 				"path=article&type=common&name=文章搜索",
 				"path=pages&type=common&name=独立页面搜索",
-				"path=tags&type=common&name=标签搜索",
+				"path=tags&type=common&name=话题搜索",
 				"path=users&type=common&name=用户搜索",
 				"path=links&type=common&name=友链搜索",
 				"path=moments&type=common&name=动态搜索",
@@ -1073,7 +1073,7 @@ func createAuthRules() (result []AuthRules) {
 		"user-collects": "【用户收藏 API】",
 		"comm":          "【公共 API】",
 		"oauth":         "【第三方登录 API】",
-		"tags":          "【标签 API】",
+		"tags":          "【话题 API】",
 		"level":         "【等级 API】",
 		"pages":         "【独立页面 API】",
 		"users":         "【用户 API】",

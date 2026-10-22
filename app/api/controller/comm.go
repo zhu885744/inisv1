@@ -1191,6 +1191,15 @@ func (this *Comm) auth(uid any) {
 	// 默认权限
 	ids := utils.Unity.Ids(config["text"])
 
+	// 兜底：后台没有配置默认权限组时，把新用户放进系统内置的「普通用户」分组
+	// （见 model.EnsureAuthGroups）。该组 rules/pages 为空，等价于「不授予任何权限」，
+	// 只是让用户有个归属组，方便后台整组追加权限、按组统计；配置了默认组则以配置为准。
+	if len(ids) == 0 {
+		if id := model.OrdinaryAuthGroupId(); id > 0 {
+			ids = []any{id}
+		}
+	}
+
 	// 是否真正写入了权限组（用于判断要不要清权限缓存）
 	changed := false
 
