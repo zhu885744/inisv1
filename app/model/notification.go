@@ -38,6 +38,10 @@ const (
 	// bind_type/bind_id 指向被打赏的内容（用户主页打赏时 bind_type=user、bind_id=接收者 uid），
 	// 发送见 model.SendTipNotify
 	NotificationTypeTip = "tip"
+	// 勋章（发放 / 收回 / 限定勋章即将到期提醒）
+	// bind_type=badge，bind_id=勋章 ID，前台点击跳到「我的勋章」
+	// 发送见 badge.go 的 notifyBadgeGranted / SendBadgeNotify
+	NotificationTypeBadge = "badge"
 )
 
 type Notification struct {
@@ -729,6 +733,7 @@ func (this *Notification) GetNotifications(uid int, typ string, isRead int, page
 // 规则：
 //   - 个人通知（uid != 0）：仅删除「已读」且 create_time 早于保留阈值的记录
 //   - 广播通知（uid = 0）：按 create_time 直接删除，并连带清理 notification_read 中的读取状态
+//
 // days: 保留天数，<= 0 时回退为 30 天
 func (this *Notification) CleanExpired(days int) (int64, error) {
 	if days <= 0 {

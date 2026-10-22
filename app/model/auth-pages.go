@@ -97,6 +97,8 @@ func InitAuthPages() {
 		{Name: "后台页面管理", Icon: "bi bi-layout-text-window", Path: "/admin/auth/pages", Size: "14px"},
 		{Name: "动态管理", Icon: "bi bi-chat-square-quote", Path: "/admin/moments", Size: "14px"},
 		{Name: "附件管理", Icon: "bi bi-folder2-open", Path: "/admin/attachment", Size: "14px"},
+		// 勋章：定义 + 任务条件 + 手动发放/收回（见 app/model/badge.go）
+		{Name: "勋章管理", Icon: "bi bi-award", Path: "/admin/badges", Size: "14px"},
 	}
 
 	// legacyIcons - v1 版本的短图标名，仅用于判断「是否可以把旧值升级为 Bootstrap Icons」

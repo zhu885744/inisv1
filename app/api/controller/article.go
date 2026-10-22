@@ -476,6 +476,9 @@ func (this *Article) create(ctx *gin.Context) {
 				Type: "article-create",
 			})
 		}()
+
+		// 勋章：发布文章后按条件判定（如「发布第一篇文章」），只发满足条件且还没持有的
+		go model.BadgeAutoGrant(uid)
 	}
 
 	// @ 提及通知：只在文章真正可展示（已发布 + 审核通过）时发，草稿与待审核不打扰被 @ 的人

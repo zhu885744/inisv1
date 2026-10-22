@@ -752,6 +752,10 @@ func (this *Comm) register(ctx *gin.Context) {
 	// 可能先把「空的权限缓存」写进 Cache（该缓存无过期时间），导致默认权限长期不生效）
 	this.auth(table.Id)
 
+	// 勋章：新用户先过一遍条件判定（注册类条件是「满 N 天」，这里不会立刻发，
+	// 但注册即满足的其它条件——例如站点配置成「注册送勋章」——能当场生效）
+	go model.BadgeAutoGrant(table.Id)
+
 	// 会话哈希要在清空响应里的密码之前算好：
 	// table.Password 此时是落库的密码哈希，清空后 Sum32 会变成空串，
 	// 会话下次校验时与数据库对不上 → 注册完立刻被判为登录过期

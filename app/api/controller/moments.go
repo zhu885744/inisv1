@@ -440,6 +440,9 @@ func (this *Moments) create(ctx *gin.Context) {
 			Uid:  uid,
 			Type: "moments",
 		})
+
+		// 勋章：发布动态后按条件判定（如「发布第一条动态」）
+		go model.BadgeAutoGrant(uid)
 	}
 }
 

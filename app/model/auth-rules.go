@@ -856,6 +856,64 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=default&name=清空回收站",
 			},
 		},
+		// 勋章：one/held 是前台可见的展示接口，mine 是登录用户自己的进度；
+		// 定义管理、持有记录、发放/收回都是后台权限点（见 app/api/controller/badge.go）
+		"badge": {
+			"GET": {
+				"path=one&type=common&name=勋章详情",
+				"path=held&type=common&name=用户获得的勋章",
+				"path=wall&type=common&name=勋章馆与佩戴榜",
+				"path=conditions&type=login&name=勋章条件清单",
+				"path=mine&type=login&name=我的勋章",
+				"path=all&type=default&name=勋章列表",
+				"path=count&type=default&name=勋章统计",
+				"path=column&type=default&name=勋章列查询",
+				"path=records&type=default&name=勋章持有记录",
+			},
+			"POST": {
+				"path=save&type=default&name=保存勋章",
+				"path=create&type=default&name=新增勋章",
+				"path=scan&type=default&name=重新判定勋章",
+				"path=wear&type=login&name=佩戴勋章",
+				"path=unwear&type=login&name=卸下勋章",
+			},
+			"PUT": {
+				"path=update&type=default&name=更新勋章",
+				"path=restore&type=default&name=恢复勋章",
+				"path=grant&type=default&name=发放勋章",
+				"path=revoke&type=default&name=收回勋章",
+			},
+			"DELETE": {
+				"path=remove&type=default&name=删除勋章",
+				"path=delete&type=default&name=彻底删除勋章",
+				"path=clear&type=default&name=清空勋章回收站",
+				"path=revoke&type=default&name=收回勋章",
+			},
+		},
+		// 勋章分类（后台分类管理）：全部是后台权限点；前台分组不走这里，
+		// 由 badge/mine 一次性返回（见 controller/badge.go 的 mine）
+		"badge-category": {
+			"GET": {
+				"path=all&type=default&name=勋章分类列表",
+				"path=one&type=default&name=勋章分类详情",
+				"path=count&type=default&name=勋章分类统计",
+				"path=column&type=default&name=勋章分类列查询",
+			},
+			"POST": {
+				"path=save&type=default&name=保存勋章分类",
+				"path=create&type=default&name=新增勋章分类",
+				"path=move&type=default&name=移动勋章到分类",
+			},
+			"PUT": {
+				"path=update&type=default&name=更新勋章分类",
+				"path=restore&type=default&name=恢复勋章分类",
+			},
+			"DELETE": {
+				"path=remove&type=default&name=删除勋章分类",
+				"path=delete&type=default&name=彻底删除勋章分类",
+				"path=clear&type=default&name=清空勋章分类回收站",
+			},
+		},
 		"qps-warn": {
 			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
 			"PUT":    {"update", "restore"},
@@ -1101,6 +1159,8 @@ func createAuthRules() (result []AuthRules) {
 		"integral":      "【积分 API】",
 		"goods":         "【商品 API】",
 		"decoration":    "【装扮 API】",
+		"badge":         "【勋章 API】",
+		"badge-category": "【勋章分类 API】",
 		"checkin":       "【签到 API】",
 		"docs":          "【文档 API】",
 		"docs-group":    "【文档目录 API】",

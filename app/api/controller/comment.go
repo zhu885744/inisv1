@@ -782,6 +782,9 @@ func (this *Comment) create(ctx *gin.Context) {
 			Uid:  user.Id,
 			Type: "comment",
 		})
+
+		// 勋章：发表评论后按条件判定（如「累计 10 条评论」）
+		model.BadgeAutoGrant(user.Id)
 	}()
 
 	go func() {

@@ -37,6 +37,8 @@ func NewValid(table any, params map[string]any) (err error) {
 		item = &Links{}
 	case "level":
 		item = &Level{}
+	case "badge":
+		item = &Badge{}
 	case "config":
 		item = &Config{}
 	case "banner":

@@ -71,6 +71,8 @@ var controllers = map[string]controller.ApiInterface{
 	"docs-project":  &controller.DocsProject{},
 	"goods":         &controller.Goods{},
 	"decoration":    &controller.Decoration{},
+	"badge":         &controller.Badge{},
+	"badge-category": &controller.BadgeCategory{},
 	"log":           &controller.Log{},
 	"stats":         &controller.Stats{},
 	"mention":       &controller.Mention{},

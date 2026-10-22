@@ -104,6 +104,10 @@ func InitTable() {
 		{"Goods", InitGoods},
 		// Decoration 必须排在 Goods 之后：首次运行会为默认装扮生成关联的商品记录
 		{"Decoration", InitDecoration},
+		// 勋章：定义 + 用户持有记录（条件判定会读 Article / Moments / Comment / Checkin，放在它们之后）
+		{"Badge", InitBadge},
+		// 勋章分类必须排在 Badge 之后：播种时要读 Badge 表给存量勋章归类
+		{"BadgeCategory", InitBadgeCategory},
 		{"IntegralCard", InitIntegralCard},
 		{"RewardCard", InitRewardCard},
 	}

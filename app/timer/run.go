@@ -54,11 +54,21 @@ func start() {
 		model.EnsureAuthRules()
 	}()
 
+	// 启动时补扫一次勋章：新装 / 刚上线勋章功能的老站，存量用户（注册满 N 天、
+	// 已有 N 篇文章）不会自己触发事件，只能靠这次扫描（以及之后的每小时扫描）补发。
+	go func() {
+		if !tryLock("badge-scan", 55*time.Minute) {
+			return
+		}
+		model.BadgeScan()
+	}()
+
 	Log.Run()
 	Device.Run()
 	Ban.Run()
 	Notification.Run()
 	Decoration.Run()
+	Badge.Run()
 	Stats.Run()
 	QpsWarnClean.Run()
 
