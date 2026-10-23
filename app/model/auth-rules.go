@@ -580,6 +580,14 @@ func createAuthRules() (result []AuthRules) {
 			"POST":   {"save", "create"},
 			"DELETE": {"remove", "delete", "clear"},
 		},
+		// 主题配色（后台）：读取公开（配色页与后台首屏都要用），保存 / 重置需要权限点
+		"theme": {
+			"GET": {"path=config&type=common&name=主题配色配置"},
+			"POST": {
+				"path=save&type=default&name=保存主题配色",
+				"path=reset&type=default&name=重置主题配色",
+			},
+		},
 		"article": {
 			"GET": {
 				"path=one&type=common",
@@ -1141,6 +1149,7 @@ func createAuthRules() (result []AuthRules) {
 		"comment":       "【评论 API】",
 		"placard":       "【公告 API】",
 		"config":        "【配置 API】",
+		"theme":         "【主题配色 API】",
 		"toml":          "【服务配置 API】",
 		"ip-black":      "【IP黑名单 API】",
 		"ip-white":      "【IP白名单 API】",

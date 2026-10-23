@@ -6,6 +6,7 @@ import (
 	"image"
 	"inis/app/facade"
 	"inis/app/middleware"
+	"inis/app/model"
 	"inis/theme"
 	"io"
 	"net/http"
@@ -135,6 +136,18 @@ func InitApp() {
 
 	notRoute(Gin)
 	console()
+
+	// 主题配色：把数据库里已保存的配色加载进内存，并挂上动态样式表。
+	// 放在 InitApp 里是为了「配置热更新 / 重建引擎」后同样能恢复到已保存的配色。
+	model.ReloadTheme()
+	Gin.GET("/theme-custom.css", themeStyle)
+
+	// 启动时打一条：既能确认本次二进制确实带了主题样式表路由
+	//（旧二进制里没有这行日志，/theme-custom.css 会落到 NoRoute 返回「资源不存在」）
+	facade.Log.Info(map[string]any{
+		"path":   "/theme-custom.css",
+		"preset": model.ThemeCurrent().Preset,
+	}, "主题配色样式表已注册")
 
 	// 调试模式才挂 pprof：内存问题靠猜没意义，
 	// go tool pprof http://127.0.0.1:8642/debug/pprof/heap 能直接看到真实分配来源。
@@ -408,6 +421,32 @@ func writeThemePage(ctx *gin.Context, file, path string) bool {
 		facade.Log.Error(map[string]any{"error": err, "path": path}, "写入主题页面失败")
 	}
 	return true
+}
+
+// themeStyle 输出主题配色样式表（由后台「主题配色」生成）
+//
+// 注册为 /theme-custom.css（见 InitApp），index.html 里用 <link> 引入。
+// 为什么用独立样式表而不是把变量拼进 HTML：主题首页可能是内嵌在二进制里的产物，
+// 服务端不方便逐字节改写 HTML；样式表由内存缓存直接吐出，保存配色后立即生效。
+//
+// 公开路由：样式表不含敏感信息，且首屏加载时用户可能还没登录。
+func themeStyle(ctx *gin.Context) {
+	css, etag := model.ThemeCSS()
+
+	ctx.Header("Content-Type", "text/css; charset=utf-8")
+	// 必须回源校验：保存配色后要立刻生效，不能用长缓存
+	ctx.Header("Cache-Control", "no-cache")
+	ctx.Header("ETag", etag)
+
+	if match := ctx.GetHeader("If-None-Match"); match != "" && strings.Contains(match, etag) {
+		ctx.Status(http.StatusNotModified)
+		return
+	}
+
+	ctx.Status(http.StatusOK)
+	if _, err := ctx.Writer.Write([]byte(css)); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "写入主题样式表失败")
+	}
 }
 
 // handleImageFile 处理图片文件

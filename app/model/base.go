@@ -64,6 +64,8 @@ func InitTable() {
 		// 内容可见范围（登录可见 / 付费可见）的解锁记录，依赖文章 / 动态 / 页面 / 评论表
 		{"ContentUnlock", InitContentUnlock},
 		{"Config", InitConfig},
+		// 主题配色：config 表补默认记录 + 加载到进程内缓存（排在 Config 之后）
+		{"Theme", InitTheme},
 		{"Links", InitLinks},
 		{"LinksGroup", InitLinksGroup},
 		{"Placard", InitPlacard},

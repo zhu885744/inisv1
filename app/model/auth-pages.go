@@ -80,6 +80,8 @@ func InitAuthPages() {
 		{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
 		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
+		// 主题配色：编辑设计 token（浅色 / 深色两套），保存后 /theme-custom.css 立即生效
+		{Name: "主题配色", Icon: "bi bi-palette2", Path: "/admin/theme", Size: "14px"},
 		{Name: "查看日志", Icon: "bi bi-journal-text", Path: "/admin/logs", Size: "14px"},
 		// 数据统计：实时资源 / 数据库 / 在线用户（数据来自 socket 推送，见 app/socket/controller/status.go）
 		{Name: "数据统计", Icon: "bi bi-graph-up-arrow", Path: "/admin/stats", Size: "14px"},

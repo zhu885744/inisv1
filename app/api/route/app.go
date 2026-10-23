@@ -40,6 +40,7 @@ var controllers = map[string]controller.ApiInterface{
 	"level":         &controller.Level{},
 	"banner":        &controller.Banner{},
 	"config":        &controller.Config{},
+	"theme":         &controller.Theme{},
 	"article":       &controller.Article{},
 	"comment":       &controller.Comment{},
 	"unlock":        &controller.Unlock{},
