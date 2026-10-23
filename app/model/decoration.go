@@ -496,7 +496,6 @@ func DecorationCount() facade.H {
 	}
 }
 
-
 // DecorationConfigKey - 装扮配置缓存键（与 Config 表的 key 一致）
 const DecorationConfigKey = "SYSTEM_DECORATION"
 
@@ -632,10 +631,10 @@ type UserDecoration struct {
 	Status       int    `gorm:"tinyint; index; comment:状态（0已拥有 1佩戴中 2已过期）; default:0;" json:"status"`
 	ExpireTime   int64  `gorm:"index; comment:过期时间（0=永久）; default:0;" json:"expire_time"`
 	// ExpireNotified 是否已发过「即将过期」站内提醒（定时任务用；续期时重置为 0，保证新一轮仍会提醒）
-	ExpireNotified int `gorm:"tinyint; comment:是否已发即将过期提醒（0否 1是）; default:0;" json:"expire_notified"`
-	Source       string `gorm:"size:32; comment:获得来源（shop/admin/activity/level/gacha）; default:'shop';" json:"source"`
-	OrderId      int    `gorm:"type:int(32); comment:关联订单ID; default:0;" json:"order_id"`
-	WearTime     int64  `gorm:"comment:最近佩戴时间; default:0;" json:"wear_time"`
+	ExpireNotified int    `gorm:"tinyint; comment:是否已发即将过期提醒（0否 1是）; default:0;" json:"expire_notified"`
+	Source         string `gorm:"size:32; comment:获得来源（shop/admin/activity/level/gacha）; default:'shop';" json:"source"`
+	OrderId        int    `gorm:"type:int(32); comment:关联订单ID; default:0;" json:"order_id"`
+	WearTime       int64  `gorm:"comment:最近佩戴时间; default:0;" json:"wear_time"`
 	// Text 用户为该装扮填写的自定义文本（如纯样式类头衔的自定义称号文字）
 	Text string `gorm:"size:64; comment:自定义文本（可选）; default:Null;" json:"custom_text"`
 	// 以下为公共字段
@@ -705,12 +704,38 @@ func backfillDecorationRenderState() {
 			continue
 		}
 
-		wearing := jsonMapOf(jsonData["decorations"])
-		if wearing == nil {
-			continue
+		changed := false
+		clearTitle := false
+
+		// 0) 修历史脏数据
+		//
+		// 旧版卸下头衔时会把「刚卸下那枚的文字」当成原头衔写进 json.title_text，
+		// 再拿它回写 users.title，于是取消佩戴后头衔仍然显示。
+		// 没戴头衔却还留着 title_text，说明是那段逻辑的残留：清掉备忘；
+		// users.title 恰好等于它才一并清空（等于时才敢认定是残留，避免误伤后台单独设的头衔）。
+		if wearingByType(jsonData, DecorationTypeTitle) <= 0 {
+			if stale := cast.ToString(jsonData["title_text"]); !utils.Is.Empty(stale) {
+				delete(jsonData, "title_text")
+				changed = true
+				if cast.ToString(row["title"]) == stale {
+					clearTitle = true
+				}
+			}
+			// 没戴头衔却还留着渲染数据：前端会拿它渲染出一个空壳徽章
+			if _, exist := jsonData["title_decoration"]; exist {
+				delete(jsonData, "title_decoration")
+				changed = true
+			}
 		}
 
-		changed := false
+		wearing := jsonMapOf(jsonData["decorations"])
+		if wearing == nil {
+			if changed {
+				flushDecorationRow(uid, jsonData, clearTitle)
+				updated++
+			}
+			continue
+		}
 
 		// 1) 头像框渲染参数（图片 / 动效 / 洞大小 / 洞心偏移）
 		//
@@ -748,19 +773,31 @@ func backfillDecorationRenderState() {
 			continue
 		}
 
-		if _, err := facade.DB.Model(&Users{}).Where("id", uid).
-			UpdateColumn("json", utils.Json.Encode(jsonData)); err != nil {
-			facade.Log.Warn(map[string]any{"error": err.Error(), "uid": uid}, "补齐装扮展示字段失败")
-			continue
-		}
-		// 用户缓存里存的是旧数据
-		facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+		flushDecorationRow(uid, jsonData, clearTitle)
 		updated++
 	}
 
 	if updated > 0 {
 		facade.Log.Info(map[string]any{"rows": updated}, "已补齐装扮展示字段（frame_animated / title payload）")
 	}
+}
+
+// flushDecorationRow - 回写单个用户的装扮展示字段
+//
+// json 每次都写；clearTitle 为真时顺手把 users.title 清空（修历史残留用）。
+func flushDecorationRow(uid int, jsonData map[string]any, clearTitle bool) {
+
+	updates := map[string]any{"json": utils.Json.Encode(jsonData)}
+	if clearTitle {
+		updates["title"] = ""
+	}
+
+	if err := facade.DB.Drive().Model(&Users{}).Where("id", uid).UpdateColumns(updates).Error; err != nil {
+		facade.Log.Warn(map[string]any{"error": err.Error(), "uid": uid}, "补齐装扮展示字段失败")
+		return
+	}
+	// 用户缓存里存的是旧数据
+	facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
 }
 
 // defaultAvatarFrames - 默认头像框资源（与旧前端 Profile.vue 的 PRESET_FRAMES 一致，
@@ -1408,11 +1445,6 @@ func updateUserDecorationState(tx *gorm.DB, uid int, mutate func(jsonData map[st
 	if jsonData == nil {
 		jsonData = map[string]any{}
 	}
-	// 首次进入装扮体系时留存原头衔文本，卸下头衔后可自动恢复
-	if _, exist := jsonData["title_text"]; !exist && !utils.Is.Empty(user.Title) {
-		jsonData["title_text"] = user.Title
-	}
-
 	state, err := mutate(jsonData)
 	if err != nil {
 		return err
@@ -1455,8 +1487,13 @@ func syncWearState(tx *gorm.DB, uid int, decoType string, deco *Decoration, text
 				delete(jsonData, "frame_offset_y")
 				delete(jsonData, "frame_animated")
 			case DecorationTypeTitle:
+				// 头衔只有一个真相：users.json.decorations.title。卸下就清空 users.title，
+				// 不做「恢复旧头衔」—— 旧逻辑把 title_text 当成原头衔留存，
+				// 但戴着装扮时 users.title 本身就是装扮渲染出来的文字，
+				// 于是每次卸下都把「刚卸下那枚的文字」又写回去（表现为「取消佩戴后头衔还在」）。
 				delete(jsonData, "title_decoration")
-				titleText = cast.ToString(jsonData["title_text"])
+				delete(jsonData, "title_text")
+				titleText = ""
 			}
 		} else {
 			payload := decorationPayloadMap(deco.Payload)
@@ -1640,6 +1677,9 @@ func WearDecoration(uid int, decorationId int, text string) (facade.H, error) {
 		return nil, err
 	}
 
+	// 用户缓存里存的是旧的 title / json，不清掉的话前台还会显示上一枚头衔
+	facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+
 	return WearingDecorations(uid), nil
 }
 
@@ -1661,9 +1701,16 @@ func UnwearDecoration(uid int, decoType string) error {
 		return errors.New("你还没有佩戴该装扮！")
 	}
 
-	return facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
+	if err := facade.DB.Drive().Transaction(func(tx *gorm.DB) error {
 		return unwearTypeTx(tx, uid, decoType)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// 用户缓存里存的是旧的 title / json，不清掉的话前台还会显示刚卸下的头衔
+	facade.Cache.DelTags(fmt.Sprintf("user[%v]", uid))
+
+	return nil
 }
 
 // wearingMap - 从 users.json 中取佩戴引用（json.decorations = {type: decoration_id}）
