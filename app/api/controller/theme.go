@@ -24,6 +24,7 @@ func (this *Theme) IGET(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"config": this.config,
+		"active": this.active,
 	}
 
 	if err := this.call(allow, method, ctx); err != nil {
@@ -61,6 +62,23 @@ func (this *Theme) config(ctx *gin.Context) {
 	this.json(ctx, model.ThemePayload(), facade.Lang(ctx, "主题配色配置"), 200)
 }
 
+// active - 当前生效的样式表
+//
+// 前端用它把 CSS 注入 <style id="theme-runtime">，不再依赖 /theme-custom.css 这个
+// 静态资源 URL：CDN / 反代对 .css 的强缓存会让主题保存后长期不生效，而接口响应
+// 可以明确要求不缓存（no-store），每次回源拿最新值。
+func (this *Theme) active(ctx *gin.Context) {
+	css, _ := model.ThemeCSS()
+
+	// 主题随时可能被保存修改，必须回源
+	ctx.Header("Cache-Control", "no-store")
+
+	this.json(ctx, facade.H{
+		"version": model.ThemeVersion(),
+		"css":     css,
+	}, facade.Lang(ctx, "主题样式表"), 200)
+}
+
 // save - 保存主题配色
 func (this *Theme) save(ctx *gin.Context) {
 	params := this.params(ctx)
@@ -69,6 +87,7 @@ func (this *Theme) save(ctx *gin.Context) {
 		Preset: cast.ToString(params["preset"]),
 		Light:  cast.ToStringMapString(params["light"]),
 		Dark:   cast.ToStringMapString(params["dark"]),
+		Extras: cast.ToStringMapString(params["extras"]),
 	}
 
 	// 前后端约定每次提交完整的浅色 / 深色取值；两个都空说明请求体没带颜色，

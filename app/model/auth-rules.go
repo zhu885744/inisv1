@@ -582,7 +582,10 @@ func createAuthRules() (result []AuthRules) {
 		},
 		// 主题配色（后台）：读取公开（配色页与后台首屏都要用），保存 / 重置需要权限点
 		"theme": {
-			"GET": {"path=config&type=common&name=主题配色配置"},
+			"GET": {
+				"path=config&type=common&name=主题配色配置",
+				"path=active&type=common&name=主题样式表",
+			},
 			"POST": {
 				"path=save&type=default&name=保存主题配色",
 				"path=reset&type=default&name=重置主题配色",

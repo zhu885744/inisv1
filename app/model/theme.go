@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"inis/app/facade"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,11 +20,12 @@ import (
 // :root[data-theme='dark']），后台只要覆盖这些变量就能换肤，不必改前端代码。
 //
 // 分层：
-//  1. themeTokens —— 可编辑的设计 token（基础色）。语义别名（--bg / --text / --primary …）
-//     在 styles.css 里用 var() 引用基础 token，改基础色即可整体跟随；
-//  2. 派生色（--accent-wash / --accent-soft / --accent-ring / --accent-glow / --gold-*、
-//     --bg-overlay、--switch-knob）由基础色按固定透明度算出来，避免管理员逐项填 rgba；
-//  3. 内置预设（preset）给出浅色 / 深色两套完整取值，自定义值在预设之上逐项覆盖。
+//  1. themeTokens —— 可编辑的设计 token，带类型（纯色 / 可渐变 / 长度 / 阴影）；
+//  2. 语义别名（--bg / --text / --primary …）在 styles.css 里用 var() 引用基础 token，
+//     改基础色即可整体跟随；
+//  3. 派生色（--accent-* / --gold-* / --bg-overlay / --switch-knob）由基础色按固定
+//     透明度算出来，避免管理员逐项填 rgba；
+//  4. extras —— 自由 CSS 变量（高自定义），直接追加到两套模式里。
 //
 // 存储：config 表的 SYSTEM_THEME 一项（json 字段），与其它系统配置一致。
 // 生效：/theme-custom.css 由本文件实时生成（config/app.go 注册路由），
@@ -32,13 +35,23 @@ const ThemeConfigKey = "SYSTEM_THEME"
 // defaultThemePreset - 默认预设（与 styles.css 的「暖纸 · 朱砂」一致）
 const defaultThemePreset = "cinnabar"
 
+// token 类型
+const (
+	themeTypeColor  = "color"  // 纯色（文字、描边、品牌色）
+	themeTypePaint  = "paint"  // 纯色或渐变（背景类）
+	themeTypeLength = "length" // 长度（圆角、间距）
+	themeTypeShadow = "shadow" // 阴影
+)
+
 // ThemeToken - 一个可编辑的设计 token
 type ThemeToken struct {
 	// Key CSS 变量名后缀（实际变量为 --Key）
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Group string `json:"group"`
+	Type  string `json:"type"`
 	Desc  string `json:"desc,omitempty"`
+	Unit  string `json:"unit,omitempty"`
 }
 
 // ThemePreset - 内置主题预设
@@ -54,38 +67,78 @@ type ThemePreset struct {
 //
 // Light / Dark 存「解析后的完整取值」（预设 + 覆盖），
 // 这样 CSS 生成与前端回显都不需要再关心预设叠加逻辑。
+// Extras 是自由 CSS 变量（key 不带 --），浅色/深色共用。
 type ThemeSettings struct {
 	Preset string            `json:"preset"`
 	Light  map[string]string `json:"light"`
 	Dark   map[string]string `json:"dark"`
+	Extras map[string]string `json:"extras"`
 }
 
 // themeGroups - token 分组（前端按此顺序渲染编辑区）
 var themeGroups = []facade.H{
-	{"key": "surface", "label": "底面与描边", "desc": "页面底色、卡片、输入框的分层，以及分隔线"},
+	{"key": "surface", "label": "底面与描边", "desc": "页面底色、卡片、输入框的分层，以及分隔线（支持渐变）"},
 	{"key": "text", "label": "文字层级", "desc": "标题、正文、辅助文字与占位信息"},
 	{"key": "brand", "label": "品牌与语义", "desc": "主色（按钮 / 链接 / 强调）与成功、警告色"},
+	{"key": "gradient", "label": "渐变", "desc": "默认关闭（none）；配置后叠加在纯色之上，不改动原有主色"},
+	{"key": "shape", "label": "圆角", "desc": "控件 10 / 卡片 14 / 弹层 18；可用下方「统一圆角」批量调整"},
+	{"key": "depth", "label": "阴影", "desc": "浮层投影；深色模式默认无阴影，靠表面提亮区分层级"},
 }
 
 // themeTokens - 可编辑的设计 token 表
 var themeTokens = []ThemeToken{
-	{Key: "paper-0", Label: "卡片底", Group: "surface", Desc: "卡片、弹层等最亮表面"},
-	{Key: "paper-1", Label: "页面底", Group: "surface", Desc: "整页背景"},
-	{Key: "paper-2", Label: "输入 / 浮层", Group: "surface", Desc: "输入框、代码块、悬浮元素"},
-	{Key: "line", Label: "描边", Group: "surface", Desc: "主分隔线与控件描边"},
-	{Key: "line-soft", Label: "浅描边", Group: "surface", Desc: "卡片边、虚线等更弱的分隔"},
+	{Key: "paper-0", Label: "卡片底", Group: "surface", Type: themeTypePaint, Desc: "卡片、弹层等最亮表面"},
+	{Key: "paper-1", Label: "页面底", Group: "surface", Type: themeTypePaint, Desc: "整页背景"},
+	{Key: "paper-2", Label: "输入 / 浮层", Group: "surface", Type: themeTypePaint, Desc: "输入框、代码块、悬浮元素"},
+	{Key: "line", Label: "描边", Group: "surface", Type: themeTypeColor, Desc: "主分隔线与控件描边"},
+	{Key: "line-soft", Label: "浅描边", Group: "surface", Type: themeTypeColor, Desc: "卡片边、虚线等更弱的分隔"},
 
-	{Key: "ink-900", Label: "标题 / 正文", Group: "text", Desc: "最高对比度文字"},
-	{Key: "ink-700", Label: "次级正文", Group: "text"},
-	{Key: "ink-500", Label: "辅助文字", Group: "text", Desc: "说明、时间、标签"},
-	{Key: "ink-300", Label: "占位 / 弱信息", Group: "text", Desc: "placeholder、禁用态"},
+	{Key: "ink-900", Label: "标题 / 正文", Group: "text", Type: themeTypeColor, Desc: "最高对比度文字"},
+	{Key: "ink-700", Label: "次级正文", Group: "text", Type: themeTypeColor},
+	{Key: "ink-500", Label: "辅助文字", Group: "text", Type: themeTypeColor, Desc: "说明、时间、标签"},
+	{Key: "ink-300", Label: "占位 / 弱信息", Group: "text", Type: themeTypeColor, Desc: "placeholder、禁用态"},
 
-	{Key: "cinnabar", Label: "品牌主色", Group: "brand", Desc: "主按钮、链接、强调；透明度阶梯由此派生"},
-	{Key: "cinnabar-deep", Label: "主色按下 / 链接", Group: "brand", Desc: "浅色下更暗，深色下更亮"},
-	{Key: "cinnabar-soft", Label: "主色浅调", Group: "brand", Desc: "圆点、引用边、弱强调"},
-	{Key: "bamboo", Label: "成功色", Group: "brand", Desc: "成功提示、版块标识"},
-	{Key: "bamboo-deep", Label: "成功色深调", Group: "brand"},
-	{Key: "warning", Label: "警告色", Group: "brand", Desc: "警告提示；积分 / 收藏等暖金阶梯由此派生"},
+	{Key: "cinnabar", Label: "品牌主色", Group: "brand", Type: themeTypeColor, Desc: "主按钮、链接、强调；透明度阶梯由此派生"},
+	{Key: "cinnabar-deep", Label: "主色按下 / 链接", Group: "brand", Type: themeTypeColor, Desc: "浅色下更暗，深色下更亮"},
+	{Key: "cinnabar-soft", Label: "主色浅调", Group: "brand", Type: themeTypeColor, Desc: "圆点、引用边、弱强调"},
+	{Key: "bamboo", Label: "成功色", Group: "brand", Type: themeTypeColor, Desc: "成功提示、版块标识"},
+	{Key: "bamboo-deep", Label: "成功色深调", Group: "brand", Type: themeTypeColor},
+	{Key: "warning", Label: "警告色", Group: "brand", Type: themeTypeColor, Desc: "警告提示；积分 / 收藏等暖金阶梯由此派生"},
+
+	{Key: "gradient-brand", Label: "品牌渐变", Group: "gradient", Type: themeTypePaint, Desc: "主按钮背景；默认 none，配置后叠加在品牌色上"},
+	{Key: "gradient-page", Label: "页面渐变", Group: "gradient", Type: themeTypePaint, Desc: "整页背景；默认 none，配置后叠加在页面底色上"},
+
+	{Key: "radius-xs", Label: "迷你圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "标签内小按钮"},
+	{Key: "radius-sm", Label: "小圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "按钮、输入框"},
+	{Key: "radius", Label: "基础圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "控件默认"},
+	{Key: "radius-lg", Label: "卡片圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "卡片、面板"},
+	{Key: "radius-xl", Label: "弹层圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "弹窗、浮层"},
+
+	{Key: "shadow-sm", Label: "轻微阴影", Group: "depth", Type: themeTypeShadow, Desc: "卡片默认投影"},
+	{Key: "shadow", Label: "悬浮阴影", Group: "depth", Type: themeTypeShadow, Desc: "卡片 hover / 下拉"},
+	{Key: "shadow-md", Label: "浮层阴影", Group: "depth", Type: themeTypeShadow, Desc: "弹窗、抽屉"},
+}
+
+// themeTokenDefault - 非颜色 token 的默认值（各预设共用）
+//
+// 颜色 token 的默认值来自预设；圆角 / 阴影 / 渐变与配色无关，统一放在这里，
+// 避免在 5 套预设里重复 13 份。
+var themeTokenDefault = map[string]struct {
+	Light string
+	Dark  string
+}{
+	"gradient-brand": {"none", "none"},
+	"gradient-page":  {"none", "none"},
+
+	"radius-xs": {"6px", "6px"},
+	"radius-sm": {"8px", "8px"},
+	"radius":    {"10px", "10px"},
+	"radius-lg": {"14px", "14px"},
+	"radius-xl": {"18px", "18px"},
+
+	"shadow-sm": {"0 1px 2px rgba(50, 46, 38, 0.04)", "none"},
+	"shadow":    {"0 6px 20px rgba(50, 46, 38, 0.07)", "none"},
+	"shadow-md": {"0 14px 34px rgba(50, 46, 38, 0.1)", "none"},
 }
 
 // themePresets - 内置预设：每套都给出浅色 / 深色完整取值
@@ -231,11 +284,14 @@ func ThemePresets() []ThemePreset {
 // defaultThemeSettings - 默认配色（默认预设的浅色 / 深色完整取值）
 func defaultThemeSettings() ThemeSettings {
 	preset := themePreset(defaultThemePreset)
-	return ThemeSettings{
+	settings := ThemeSettings{
 		Preset: preset.Key,
 		Light:  themeClone(preset.Light),
 		Dark:   themeClone(preset.Dark),
+		Extras: map[string]string{},
 	}
+	themeFillDefaults(&settings)
+	return settings
 }
 
 // themePreset - 按 key 取预设，不存在时回退默认预设
@@ -261,6 +317,46 @@ func themeClone(source map[string]string) map[string]string {
 	return result
 }
 
+// themeFillDefaults - 给缺失的 token 补默认值（兼容旧版本保存的配置）
+func themeFillDefaults(settings *ThemeSettings) {
+	if settings.Light == nil {
+		settings.Light = map[string]string{}
+	}
+	if settings.Dark == nil {
+		settings.Dark = map[string]string{}
+	}
+	if settings.Extras == nil {
+		settings.Extras = map[string]string{}
+	}
+
+	for _, token := range themeTokens {
+		if settings.Light[token.Key] == "" {
+			settings.Light[token.Key] = themeTokenValue(nil, token, false)
+		}
+		if settings.Dark[token.Key] == "" {
+			settings.Dark[token.Key] = themeTokenValue(nil, token, true)
+		}
+	}
+}
+
+// themeTokenValue - 取 token 值，缺失时回退：非颜色 token 默认值 → 默认预设
+func themeTokenValue(values map[string]string, token ThemeToken, dark bool) string {
+	if value := strings.TrimSpace(values[token.Key]); value != "" {
+		return value
+	}
+	if item, ok := themeTokenDefault[token.Key]; ok {
+		if dark {
+			return item.Dark
+		}
+		return item.Light
+	}
+	preset := themePreset(defaultThemePreset)
+	if dark {
+		return preset.Dark[token.Key]
+	}
+	return preset.Light[token.Key]
+}
+
 // ThemeCurrent - 当前生效的配色（副本）
 func ThemeCurrent() ThemeSettings {
 	themeState.RLock()
@@ -269,6 +365,7 @@ func ThemeCurrent() ThemeSettings {
 		Preset: themeState.settings.Preset,
 		Light:  themeClone(themeState.settings.Light),
 		Dark:   themeClone(themeState.settings.Dark),
+		Extras: themeClone(themeState.settings.Extras),
 	}
 }
 
@@ -277,6 +374,13 @@ func ThemeCSS() (string, string) {
 	themeState.RLock()
 	defer themeState.RUnlock()
 	return themeState.css, themeState.etag
+}
+
+// ThemeVersion - 主题样式表版本（内容指纹，用于给 /theme-custom.css 加 ?v=）
+func ThemeVersion() string {
+	themeState.RLock()
+	defer themeState.RUnlock()
+	return strings.Trim(themeState.etag, `"`)
 }
 
 // ThemePayload - 后台「主题配色」页需要的全部数据
@@ -327,14 +431,14 @@ func themeStoredSettings() (ThemeSettings, bool) {
 		Limit(1).
 		Scan(&payload).Error; err == nil && strings.TrimSpace(payload) != "" {
 		if data := ParseConfigJson(payload); themeSettingsPayload(data) {
-			return normalizeThemeSettings(data["preset"], data["light"], data["dark"]), true
+			return normalizeThemeSettings(data["preset"], data["light"], data["dark"], data["extras"]), true
 		}
 	}
 
 	// 路径二：走 Find，并兼容 json 字段可能是 map / 字符串 / []byte 的差异
 	item, _ := facade.DB.Model(&Config{}).Where("key", ThemeConfigKey).Find()
 	if data := themeDecodeStored(item["json"]); themeSettingsPayload(data) {
-		return normalizeThemeSettings(data["preset"], data["light"], data["dark"]), true
+		return normalizeThemeSettings(data["preset"], data["light"], data["dark"], data["extras"]), true
 	}
 
 	return ThemeSettings{}, false
@@ -385,7 +489,7 @@ func SaveTheme(settings ThemeSettings) (ThemeSettings, error) {
 		return ThemeSettings{}, fmt.Errorf("站点尚未完成安装，无法保存主题配色")
 	}
 
-	normalized := normalizeThemeSettings(settings.Preset, settings.Light, settings.Dark)
+	normalized := normalizeThemeSettings(settings.Preset, settings.Light, settings.Dark, settings.Extras)
 
 	// 用 map 而不是直接编码结构体：与项目里其它配置写入保持一致，
 	// 也避免不同 JSON 库对结构体指针 / 空 map 的处理差异
@@ -393,6 +497,7 @@ func SaveTheme(settings ThemeSettings) (ThemeSettings, error) {
 		"preset": normalized.Preset,
 		"light":  normalized.Light,
 		"dark":   normalized.Dark,
+		"extras": normalized.Extras,
 	})
 
 	exist, _ := facade.DB.Model(&Config{}).WithTrashed().Where("key", ThemeConfigKey).Exist()
@@ -438,17 +543,19 @@ func ResetTheme() (ThemeSettings, error) {
 //
 // 任何非法值（空、超长、含 ; { } 等可能破坏 CSS 的字符）都会被丢弃并回退到预设值，
 // 保证最终生成的样式表一定可用。
-func normalizeThemeSettings(presetKey any, light any, dark any) ThemeSettings {
+func normalizeThemeSettings(presetKey any, light any, dark any, extras any) ThemeSettings {
 	preset := themePreset(strings.TrimSpace(cast.ToString(presetKey)))
 
 	result := ThemeSettings{
 		Preset: preset.Key,
 		Light:  themeClone(preset.Light),
 		Dark:   themeClone(preset.Dark),
+		Extras: themeExtras(extras),
 	}
 
 	themeApplyOverrides(result.Light, themeOverrides(light))
 	themeApplyOverrides(result.Dark, themeOverrides(dark))
+	themeFillDefaults(&result)
 
 	return result
 }
@@ -483,10 +590,77 @@ func themeApplyOverrides(target map[string]string, overrides map[string]any) {
 		if value == "" {
 			continue
 		}
-		if !themeColorValid(value) {
+		if !themeValueValid(token.Type, value) {
 			continue
 		}
 		target[token.Key] = value
+	}
+}
+
+// themeExtras - 规范化自由 CSS 变量（key 去 -- 前缀、校验、去重）
+func themeExtras(value any) map[string]string {
+	result := map[string]string{}
+	for key, val := range themeOverrides(value) {
+		name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(cast.ToString(key))), "--")
+		name = strings.TrimPrefix(name, "--")
+		if !themeExtraKeyValid(name) {
+			continue
+		}
+		if themeTokenExists(name) {
+			continue
+		}
+		text := strings.TrimSpace(cast.ToString(val))
+		if !themeExtraValueValid(text) {
+			continue
+		}
+		result[name] = text
+	}
+	return result
+}
+
+var themeExtraKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
+
+func themeExtraKeyValid(key string) bool {
+	return themeExtraKeyPattern.MatchString(key)
+}
+
+func themeTokenExists(key string) bool {
+	for _, token := range themeTokens {
+		if token.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func themeExtraValueValid(value string) bool {
+	if value == "" || len(value) > 200 {
+		return false
+	}
+	if strings.ContainsAny(value, ";{}<>\"'\\") {
+		return false
+	}
+	return !strings.Contains(strings.ToLower(value), "url(")
+}
+
+// themeValueValid - 按 token 类型校验取值
+func themeValueValid(tokenType string, value string) bool {
+	if value == "" || len(value) > 200 {
+		return false
+	}
+	if strings.ContainsAny(value, ";{}<>\"'\\") {
+		return false
+	}
+
+	switch tokenType {
+	case themeTypePaint:
+		return value == "none" || themeColorValid(value) || themeGradientValid(value)
+	case themeTypeLength:
+		return themeLengthValid(value)
+	case themeTypeShadow:
+		return themeShadowValid(value)
+	default:
+		return themeColorValid(value)
 	}
 }
 
@@ -528,6 +702,98 @@ func themeColorValid(value string) bool {
 	return lower != ""
 }
 
+// themeGradientValid - 渐变校验（只接受 gradient 函数，禁止 url()）
+func themeGradientValid(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+
+	allowed := []string{
+		"linear-gradient(", "radial-gradient(", "conic-gradient(",
+		"repeating-linear-gradient(", "repeating-radial-gradient(",
+	}
+
+	matched := false
+	for _, prefix := range allowed {
+		if strings.HasPrefix(lower, prefix) && strings.HasSuffix(lower, ")") {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+
+	return !strings.Contains(lower, "url(")
+}
+
+var themeLengthPattern = regexp.MustCompile(`^(0|-?[0-9]+(\.[0-9]+)?(px|rem|em|%|vh|vw|vmin|vmax|pt|ch))$`)
+
+func themeLengthValid(value string) bool {
+	return themeLengthPattern.MatchString(strings.TrimSpace(strings.ToLower(value)))
+}
+
+// themeShadowValid - 阴影校验
+//
+// 支持 none、单段 / 多段阴影；每段至少要有 2 个长度值（x y），颜色段可选，
+// 允许 inset。只做结构上的宽松校验，重点是挡住 ; { } 这类会截断样式表的字符。
+func themeShadowValid(value string) bool {
+	lower := strings.TrimSpace(strings.ToLower(value))
+	if lower == "none" {
+		return true
+	}
+	if strings.Contains(lower, "url(") {
+		return false
+	}
+
+	// 按顶层逗号分段：rgba(0, 0, 0, 0.12) 内部的逗号不能切开
+	for _, part := range themeSplitTopLevel(lower) {
+		lengths := 0
+		for _, field := range strings.Fields(part) {
+			if field == "inset" {
+				continue
+			}
+			if themeLengthValid(field) {
+				lengths++
+			}
+		}
+		if lengths < 2 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// themeSplitTopLevel - 按顶层逗号拆分（忽略括号内的逗号）
+func themeSplitTopLevel(text string) []string {
+	var result []string
+	var current strings.Builder
+	depth := 0
+
+	for _, char := range text {
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				if item := strings.TrimSpace(current.String()); item != "" {
+					result = append(result, item)
+				}
+				current.Reset()
+				continue
+			}
+		}
+		current.WriteRune(char)
+	}
+
+	if item := strings.TrimSpace(current.String()); item != "" {
+		result = append(result, item)
+	}
+
+	return result
+}
+
 // buildThemeCSS - 生成覆盖 styles.css 的样式表（浅色 + 深色）
 func buildThemeCSS(settings ThemeSettings) (string, string) {
 	var builder strings.Builder
@@ -539,9 +805,9 @@ func buildThemeCSS(settings ThemeSettings) (string, string) {
 	// 主题产物里的 styles.css 也定义了 :root，两者特异性相同，谁后加载谁生效；
 	// 而 <link> 在 head 里的位置会随构建 / 模板变化。把本文件的特异性顶到 (0,2,0)，
 	// 就能与加载顺序无关地稳定覆盖默认值。深色块再多一个属性选择器，保证压过浅色块。
-	builder.WriteString(themeBlock(":root:root", settings.Light, false))
+	builder.WriteString(themeBlock(":root:root", settings, false))
 	builder.WriteString("\n")
-	builder.WriteString(themeBlock(":root:root[data-theme='dark']", settings.Dark, true))
+	builder.WriteString(themeBlock(":root:root[data-theme='dark']", settings, true))
 
 	css := builder.String()
 
@@ -553,52 +819,77 @@ func buildThemeCSS(settings ThemeSettings) (string, string) {
 }
 
 // themeBlock - 生成一个作用域的变量块
-func themeBlock(selector string, values map[string]string, dark bool) string {
+func themeBlock(selector string, settings ThemeSettings, dark bool) string {
 	var builder strings.Builder
+
+	values := settings.Light
+	preset := themePreset(settings.Preset)
+	if dark {
+		values = settings.Dark
+	}
 
 	builder.WriteString(selector)
 	builder.WriteString(" {\n")
 
 	for _, token := range themeTokens {
-		value := values[token.Key]
-		if value == "" {
-			value = themePreset(defaultThemePreset).Light[token.Key]
-		}
-		fmt.Fprintf(&builder, "  --%s: %s;\n", token.Key, value)
+		fmt.Fprintf(&builder, "  --%s: %s;\n", token.Key, themeTokenValue(values, token, dark))
 	}
 
-	// 主色透明度阶梯：按钮浅底、焦点环、高亮都从这里取
+	// 主色透明度阶梯：按钮浅底、焦点环、高亮都从这里取。
+	// 主色被填成渐变 / 非法值时，退回预设主色算 rgba（渐变没法直接取 RGB）。
+	primary := themeTokenValue(values, themeTokenByKey("cinnabar"), dark)
+	primaryFallback := preset.Light["cinnabar"]
+	if dark {
+		primaryFallback = preset.Dark["cinnabar"]
+	}
 	alpha := []string{"0.06", "0.12", "0.2", "0.38"}
 	if dark {
 		alpha = []string{"0.1", "0.18", "0.3", "0.45"}
 	}
 	for index, name := range []string{"accent-wash", "accent-soft", "accent-ring", "accent-glow"} {
-		fmt.Fprintf(&builder, "  --%s: %s;\n", name, themeRGBA(values["cinnabar"], alpha[index]))
+		fmt.Fprintf(&builder, "  --%s: %s;\n", name, themeRGBA(primary, alpha[index], primaryFallback))
 	}
 
 	// 暖金阶梯：积分 / 收藏等辅助强调，取警告色
+	warning := themeTokenValue(values, themeTokenByKey("warning"), dark)
+	warningFallback := preset.Light["warning"]
+	if dark {
+		warningFallback = preset.Dark["warning"]
+	}
 	goldAlpha := []string{"0.1", "0.16", "0.32"}
 	if dark {
 		goldAlpha = []string{"0.12", "0.18", "0.34"}
 	}
 	for index, name := range []string{"gold-wash", "gold-soft", "gold-line"} {
-		fmt.Fprintf(&builder, "  --%s: %s;\n", name, themeRGBA(values["warning"], goldAlpha[index]))
+		fmt.Fprintf(&builder, "  --%s: %s;\n", name, themeRGBA(warning, goldAlpha[index], warningFallback))
 	}
 
 	// 半透明浮层底：浅色取卡片底，深色取页面底（与 styles.css 原口径一致）
-	overlay := values["paper-0"]
+	overlayKey := "paper-0"
 	if dark {
-		overlay = values["paper-1"]
+		overlayKey = "paper-1"
 	}
-	fmt.Fprintf(&builder, "  --bg-overlay: %s;\n", themeRGBA(overlay, "0.86"))
+	overlay := themeTokenValue(values, themeTokenByKey(overlayKey), dark)
+	overlayFallback := preset.Light[overlayKey]
+	if dark {
+		overlayFallback = preset.Dark[overlayKey]
+	}
+	fmt.Fprintf(&builder, "  --bg-overlay: %s;\n", themeRGBA(overlay, "0.86", overlayFallback))
 
 	// 深色下的开关滑块：用最高对比度文字色，避免纯白滑块与暖色底脱节
 	if dark {
-		knob := values["ink-900"]
-		if knob == "" {
-			knob = "#ece6da"
-		}
+		knob := themeTokenValue(values, themeTokenByKey("ink-900"), true)
 		fmt.Fprintf(&builder, "  --switch-knob: %s;\n", knob)
+	}
+
+	// 自由 CSS 变量：排序后输出，保证 ETag 稳定
+	keys := make([]string, 0, len(settings.Extras))
+	for key := range settings.Extras {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(&builder, "  --%s: %s;\n", key, settings.Extras[key])
 	}
 
 	builder.WriteString("}\n")
@@ -606,13 +897,25 @@ func themeBlock(selector string, values map[string]string, dark bool) string {
 	return builder.String()
 }
 
-// themeRGBA - 把颜色转成带透明度的 rgba()；解析失败时给一个中性灰兜底
-func themeRGBA(value string, alpha string) string {
-	red, green, blue, ok := themeParseHex(value)
-	if !ok {
-		return "rgba(128, 128, 128, " + alpha + ")"
+// themeTokenByKey - 按 key 找 token（找不到返回零值，themeTokenValue 会回退默认预设）
+func themeTokenByKey(key string) ThemeToken {
+	for _, token := range themeTokens {
+		if token.Key == key {
+			return token
+		}
 	}
-	return fmt.Sprintf("rgba(%d, %d, %d, %s)", red, green, blue, alpha)
+	return ThemeToken{Key: key}
+}
+
+// themeRGBA - 把颜色转成带透明度的 rgba()；解析失败时用 fallback 再试，最后给中性灰
+func themeRGBA(value string, alpha string, fallback string) string {
+	if red, green, blue, ok := themeParseHex(value); ok {
+		return fmt.Sprintf("rgba(%d, %d, %d, %s)", red, green, blue, alpha)
+	}
+	if red, green, blue, ok := themeParseHex(fallback); ok {
+		return fmt.Sprintf("rgba(%d, %d, %d, %s)", red, green, blue, alpha)
+	}
+	return "rgba(128, 128, 128, " + alpha + ")"
 }
 
 // themeParseHex - 解析 #rgb / #rrggbb / #rrggbbaa 为 RGB
@@ -660,6 +963,7 @@ func InitTheme() {
 				"preset": settings.Preset,
 				"light":  settings.Light,
 				"dark":   settings.Dark,
+				"extras": settings.Extras,
 			}),
 			Remark: "主题配色（设计 token，浅色/深色两套）",
 		}); err != nil {
