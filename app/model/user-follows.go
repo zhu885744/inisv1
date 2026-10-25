@@ -75,33 +75,65 @@ func (this *UserFollows) followUser(wg *sync.WaitGroup, result *any, uid int) {
 }
 
 func (this *UserFollows) Follow(uid, followUid int) error {
-	if uid == followUid {
-		return errors.New("不能关注自己！")
+	_, err := this.FollowWith(uid, followUid, "")
+	return err
+}
+
+// FollowWith - 关注（可附带描述），返回关注记录 id
+//
+// 同一个 (uid, follow_uid) 始终只有一条记录：
+//   - 已有记录（含软删除 / status=0）→ 恢复并置 status=1，description 非空才覆盖
+//   - 没有记录 → 新建
+//
+// 注意：不要绕过这里直接 Create，否则重复关注会插入多行，
+// 导致关注数、互关判定、二度人脉推荐被重复数据放大。
+func (this *UserFollows) FollowWith(uid, followUid int, description string) (int, error) {
+
+	if uid <= 0 || followUid <= 0 {
+		return 0, errors.New("用户ID不能为空！")
 	}
 
-	var exist []UserFollows
-	facade.DB.Model(&exist).
+	if uid == followUid {
+		return 0, errors.New("不能关注自己！")
+	}
+
+	// 只取 id 列：避免 AfterFind 为每条记录额外查询两个用户信息
+	column, _ := facade.DB.Model(&[]UserFollows{}).
 		WithTrashed().
 		Where([]any{
 			[]any{"uid", "=", uid},
 			[]any{"follow_uid", "=", followUid},
-		}).Select()
+		}).Column("id")
+
+	exist := cast.ToIntSlice(column)
 
 	if len(exist) > 0 {
-		facade.DB.Model(&UserFollows{}).Restore(exist[0].Id)
+		facade.DB.Model(&UserFollows{}).Restore(exist[0])
+
+		update := map[string]any{"status": 1}
+		if description != "" {
+			update["description"] = description
+		}
+
 		_, err := facade.DB.Model(&UserFollows{}).
-			Where("id", exist[0].Id).
-			UpdateColumn("status", 1)
-		return err
+			Where("id", exist[0]).
+			Update(update)
+
+		return exist[0], err
 	}
 
-	_, err := facade.DB.Model(&UserFollows{}).Create(&UserFollows{
-		Uid:       uid,
-		FollowUid: followUid,
-		Status:    1,
-	})
+	table := UserFollows{
+		Uid:         uid,
+		FollowUid:   followUid,
+		Status:      1,
+		Description: description,
+	}
 
-	return err
+	if _, err := facade.DB.Model(&table).Create(&table); err != nil {
+		return 0, err
+	}
+
+	return table.Id, nil
 }
 
 func (this *UserFollows) Unfollow(uid, followUid int) error {

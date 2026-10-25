@@ -61,6 +61,7 @@ func (this *UserLikes) IGET(ctx *gin.Context) {
 		"is-liked": this.isLiked,
 		"likes":    this.likes,
 		"counts":   this.counts,
+		"states":   this.states,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -307,6 +308,20 @@ func (this *UserLikes) create(ctx *gin.Context) {
 		if utils.In.Array(key, userLikesAllowFieldsSlice) {
 			utils.Struct.Set(&table, key, val)
 		}
+	}
+
+	// 幂等：同一用户对同一对象只能有一条点赞记录
+	//
+	// like 接口走 model.UserLikes.Like 已经判过重，但这里是裸的通用 create，
+	// 直接 POST /api/user-likes/create 能绕过去重 —— 重复插入把点赞数刷上去。
+	exists, _ := facade.DB.Model(&model.UserLikes{}).
+		Where("uid", uid).
+		Where("target_type", table.TargetType).
+		Where("target_id", table.TargetId).
+		Count()
+	if exists > 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "已经点赞过了！"), 400)
+		return
 	}
 
 	_, err := facade.DB.Model(&table).Create(&table)
@@ -867,6 +882,55 @@ func (this *UserLikes) counts(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"counts": counts}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// states 批量点赞状态（列表页专用）
+//
+// 一次返回「整页内容」的 is_liked + count，替代前端对每张卡片各调一次 is-liked。
+// 未登录时 is_liked 一律为 false，count 照常返回（游客也要看到点赞数）。
+func (this *UserLikes) states(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	if utils.Is.Empty(params["target_type"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_type"), 400)
+		return
+	}
+
+	if utils.Is.Empty(params["target_ids"]) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_ids"), 400)
+		return
+	}
+
+	targetType := cast.ToString(params["target_type"])
+	targetIds := cast.ToIntSlice(utils.Unity.Ids(params["target_ids"]))
+	if len(targetIds) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_ids"), 400)
+		return
+	}
+
+	// 上限保护：列表一页最多几百条，超出直接截断，避免被当成全表统计
+	const maxStates = 200
+	if len(targetIds) > maxStates {
+		targetIds = targetIds[:maxStates]
+	}
+
+	counts := (&model.UserLikes{}).GetLikesCounts(targetType, targetIds)
+
+	liked := map[int]bool{}
+	if uid := this.meta.user(ctx).Id; uid > 0 {
+		liked = (&model.UserLikes{}).LikedTargetIds(uid, targetType, targetIds)
+	}
+
+	// key 必须是字符串，JSON 对象的键不支持 int
+	result := make(map[string]any, len(targetIds))
+	for _, id := range targetIds {
+		result[cast.ToString(id)] = gin.H{
+			"is_liked": liked[id],
+			"count":    counts[id],
+		}
+	}
+
+	this.json(ctx, gin.H{"states": result}, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 // truncateSafe 按字符(rune)数截断字符串，超长时追加省略号

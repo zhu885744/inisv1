@@ -205,6 +205,30 @@ func (this *UserLikes) GetUserLikesCount(uid int) int64 {
 	return count
 }
 
+// LikedTargetIds - 批量判断「当前用户点赞过哪些 target」（一次 IN 查询）
+//
+// 列表页过去对每张卡片各调一次 is-liked，一页 20 条就是 20 次往返；
+// 配合 GetLikesCounts 即可一次拿到整页的「是否已赞 + 点赞数」。
+func (this *UserLikes) LikedTargetIds(uid int, targetType string, targetIds []int) map[int]bool {
+	result := make(map[int]bool)
+	if uid <= 0 || targetType == "" || len(targetIds) == 0 {
+		return result
+	}
+
+	var ids []int
+	facade.DB.Drive().Model(&UserLikes{}).
+		Where("uid = ?", uid).
+		Where("target_type = ?", targetType).
+		Where("target_id IN ?", targetIds).
+		Pluck("target_id", &ids)
+
+	for _, id := range ids {
+		result[id] = true
+	}
+
+	return result
+}
+
 func (this *UserLikes) GetLikesCounts(targetType string, targetIds []int) map[int]int64 {
 	result := make(map[int]int64)
 	if len(targetIds) == 0 || targetType == "" {

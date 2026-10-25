@@ -387,6 +387,49 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 ---
 
+#### 1.12 批量查询点赞状态 [业务接口]
+
+- **路径**: `/api/user-likes/states`
+- **方法**: `GET`
+- **描述**: 一次拿到整页内容的「是否已点赞 + 点赞数」，供列表页替代逐条调用 1.9
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
+| `target_ids` | string | **是** | 目标ID列表，逗号分隔，单次最多 200 个 |
+
+**成功响应** (200):
+```json
+{
+    "code": 200,
+    "msg": "查询成功！",
+    "data": {
+        "states": {
+            "1": { "is_liked": true, "count": 10 },
+            "2": { "is_liked": false, "count": 5 }
+        }
+    }
+}
+```
+
+**使用示例**:
+```
+GET /api/user-likes/states?target_type=article&target_ids=1,2,3
+```
+
+**说明**:
+
+- 未登录时 `is_liked` 一律为 `false`，`count` 照常返回（游客也要看到点赞数）；
+- 与 1.11 的区别：`counts` 只给数量，`states` 额外带当前用户的点赞状态，
+  一次请求顶替前端 1.9 + 1.11 的 N 次调用；
+- 只返回请求里出现过的 id，缺失的 id 视为 0 赞。
+
+**权限说明**: 公共接口，无需登录
+
+---
+
 ### 2. POST 请求接口
 
 #### 2.1 保存点赞 [基础接口-保存数据]

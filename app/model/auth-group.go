@@ -153,9 +153,16 @@ func EnsureAuthGroups() {
 	// 维护任务：任何异常都不应影响服务启动
 	defer func() {
 		if err := recover(); err != nil {
-			facade.Log.Error(map[string]any{"error": err}, "补齐系统内置权限分组时发生panic")
+			if facade.Log != nil {
+				facade.Log.Error(map[string]any{"error": err}, "补齐系统内置权限分组时发生panic")
+			}
 		}
 	}()
+
+	// 数据库还没初始化（未安装 / 连接失败）：跳过，别在 nil 上操作
+	if facade.DB == nil {
+		return
+	}
 
 	for _, builtin := range builtinAuthGroups {
 		// WithTrashed：回收站里的同名分组也算「已存在」，不重复播种

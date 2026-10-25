@@ -123,10 +123,20 @@ func (this *Users) AfterFind(tx *gorm.DB) (err error) {
 // AfterSave - 保存后的Hook（包括 create update）
 func (this *Users) AfterSave(tx *gorm.DB) (err error) {
 
-	// 同步替换头像域名（原为异步 goroutine，存在事务连接复用与数据竞争风险）
-	this.Avatar = utils.Replace(this.Avatar, DomainTemp2())
-	if err := tx.Model(this).UpdateColumn("avatar", this.Avatar).Error; err != nil {
-		facade.Log.Error(map[string]any{"error": err, "id": this.Id}, "头像域名替换失败")
+	// 只在本条 SQL 真的写入了 avatar 时才回写域名模板。
+	//
+	// 为什么必须判断：登录、状态变更、经验结算等流程都会更新 users，这些路径上的
+	// this.Avatar 常常来自 AfterFind 的「空头像推导」（QQ 邮箱 → qlogo 地址）。
+	// 无条件回写等于把推导结果持久化 —— 用户明明没设置头像，库里却多出一个 QQ 头像链接；
+	// 手动设置过头像的用户，也会在下一次无关更新时被这个推导值覆盖回去。
+	//
+	// create 时 Changed 恒为 false（gorm 拿字段值和自身比较），所以显式放行 INSERT。
+	isCreate := tx.Statement.SQL.Len() > 0 && strings.HasPrefix(strings.ToUpper(tx.Statement.SQL.String()), "INSERT")
+	if isCreate || tx.Statement.Changed("Avatar") {
+		this.Avatar = utils.Replace(this.Avatar, DomainTemp2())
+		if err := tx.Model(this).UpdateColumn("avatar", this.Avatar).Error; err != nil {
+			facade.Log.Error(map[string]any{"error": err, "id": this.Id}, "头像域名替换失败")
+		}
 	}
 
 	if !utils.Is.Empty(this.Account) {
@@ -238,6 +248,7 @@ func (this *Users) Rules(uid any) (slice []any) {
 //   - following : 仅公开关注列表
 //   - followers : 仅公开粉丝列表
 //   - none      : 全部私密
+//
 // collects: 是否公开我的收藏（1 公开 / 0 私密，默认 0）
 // likes: 是否公开我的点赞（1 公开 / 0 私密，默认 0）
 type UserPrivacySetting struct {
@@ -286,10 +297,10 @@ func (this *Users) result() (result map[string]any) {
 	wg.Wait()
 
 	return map[string]any{
-		"auth":     auth,
-		"level":    level,
-		"ban":      ban,
-		"setting":  this.userSetting(),
+		"auth":    auth,
+		"level":   level,
+		"ban":     ban,
+		"setting": this.userSetting(),
 	}
 }
 
@@ -547,6 +558,46 @@ func GetUserJson(uid any) map[string]any {
 	}
 
 	return map[string]any{}
+}
+
+// UserJsonSelfKeys - 普通用户可以通过 /users/update 自行修改的 users.json 键
+//
+// 白名单里放「用户自己的资料 / 偏好」，其余键一律不允许用户直写：
+//   - privacy：隐私设置（关注 / 收藏 / 点赞可见性）
+//   - cover：个人主页顶部封面（图片或颜色）
+//   - website：个人主页展示的个人网站
+//
+// 而 decorations（装扮佩戴）与 wearing_badge（勋章佩戴）是「已拥有物品」的渲染结果，
+// 只能由佩戴接口在完成拥有校验后写入（WearDecoration / WearBadge）。
+// 若不设白名单，用户只要提交 {"json": {"decorations": {"title": 99}}}
+// 就能白拿任意付费头衔、头像框和勋章 —— 等于绕过整个商城。
+var UserJsonSelfKeys = []any{"privacy", "cover", "website"}
+
+// MergeUserJsonPatch - 把用户提交的 json 补丁合并进现有 json（返回可写库的 JSON 字符串）
+//
+// 两点约束：
+//  1. 合并而非覆盖：一次改隐私设置不应该把佩戴的装扮、勋章一起抹掉；
+//  2. 非管理员只允许改 UserJsonSelfKeys 里的键，其余键原样保留。
+//
+// patch 既接受 map，也接受 JSON 字符串（前端两种传法都有）。
+func MergeUserJsonPatch(uid any, patch any, isAdmin bool) string {
+	jsonMap := GetUserJson(uid)
+
+	patchMap := cast.ToStringMap(patch)
+	if len(patchMap) == 0 {
+		if decoded, ok := utils.Json.Decode(cast.ToString(patch)).(map[string]any); ok {
+			patchMap = decoded
+		}
+	}
+
+	for key, val := range patchMap {
+		if !isAdmin && !utils.In.Array(key, UserJsonSelfKeys) {
+			continue
+		}
+		jsonMap[key] = val
+	}
+
+	return utils.Json.Encode(jsonMap)
 }
 
 // UpdateUserJson - 合并写入 users.json（保留未涉及的键），并清理该用户的缓存

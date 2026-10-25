@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"inis/config"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,9 +19,12 @@ var socket = websocket.Upgrader{
 	ReadBufferSize: 1024,
 	// 写入存储空间大小
 	WriteBufferSize: 1024,
-	// 允许跨域
+	// 来源校验：默认要求与请求同源，跨域部署请在 socket.allowed_origins 里显式放行
+	//
+	// 这里以前恒 return true：任意站点都能用浏览器连上来，
+	// 配合「无 token 也放行」的握手，等于允许跨站窃听广播消息。
 	CheckOrigin: func(request *http.Request) bool {
-		return true
+		return Hub.IsOriginAllowed(request.Header.Get("Origin"), request.Host)
 	},
 }
 
@@ -232,8 +237,8 @@ var Hub = func() *hub {
 		},
 		security: &securityConfig{
 			blacklistedIPs:    make(map[string]bool),
-			allowedOrigins:    []string{},
-			enableOriginCheck: false,
+			allowedOrigins:    cast.ToStringSlice(getSocketConfig("allowed_origins", []any{})),
+			enableOriginCheck: cast.ToBool(getSocketConfig("enable_origin_check", true)),
 			maxMessageSize:    cast.ToInt(getSocketConfig("max_message_size", 1024*1024)),
 		},
 	}
@@ -480,16 +485,34 @@ func (hub *hub) RemoveAllowedOrigin(origin string) {
 	}
 }
 
-func (hub *hub) IsOriginAllowed(origin string) bool {
+// IsOriginAllowed - 是否允许该来源建立 WebSocket 连接
+//
+// 规则：
+//  1. 没有 Origin 头 → 放行（curl / 服务端互调等非浏览器客户端）
+//  2. 显式关闭校验（socket.enable_origin_check = false）→ 放行，兼容已有反代方案
+//  3. 命中 socket.allowed_origins 白名单（支持 "*"）→ 放行
+//  4. 其余要求 Origin 的 host 与请求 Host 同源
+func (hub *hub) IsOriginAllowed(origin, host string) bool {
+	if origin == "" {
+		return true
+	}
+
 	if !hub.security.enableOriginCheck {
 		return true
 	}
-	for _, o := range hub.security.allowedOrigins {
-		if o == origin || o == "*" {
+
+	for _, item := range hub.security.allowedOrigins {
+		if item == "*" || strings.EqualFold(item, origin) {
 			return true
 		}
 	}
-	return false
+
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	return strings.EqualFold(parsed.Host, host)
 }
 
 func (hub *hub) ValidateMessage(message []byte) (bool, string) {

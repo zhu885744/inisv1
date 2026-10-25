@@ -42,6 +42,53 @@ func sanitizeColumn(field any) string {
 	return name
 }
 
+// orderSegmentRegex - 单个排序片段：字段名 + 可选方向（asc / desc，大小写不敏感）
+var orderSegmentRegex = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?)(\s+(?i:asc|desc))?$`)
+
+// sanitizeOrder - 校验 ORDER BY 表达式，防止 SQL 注入；非法内容整段丢弃
+//
+// 只放行「字段名 [asc|desc]」，多个用逗号分隔（如 sort desc, id asc）。
+// 子查询、函数调用、CASE、sleep() 之类一律丢掉 —— 免登录接口的 order 参数
+// 一旦拼进 SQL，就是现成的时间盲注（order=(select 1 from (select sleep(5))x)）。
+func sanitizeOrder(order any) string {
+	var raw string
+
+	switch value := order.(type) {
+	case []string:
+		raw = strings.Join(value, ",")
+	case []any:
+		parts := make([]string, 0, len(value))
+		for _, item := range value {
+			parts = append(parts, cast.ToString(item))
+		}
+		raw = strings.Join(parts, ",")
+	default:
+		raw = cast.ToString(order)
+	}
+
+	segments := make([]string, 0, 2)
+	for _, part := range strings.Split(raw, ",") {
+		segment := strings.TrimSpace(part)
+		if segment == "" {
+			continue
+		}
+
+		match := orderSegmentRegex.FindStringSubmatch(segment)
+		if match == nil {
+			continue
+		}
+
+		direction := strings.ToLower(strings.TrimSpace(match[3]))
+		if direction == "" {
+			direction = "asc"
+		}
+
+		segments = append(segments, match[1]+" "+direction)
+	}
+
+	return strings.Join(segments, ", ")
+}
+
 // sanitizeOperator - 校验操作符合法性，非法操作符返回空字符串
 func sanitizeOperator(op any) string {
 	operator := strings.ToUpper(strings.TrimSpace(cast.ToString(op)))
@@ -861,14 +908,38 @@ func (this *ModelStruct) OnlyTrashed(yes ...any) *ModelStruct {
 }
 
 // Order - 排序
+//
+// 字段名一律走 sanitizeOrder 清洗：控制器里普遍是 Order(params["order"])，
+// order 来自 URL 查询参数（其中不少接口免登录），裸拼进去就是 SQL 注入。
 func (this *ModelStruct) Order(args ...any) *ModelStruct {
-	if len(args) > 0 {
-		if utils.Is.Empty(args[0]) {
-			return this
-		}
-		this.order = args[0]
-		this.model.Order(args[0])
+	if len(args) == 0 {
+		return this
 	}
+
+	order := sanitizeOrder(args[0])
+	if order == "" {
+		return this
+	}
+
+	this.order = order
+	this.model.Order(order)
+
+	return this
+}
+
+// OrderRaw - 内部可信排序表达式（不走 sanitizeOrder 白名单）
+//
+// 仅供拼装好的内部表达式使用（如「置顶优先」的 (id IN (1,2)) DESC）。
+// 参数必须来自代码常量或已校验的整数，绝不能把请求参数直接传进来 ——
+// 用户可控的排序一律走 Order。
+func (this *ModelStruct) OrderRaw(order string) *ModelStruct {
+	if strings.TrimSpace(order) == "" {
+		return this
+	}
+
+	this.order = order
+	this.model.Order(order)
+
 	return this
 }
 

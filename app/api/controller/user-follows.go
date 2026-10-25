@@ -17,12 +17,12 @@ type UserFollows struct {
 }
 
 const (
-	userFollowsAllowFields = "follow_uid,state,description"
-	userFollowsAllowQuery  = "id,uid,follow_uid,state"
+	userFollowsAllowFields = "follow_uid,status,description"
+	userFollowsAllowQuery  = "id,uid,follow_uid,status"
 )
 
-var userFollowsAllowFieldsSlice = []any{"follow_uid", "state", "description"}
-var userFollowsAllowQuerySlice = []any{"id", "uid", "follow_uid", "state"}
+var userFollowsAllowFieldsSlice = []any{"follow_uid", "status", "description"}
+var userFollowsAllowQuerySlice = []any{"id", "uid", "follow_uid", "status"}
 
 func (this *UserFollows) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
@@ -308,21 +308,16 @@ func (this *UserFollows) create(ctx *gin.Context) {
 		return
 	}
 
-	table := model.UserFollows{Uid: uid}
-	for key, val := range params {
-		if utils.In.Array(key, userFollowsAllowFieldsSlice) {
-			utils.Struct.Set(&table, key, val)
-		}
-	}
-
-	_, err := facade.DB.Model(&table).Create(&table)
+	// 走模型层的关注逻辑：同一个 (uid, follow_uid) 复用已有记录（含软删除），
+	// 不直接 Create，避免重复关注插入多行
+	id, err := (&model.UserFollows{}).FollowWith(uid, followUid, cast.ToString(params["description"]))
 
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
 	}
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "创建成功！"), 200)
+	this.json(ctx, gin.H{"id": id}, facade.Lang(ctx, "创建成功！"), 200)
 }
 
 func (this *UserFollows) update(ctx *gin.Context) {

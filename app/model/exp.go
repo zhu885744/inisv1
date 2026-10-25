@@ -168,6 +168,21 @@ func (this *EXP) Add(table EXP) (err error) {
 		if exist {
 			// 已经对该对象操作过，不增加经验值，但操作可以继续
 			canAddExp = false
+			break
+		}
+
+		// 只按对象去重是不够的：换个 bind_id 就能接着加。
+		// 以 share 为例，登录用户遍历 article id 1..N 挨个「分享」，
+		// 每次都能拿到经验值（配置里的 daily_limit 形同虚设）。
+		// 这里再按「当天该类型的总条数」兜一道每日上限。
+		count, _ := facade.DB.Model(&EXP{}).Where([]any{
+			[]any{"uid", "=", table.Uid},
+			[]any{"type", "=", table.Type},
+			[]any{"create_time", ">=", today.Unix()},
+		}).Count()
+
+		if count >= cast.ToInt64(expConfig[table.Type]["daily_limit"]) {
+			canAddExp = false
 		}
 	default:
 		count, _ := facade.DB.Model(&EXP{}).Where([]any{

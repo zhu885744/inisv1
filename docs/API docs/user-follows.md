@@ -555,16 +555,17 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 - **路径**: `/api/user-follows/create`
 - **方法**: `POST`
-- **描述**: 新增关注记录。注意：不能关注自己
+- **描述**: 新增关注记录。注意：不能关注自己。**幂等**：与 `follow` 共用同一套逻辑，
+  同一对 `(uid, follow_uid)` 只会有一条记录，已存在（含已取消 / 软删除）时复用并置 `status=1`，不会新增行
 
 **请求参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `uid` | int | 否 | 用户ID（管理员） |
+| `uid` | int | 否 | 忽略，固定取当前登录用户 |
 | `follow_uid` | int | **是** | 被关注用户ID |
-| `status` | int | 否 | 状态，默认1 |
-| `description` | string | 否 | 描述 |
+| `status` | int | 否 | 忽略，创建后固定为 `1`（取消请用 `unfollow`） |
+| `description` | string | 否 | 描述，非空时覆盖已有记录的描述 |
 
 **成功响应** (200):
 ```json
@@ -823,6 +824,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 - **粉丝列表 (followers)**: 哪些用户关注了当前用户
 
 ### 6. 关注/取消关注特性
-- 关注不检查重复，重复关注直接返回成功
-- 取消关注不检查是否存在记录，直接更新状态返回成功
+- 关注是**幂等**的：同一对 `(uid, follow_uid)` 复用同一条记录，重复关注只把 `status` 置回 `1`，
+  不会插入新行（`create` 同样如此），因此关注数 / 互关判定不会被重复数据放大
+- 取消关注只把 `status` 置 `0`，不删除记录；不检查是否存在记录，直接返回成功
 - unfollow 同时支持 POST 和 PUT 两种请求方式

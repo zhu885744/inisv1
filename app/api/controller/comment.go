@@ -201,6 +201,7 @@ func (this *Comment) IGET(ctx *gin.Context) {
 		"max":    this.max,
 		"rand":   this.rand,
 		"count":  this.count,
+		"counts": this.counts,
 		"column": this.column,
 		"flat":   this.flat,
 	}
@@ -404,7 +405,7 @@ func (this *Comment) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 	mold = this.withAuditFilter(mold, ctx)
 
-	item, _ := mold.Order("RAND()").Limit(limit).Select()
+	item, _ := mold.OrderRaw("RAND()").Limit(limit).Select()
 	data := this.maskCommentData(ctx, utils.ArrayMapWithField(item, params["field"]))
 	// 可见范围：随机获取的评论同样脱敏
 	data = applyScopeData(ctx, data, "comment")
@@ -1127,6 +1128,34 @@ func (this *Comment) count(ctx *gin.Context) {
 
 	count, _ := query.Count()
 	this.json(ctx, count, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// counts 批量评论数（列表页专用）
+//
+// 一次拿到整页内容的评论数，替代前端对每条动态各调一次 count。
+// 口径与 count 一致：只统计审核通过的评论（含二级及更深的回复）。
+func (this *Comment) counts(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	bindType := cast.ToString(params["bind_type"])
+	if bindType == "" {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bind_type"), 400)
+		return
+	}
+
+	bindIds := cast.ToIntSlice(utils.Unity.Ids(params["bind_ids"]))
+	if len(bindIds) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bind_ids"), 400)
+		return
+	}
+
+	// 上限保护：批量统计不能变成全表 COUNT
+	const maxCounts = 200
+	if len(bindIds) > maxCounts {
+		bindIds = bindIds[:maxCounts]
+	}
+
+	this.json(ctx, gin.H{"counts": model.CommentCounts(bindType, bindIds)}, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *Comment) sum(ctx *gin.Context) {

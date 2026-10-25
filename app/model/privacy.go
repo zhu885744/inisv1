@@ -2,6 +2,7 @@ package model
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/spf13/cast"
 )
@@ -147,6 +148,15 @@ func hideContact(item map[string]any) {
 // 而 <QQ号>@qq.com 正是该用户的登录邮箱。邮箱在他人视图中已经统一隐藏为掩码，
 // 头像却把同一个 QQ 号原样带出去，属于「绕过脱敏的关联性泄露」。
 var derivedAvatarPattern = regexp.MustCompile(`(?i)^https?://[^/]*qlogo\.cn/[^?\s]*\?[^\s]*\bnk=\d+`)
+
+// IsDerivedAvatar - 判断头像地址是否是「由邮箱自动推导出来的 qlogo 头像」
+//
+// 这种头像只能用于展示，不能被当作「用户设置过的头像」写进 users.avatar：
+// 前端常常把接口返回的展示值原样回传（编辑资料、后台保存用户），一旦落库，
+// 推导值就固化成了真实设置，之后用户上传的头像也会被它覆盖回来。
+func IsDerivedAvatar(avatar string) bool {
+	return derivedAvatarPattern.MatchString(strings.TrimSpace(avatar))
+}
 
 // hideDerivedAvatar - 他人视图中把「由邮箱推导出来的头像」置空（等同未设置头像）
 //

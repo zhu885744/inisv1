@@ -315,6 +315,20 @@ func (this *UserCollects) create(ctx *gin.Context) {
 		}
 	}
 
+	// 幂等：同一用户对同一对象只能收藏一次
+	//
+	// collect 接口走 model.UserCollects.Collect 判过重，但通用 create 是裸的，
+	// 直接 POST 能绕过去重，重复插入把收藏数刷上去。
+	exists, _ := facade.DB.Model(&model.UserCollects{}).
+		Where("uid", uid).
+		Where("target_type", table.TargetType).
+		Where("target_id", table.TargetId).
+		Count()
+	if exists > 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "已经收藏过了！"), 400)
+		return
+	}
+
 	_, err := facade.DB.Model(&table).Create(&table)
 
 	if err != nil {

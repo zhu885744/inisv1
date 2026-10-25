@@ -604,7 +604,7 @@ func (this *Attachment) rand(ctx *gin.Context) {
 		query = query.Where("uploader_id", this.meta.user(ctx).Id)
 	}
 
-	query = this.buildQuery(query, params).Order("RAND()").Limit(limit)
+	query = this.buildQuery(query, params).OrderRaw("RAND()").Limit(limit)
 
 	items, _ := query.Select()
 	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])

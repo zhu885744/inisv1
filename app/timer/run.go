@@ -1,6 +1,7 @@
 package timer
 
 import (
+	"fmt"
 	"inis/app/facade"
 	"inis/app/model"
 	"sync"
@@ -37,6 +38,29 @@ func Run() {
 	runOnce.Do(start)
 }
 
+// runSafely - 启动维护任务的兜底执行
+//
+// 这些任务跑在独立 goroutine 里，panic 不会被 gin 的 Recovery 捕获：
+// 一旦 DB / Cache 尚未就绪（如安装向导刚写完配置、任务抢在初始化完成前执行），
+// 整个进程会直接退出（现象：打印完「服务已启动」立刻 SIGSEGV）。
+// 维护任务本身幂等，失败下次启动会重试，不能让服务跟着一起挂掉。
+func runSafely(name string, fn func()) {
+	defer func() {
+		if err := recover(); err != nil {
+			if facade.Log != nil {
+				facade.Log.Error(map[string]any{
+					"task":  name,
+					"error": err,
+				}, "启动维护任务发生panic，已跳过")
+			} else {
+				fmt.Printf("启动维护任务 %s 发生panic：%v\n", name, err)
+			}
+		}
+	}()
+
+	fn()
+}
+
 func start() {
 
 	// 启动时执行一次的维护任务：
@@ -46,22 +70,22 @@ func start() {
 	// 3. 清理已下线接口残留的权限规则（见 model.PruneAuthRules）
 	// 第 1~3 步由 EnsureAuthRules 内部串起来执行。
 	// 多实例同时重启时会抢锁：补齐本身幂等，但没必要 N 个实例同时写权限表。
-	go func() {
+	go runSafely("auth-rules", func() {
 		if !tryLock("auth-rules", 10*time.Minute) {
 			return
 		}
 		model.EnsureAuthGroups()
 		model.EnsureAuthRules()
-	}()
+	})
 
 	// 启动时补扫一次勋章：新装 / 刚上线勋章功能的老站，存量用户（注册满 N 天、
 	// 已有 N 篇文章）不会自己触发事件，只能靠这次扫描（以及之后的每小时扫描）补发。
-	go func() {
+	go runSafely("badge-scan", func() {
 		if !tryLock("badge-scan", 55*time.Minute) {
 			return
 		}
 		model.BadgeScan()
-	}()
+	})
 
 	Log.Run()
 	Device.Run()

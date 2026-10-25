@@ -70,7 +70,7 @@ func (this Index) Connect(ctx *gin.Context) {
 	}
 
 	origin := ctx.GetHeader("Origin")
-	if !Hub.IsOriginAllowed(origin) {
+	if !Hub.IsOriginAllowed(origin, ctx.Request.Host) {
 		socketLog("Origin不允许，拒绝连接: %s", origin)
 		ctx.JSON(http.StatusForbidden, gin.H{
 			"error": "不允许的来源",
@@ -208,6 +208,26 @@ func (this *client) read() {
 			if !this.hub.checkRateLimit(this.info.ID) {
 				socketLog("消息频率超限，丢弃消息: %s", this.info.ID)
 				continue
+			}
+
+			// 转发类消息的身份要求（防止匿名的跨连接投递）：
+			//   - 全站广播只给管理员，否则任意游客都能向所有在线连接下发任意内容；
+			//   - 定向消息要求已登录，否则游客可以往 user_<uid>（可枚举）投递伪造的私信。
+			// 客户端 ID 由 socket 中间件生成，只有 user_<uid> / guest_<uuid> 两种形态。
+			if utils.Is.Empty(item["to"]) {
+				if !this.isAdmin {
+					socketLog("非管理员尝试广播，已丢弃: %s", this.info.ID)
+					continue
+				}
+			} else {
+				target := cast.ToString(item["to"])
+				guest := strings.HasPrefix(this.info.ID, "guest_")
+				legal := len(target) <= 80 &&
+					(strings.HasPrefix(target, "user_") || strings.HasPrefix(target, "guest_"))
+				if guest || !legal {
+					socketLog("非法的定向消息，已丢弃: %s -> %s", this.info.ID, target)
+					continue
+				}
 			}
 
 			info := &info{

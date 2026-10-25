@@ -6,6 +6,7 @@ import (
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ func (this *Users) IGET(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"one":          this.one,
+		"batch":        this.batch,
 		"all":          this.all,
 		"sum":          this.sum,
 		"min":          this.min,
@@ -215,6 +217,67 @@ func (this *Users) one(ctx *gin.Context) {
 	}
 
 	this.json(ctx, data, facade.Lang(ctx, strings.Join(msg, "")), code)
+}
+
+// batch 批量获取用户（脱敏后）
+//
+// 用途：列表里一次拿多个用户（点赞人、参与者、推荐位等），避免前端对 /users/one
+// 发起 N 次请求。返回与 all 同一套隐私分级 —— 普通用户拿到的依然是被脱敏的数据，
+// 不会因为「批量」就绕过 email / 手机号 / 管理员备注的隐藏规则。
+func (this *Users) batch(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	ids := utils.Unity.Ids(params["ids"])
+
+	// 兼容 ?ids=1,2,3 这种逗号串：Ids 只认数组形态（ids[]=1&ids[]=2）
+	if len(ids) == 0 {
+		for _, raw := range strings.Split(cast.ToString(params["ids"]), ",") {
+			if id := cast.ToInt(strings.TrimSpace(raw)); id > 0 {
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	if len(ids) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	// 上限保护：批量接口不能被当成「按 id 全表导出」
+	const maxBatch = 50
+	if len(ids) > maxBatch {
+		ids = ids[:maxBatch]
+	}
+
+	var result []model.Users
+	item, _ := facade.DB.Model(&result).WhereIn("id", ids).WithoutField("password").Select()
+
+	// 头像框的洞大小 / 偏移按装扮当前配置重算（与 one 保持一致）
+	for _, one := range item {
+		model.ApplyUserFrameRenderState(one)
+	}
+
+	// 按请求里的 ids 顺序返回，前端可以直接和入参对齐，不必自己再排一次
+	order := make(map[int]int, len(ids))
+	for index, id := range ids {
+		order[cast.ToInt(id)] = index
+	}
+	sort.SliceStable(item, func(i, j int) bool {
+		return order[cast.ToInt(item[i]["id"])] < order[cast.ToInt(item[j]["id"])]
+	})
+
+	data := utils.ArrayMapWithField(item, params["field"])
+	this.meta.privacyUserList(ctx, data)
+
+	code := 204
+	msg := "无数据！"
+	if !utils.Is.Empty(data) {
+		code = 200
+		msg = "数据请求成功！"
+	}
+
+	this.json(ctx, data, facade.Lang(ctx, msg), code)
 }
 
 // all 获取全部数据
@@ -441,6 +504,13 @@ func (this *Users) create(ctx *gin.Context) {
 				// （如 QQ 头像 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100）
 				if key == "avatar" {
 					val = facade.Comm.SanitizeURL(cast.ToString(val))
+					// 由邮箱推导出来的 qlogo 头像只是展示值，不是用户设置的头像。
+					// 前端把展示值原样回传时若照单全收，会让「没设置过头像」变成
+					// 「设置了一个 QQ 头像链接」，而且之后上传的头像会被它覆盖回去。
+					// 真要清空头像请传空字符串，这里只拦推导值。
+					if model.IsDerivedAvatar(cast.ToString(val)) {
+						continue
+					}
 				} else {
 					val = facade.Comm.SanitizeHTML(cast.ToString(val))
 				}
@@ -539,6 +609,13 @@ func (this *Users) update(ctx *gin.Context) {
 				// （如 QQ 头像 https://q1.qlogo.cn/g?b=qq&nk=xxx&s=100）
 				if key == "avatar" {
 					val = facade.Comm.SanitizeURL(cast.ToString(val))
+					// 由邮箱推导出来的 qlogo 头像只是展示值，不是用户设置的头像。
+					// 前端把展示值原样回传时若照单全收，会让「没设置过头像」变成
+					// 「设置了一个 QQ 头像链接」，而且之后上传的头像会被它覆盖回去。
+					// 真要清空头像请传空字符串，这里只拦推导值。
+					if model.IsDerivedAvatar(cast.ToString(val)) {
+						continue
+					}
 				} else {
 					val = facade.Comm.SanitizeHTML(cast.ToString(val))
 				}
@@ -546,13 +623,22 @@ func (this *Users) update(ctx *gin.Context) {
 		}
 		// 防止恶意传入字段
 		if utils.In.Array(key, allow) {
-			switch utils.Get.Type(val) {
-			case "map":
-				val = utils.Json.Encode(val)
-			case "2d slice":
-				val = utils.Json.Encode(val)
-			case "slice":
-				val = strings.Join(cast.ToStringSlice(val), ",")
+			if key == "json" {
+				// json 是扩展字段容器，必须按「补丁合并 + 键白名单」处理：
+				//  1. 合并而非覆盖 —— 一次改隐私设置不该把佩戴的装扮、勋章一起抹掉；
+				//  2. 普通用户只允许改 privacy。decorations / wearing_badge 是「已拥有物品」
+				//     的佩戴结果，只能由佩戴接口在完成拥有校验后写入，否则提交一个
+				//     {"json": {"decorations": {"title": 99}}} 就能白拿任意付费装扮。
+				val = model.MergeUserJsonPatch(params["id"], val, root)
+			} else {
+				switch utils.Get.Type(val) {
+				case "map":
+					val = utils.Json.Encode(val)
+				case "2d slice":
+					val = utils.Json.Encode(val)
+				case "slice":
+					val = strings.Join(cast.ToStringSlice(val), ",")
+				}
 			}
 			async.Set(key, val)
 		}
@@ -572,8 +658,11 @@ func (this *Users) update(ctx *gin.Context) {
 		return
 	}
 
-	// 删除缓存
+	// 删除缓存（用户相关缓存均为 user[uid][...] 形式，用标签一次清干净）
 	facade.Cache.Del(fmt.Sprintf("user[%v]", params["id"]))
+	// 列表 / 详情接口的共享缓存也要失效：只删 user[uid] 会让「用户列表、作者页」继续返回
+	// 旧头像、旧昵称，看起来就像改动没生效（其它写接口都已调用 delCache）
+	go this.delCache()
 
 	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
 }

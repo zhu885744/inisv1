@@ -63,6 +63,24 @@ func InitAuthRules() {
 // 并清理已下线接口残留的规则（见 PruneAuthRules）。
 func EnsureAuthRules() {
 
+	// 维护任务：任何异常都不应影响服务启动
+	//
+	// 调用方有两处：InitAuthRules（安装 / 迁移）与 timer.Run（每次启动）。
+	// 后者跑在独立 goroutine 里，panic 不会被 gin 的 Recovery 接住 ——
+	// 早期这里没做保护，DB 未就绪时直接 SIGSEGV，现象是「打印完服务已启动就退出」。
+	defer func() {
+		if err := recover(); err != nil {
+			if facade.Log != nil {
+				facade.Log.Error(map[string]any{"error": err}, "补齐权限规则时发生panic")
+			}
+		}
+	}()
+
+	// 数据库还没初始化（未安装 / 连接失败）：跳过，别在 nil 上操作
+	if facade.DB == nil {
+		return
+	}
+
 	// 未完成安装时没有数据库：直接跳过，避免空指针（定时任务也会先判断一次，这里是双保险）
 	if !facade.Installed() {
 		return
@@ -100,7 +118,73 @@ func EnsureAuthRules() {
 	}
 
 	NormalizeAuthRuleTypes()
+	SyncAuthRuleNames()
 	PruneAuthRules()
+}
+
+// SyncAuthRuleNames - 回填「没有模块前缀」的权限规则名称（幂等）
+//
+// 背景：createAuthRules 的 names 表早先漏了 log / stats / tip / topics / mention /
+// feed / user-blocks / unlock / report 这几项，这批接口生成出来的名称只有「获取全部」
+// 这种动作描述，后台「权限规则」里根本认不出属于哪个模块。
+//
+// 补 names 表只能让新库、新接口拿到前缀，旧库里已经落库的规则不会自己变，
+// 这里按 hash 回填一次。只处理「名称不以【开头」的记录：规范名称一定是【xx API】xxx，
+// 剩下的就是旧版生成的空前缀名称；管理员自定义的其它规则（hash 不在内置表里）不动。
+func SyncAuthRuleNames() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			if facade.Log != nil {
+				facade.Log.Error(map[string]any{"error": err}, "回填权限规则名称时发生panic")
+			}
+		}
+	}()
+
+	if facade.DB == nil || !facade.Installed() {
+		return
+	}
+
+	db := facade.DB.Drive()
+	if db == nil {
+		return
+	}
+
+	var rows []AuthRules
+	if err := db.Where("name NOT LIKE ?", "【%").Find(&rows).Error; err != nil || len(rows) == 0 {
+		return
+	}
+
+	// hash -> 现有名称（都是缺前缀的）
+	outdated := make(map[string]string, len(rows))
+	for _, row := range rows {
+		outdated[cast.ToString(row.Hash)] = cast.ToString(row.Name)
+	}
+
+	updated := 0
+	for _, item := range createAuthRules() {
+		name := cast.ToString(item.Name)
+		if name == "" {
+			continue
+		}
+
+		method := strings.ToUpper(cast.ToString(item.Method))
+		hash := utils.Hash.Sum32(fmt.Sprintf("[%s]%s", method, item.Route))
+		old, ok := outdated[cast.ToString(hash)]
+		if !ok || old == name {
+			continue
+		}
+
+		if err := db.Model(&AuthRules{}).Where("hash = ?", hash).Update("name", name).Error; err != nil {
+			continue
+		}
+		updated++
+	}
+
+	if updated > 0 && facade.Log != nil {
+		facade.Log.Info(map[string]any{"rows": updated}, "已补全权限规则名称的模块前缀")
+	}
 }
 
 // NormalizeAuthRuleTypes - 纠正历史数据中非法的规则类型
@@ -197,6 +281,103 @@ func PruneAuthRules() {
 
 	facade.Log.Info(map[string]any{"rows": total}, "已清理下线接口的权限规则")
 	facade.Cache.DelTags([]any{"rule"})
+}
+
+// ============================== 规则模板 ==============================
+//
+// 全站 700+ 条规则里，绝大部分来自两类固定套路：
+//  1. 通用只读接口：GET one/all/sum/min/max/rand/count/column（公开访问）
+//  2. 通用增删改：PUT update/restore、POST save/create、DELETE remove/delete/clear
+//
+// 逐个手写既冗长，又容易漏标 type —— 标错会直接把公开接口变成 401、把管理接口
+// 变成人人可访问。所以收敛成下面这些模板：一个标准模块 = 1 行声明。
+//
+// 写法与手写规则完全一致：extra 直接写 "path=xxx&type=yyy&name=zzz"，
+// 用于追加该模块特有的接口（如 moments 的 set_top）。
+// 只有「标准套路装不下」的模块（users / docs / goods 等混合了 common、login、
+// default 三种类型）才继续逐条手写。
+
+// readCommon - 通用只读接口（GET），type=common：免登录
+func readCommon(extra ...string) []string {
+	items := []string{
+		"path=one&type=common",
+		"path=all&type=common",
+		"path=sum&type=common",
+		"path=min&type=common",
+		"path=max&type=common",
+		"path=rand&type=common",
+		"path=count&type=common",
+		"path=column&type=common",
+	}
+	return append(items, extra...)
+}
+
+// readCommonOnly - 只开放其中几个只读接口（GET），type=common
+func readCommonOnly(paths ...string) []string {
+	items := make([]string, 0, len(paths))
+	for _, path := range paths {
+		items = append(items, "path="+path+"&type=common")
+	}
+	return items
+}
+
+// readPerm - 通用只读接口（GET），type=default：需要权限点（后台列表 / 统计）
+func readPerm(extra ...string) []string {
+	items := []string{"one", "all", "sum", "min", "max", "rand", "count", "column"}
+	return append(items, extra...)
+}
+
+// permUpdate / permCreate / permDelete - 后台增删改，type=default：需要权限点
+func permUpdate(extra ...string) []string { return append([]string{"update", "restore"}, extra...) }
+func permCreate(extra ...string) []string { return append([]string{"save", "create"}, extra...) }
+func permDelete(extra ...string) []string {
+	return append([]string{"remove", "delete", "clear"}, extra...)
+}
+
+// loginUpdate / loginCreate / loginDelete - 用户自助增删改，type=login：登录即放行
+func loginUpdate(extra ...string) []string {
+	return append([]string{"path=update&type=login", "path=restore&type=login"}, extra...)
+}
+
+// loginUpdateOnly - 同 loginUpdate，但控制器没有 restore 接口的模块用它
+// （点赞 / 收藏的 IPUT 只有 update 与撤销，见 deprecatedAuthRules 里清理的 restore）
+func loginUpdateOnly(extra ...string) []string {
+	return append([]string{"path=update&type=login"}, extra...)
+}
+
+func loginCreate(extra ...string) []string {
+	return append([]string{"path=save&type=login", "path=create&type=login"}, extra...)
+}
+
+func loginDelete(extra ...string) []string {
+	return append([]string{
+		"path=remove&type=login",
+		"path=delete&type=login",
+		"path=clear&type=login",
+	}, extra...)
+}
+
+// standardModule - 标准内容模块：读公开 + 增删改需权限点
+//
+// 适用于 tags / pages / article / banner 这类「前台随便看、后台才能改」的模型。
+// readExtra 用于追加该模块特有的公开读接口。
+func standardModule(readExtra ...string) map[string][]string {
+	return map[string][]string{
+		"GET":    readCommon(readExtra...),
+		"PUT":    permUpdate(),
+		"POST":   permCreate(),
+		"DELETE": permDelete(),
+	}
+}
+
+// permModule - 纯后台模块：读（列表 / 统计）与增删改都需要权限点
+func permModule() map[string][]string {
+	return map[string][]string{
+		"GET":    readPerm(),
+		"PUT":    permUpdate(),
+		"POST":   permCreate(),
+		"DELETE": permDelete(),
+	}
 }
 
 // createAuthRules - 生成规则
@@ -429,21 +610,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=test-cos&name=测试COS连接",
 			},
 		},
-		"tags": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"tags": standardModule(),
 		// 话题（Hashtag）：与 tags 同表，面向用户的读接口公开、写接口需登录
 		// （管理侧的增删改仍在 tags 下，需要后台页面权限）
 		"topics": {
@@ -471,6 +638,7 @@ func createAuthRules() (result []AuthRules) {
 		"users": {
 			"GET": {
 				"path=one&type=common",
+				"path=batch&type=common&name=批量获取用户",
 				"path=all&type=common",
 				"path=sum&type=common",
 				"path=min&type=common",
@@ -502,83 +670,21 @@ func createAuthRules() (result []AuthRules) {
 			},
 			"DELETE": {"remove", "delete", "clear", "path=destroy&type=login&name=注销账户"},
 		},
+		// 友链：任何人都能看，申请 / 管理自己的友链登录即可
 		"links": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT": {"path=update&type=login", "path=restore&type=login"},
-			"POST": {
-				"path=save&type=login",
-				"path=create&type=login",
-			},
-			"DELETE": {
-				"path=remove&type=login",
-				"path=delete&type=login",
-				"path=clear&type=login",
-			},
+			"GET":    readCommon(),
+			"PUT":    loginUpdate(),
+			"POST":   loginCreate(),
+			"DELETE": loginDelete(),
 		},
-		"pages": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"level": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"banner": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"pages":  standardModule(),
+		"level":  standardModule(),
+		"banner": standardModule(),
 		"config": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
+			"GET":    readCommonOnly("one", "all", "count", "column"),
+			"PUT":    permUpdate(),
+			"POST":   permCreate(),
+			"DELETE": permDelete(),
 		},
 		// 主题配色（后台）：读取公开（配色页与后台首屏都要用），保存 / 重置需要权限点
 		"theme": {
@@ -591,51 +697,17 @@ func createAuthRules() (result []AuthRules) {
 				"path=reset&type=default&name=重置主题配色",
 			},
 		},
-		"article": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"placard": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"article": standardModule(),
+		"placard": standardModule(),
+		// 评论：任何人的评论都能看，写 / 改 / 删自己的评论登录即可
 		"comment": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=flat&type=common&name=扁平化",
-			},
-			"PUT":    {"path=update&type=login", "path=restore&type=login"},
-			"POST":   {"path=save&type=login", "path=create&type=login"},
-			"DELETE": {"path=remove&type=login", "path=delete&type=login", "path=clear&type=login"},
+				"path=counts&type=common&name=批量评论数",
+			),
+			"PUT":    loginUpdate(),
+			"POST":   loginCreate(),
+			"DELETE": loginDelete(),
 		},
 		// @ 提及：候选列表只给「我关注的人」，登录即可用（写入没有独立接口 —— @ 在保存内容时解析）
 		"mention": {
@@ -680,91 +752,28 @@ func createAuthRules() (result []AuthRules) {
 			"PUT":    {"path=handle&type=login&name=处理举报"},
 			"DELETE": {"path=cancel&type=login&name=撤回举报"},
 		},
-		"api-keys": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"api-keys": permModule(),
 		"auth-group": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore", "path=uids&name=更改用户权限"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
+			"GET":    readPerm(),
+			"PUT":    permUpdate("path=uids&name=更改用户权限"),
+			"POST":   permCreate(),
+			"DELETE": permDelete(),
 		},
-		"auth-rules": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"auth-pages": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"links-group": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"article-group": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
-				"path=tree&type=common&name=树形结构",
-			},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"auth-rules":    permModule(),
+		"auth-pages":    standardModule(),
+		"links-group":   standardModule(),
+		"article-group": standardModule("path=tree&type=common&name=树形结构"),
 		"exp": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=active&type=common&name=活跃度排行",
 				"path=rules&type=common&name=经验任务规则",
-			},
-			"PUT": {"update", "restore"},
-			"POST": {
-				"save",
-				"create",
+			),
+			"PUT": permUpdate(),
+			"POST": permCreate(
 				"path=give&type=default&name=发放经验值",
 				"path=share&type=login&name=分享",
-			},
-			"DELETE": {"remove", "delete", "clear"},
+			),
+			"DELETE": permDelete(),
 		},
 		// 签到（独立模块）：exp 里那几条 check-in 规则是老接口，保留只为兼容旧版前端
 		"checkin": {
@@ -925,24 +934,9 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=default&name=清空勋章分类回收站",
 			},
 		},
-		"qps-warn": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"ip-black": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
-		"ip-white": {
-			"GET":    {"one", "all", "sum", "min", "max", "count", "column", "rand"},
-			"PUT":    {"update", "restore"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
-		},
+		"qps-warn": permModule(),
+		"ip-black": permModule(),
+		"ip-white": permModule(),
 		"search": {
 			"GET": {
 				"path=article&type=common&name=文章搜索",
@@ -960,21 +954,14 @@ func createAuthRules() (result []AuthRules) {
 			},
 		},
 		"moments": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=comment&type=common&name=获取动态评论",
 				"path=comment_count&type=common&name=获取动态评论数量",
-			},
-			"PUT":    {"update", "restore", "path=set_top&type=default&name=设置/取消置顶动态"},
-			"POST":   {"save", "create"},
-			"DELETE": {"remove", "delete", "clear"},
+			),
+			// 置顶是管理动作，即使是 PUT 也要权限点
+			"PUT":    permUpdate("path=set_top&type=default&name=设置/取消置顶动态"),
+			"POST":   permCreate(),
+			"DELETE": permDelete(),
 		},
 		"attachment": {
 			"GET": {
@@ -1007,45 +994,20 @@ func createAuthRules() (result []AuthRules) {
 				"path=clear&type=login&name=清空回收站",
 			},
 		},
+		// 收藏：浏览公开、写入登录即可（都是自己的数据）
 		"user-collects": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=is-collected&type=login&name=检查是否已收藏",
 				"path=collects&type=common&name=获取收藏列表",
 				"path=counts&type=common&name=批量查询收藏数量",
-			},
-			"POST": {
-				"path=save&type=login",
-				"path=create&type=login",
-				"path=collect&type=login&name=收藏",
-			},
-			"PUT": {
-				"path=update&type=login",
-				"path=uncollect&type=login&name=取消收藏",
-			},
-			"DELETE": {
-				"path=remove&type=login",
-				"path=delete&type=login",
-				"path=clear&type=login",
-			},
+			),
+			"POST":   loginCreate("path=collect&type=login&name=收藏"),
+			"PUT":    loginUpdateOnly("path=uncollect&type=login&name=取消收藏"),
+			"DELETE": loginDelete(),
 		},
+		// 关注：关注 / 粉丝列表公开，关注动作登录即可（社交关系不设权限点）
 		"user-follows": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=following&type=common&name=获取关注列表",
 				"path=followers&type=common&name=获取粉丝列表",
 				"path=is-following&type=login&name=检查是否已关注",
@@ -1053,51 +1015,22 @@ func createAuthRules() (result []AuthRules) {
 				"path=relation&type=login&name=查询互关状态",
 				"path=suggest&type=login&name=可能认识的人",
 				"path=stats&type=common&name=获取社交数据卡片",
-			},
-			"POST": {
-				"path=save&type=login",
-				"path=create&type=login",
-				"path=follow&type=login&name=关注用户",
-			},
-			"PUT": {
-				"path=update&type=login",
-				"path=restore&type=login",
-				"path=unfollow&type=login&name=取消关注",
-			},
-			"DELETE": {
-				"path=remove&type=login",
-				"path=delete&type=login",
-				"path=clear&type=login",
-			},
+			),
+			"POST":   loginCreate("path=follow&type=login&name=关注用户"),
+			"PUT":    loginUpdate("path=unfollow&type=login&name=取消关注"),
+			"DELETE": loginDelete(),
 		},
+		// 点赞：同上
 		"user-likes": {
-			"GET": {
-				"path=one&type=common",
-				"path=all&type=common",
-				"path=sum&type=common",
-				"path=min&type=common",
-				"path=max&type=common",
-				"path=rand&type=common",
-				"path=count&type=common",
-				"path=column&type=common",
+			"GET": readCommon(
 				"path=is-liked&type=login&name=检查是否已点赞",
 				"path=likes&type=common&name=获取点赞列表",
 				"path=counts&type=common&name=批量查询点赞数量",
-			},
-			"POST": {
-				"path=save&type=login",
-				"path=create&type=login",
-				"path=like&type=login&name=点赞",
-			},
-			"PUT": {
-				"path=update&type=login",
-				"path=unlike&type=login&name=取消点赞",
-			},
-			"DELETE": {
-				"path=remove&type=login",
-				"path=delete&type=login",
-				"path=clear&type=login",
-			},
+				"path=states&type=common&name=批量查询点赞状态",
+			),
+			"POST":   loginCreate("path=like&type=login&name=点赞"),
+			"PUT":    loginUpdateOnly("path=unlike&type=login&name=取消点赞"),
+			"DELETE": loginDelete(),
 		},
 		"notification": {
 			"GET": {
@@ -1135,48 +1068,57 @@ func createAuthRules() (result []AuthRules) {
 
 	// 接口名称
 	names := map[string]string{
-		"exp":           "【经验值 API】",
-		"proxy":         "【代理 API】",
-		"user-follows":  "【用户关注 API】",
-		"user-likes":    "【用户点赞 API】",
-		"user-collects": "【用户收藏 API】",
-		"comm":          "【公共 API】",
-		"oauth":         "【第三方登录 API】",
-		"tags":          "【话题 API】",
-		"level":         "【等级 API】",
-		"pages":         "【独立页面 API】",
-		"users":         "【用户 API】",
-		"links":         "【友链 API】",
-		"banner":        "【轮播 API】",
-		"article":       "【文章 API】",
-		"comment":       "【评论 API】",
-		"placard":       "【公告 API】",
-		"config":        "【配置 API】",
-		"theme":         "【主题配色 API】",
-		"toml":          "【服务配置 API】",
-		"ip-black":      "【IP黑名单 API】",
-		"ip-white":      "【IP白名单 API】",
-		"qps-warn":      "【QPS预警 API】",
-		"api-keys":      "【接口密钥 API】",
-		"auth-group":    "【权限分组 API】",
-		"auth-pages":    "【页面权限 API】",
-		"auth-rules":    "【权限规则 API】",
-		"links-group":   "【友链分类 API】",
-		"article-group": "【文章分类 API】",
-		"search":        "【搜索 API】",
-		"rss":           "【RSS订阅 API】",
-		"moments":       "【动态 API】",
-		"attachment":    "【附件 API】",
-		"notification":  "【消息通知 API】",
-		"integral":      "【积分 API】",
-		"goods":         "【商品 API】",
-		"decoration":    "【装扮 API】",
-		"badge":         "【勋章 API】",
+		"exp":            "【经验值 API】",
+		"proxy":          "【代理 API】",
+		"user-follows":   "【用户关注 API】",
+		"user-likes":     "【用户点赞 API】",
+		"user-collects":  "【用户收藏 API】",
+		"user-blocks":    "【用户拉黑 API】",
+		"comm":           "【公共 API】",
+		"oauth":          "【第三方登录 API】",
+		"tags":           "【话题 API】",
+		"topics":         "【话题聚合 API】",
+		"mention":        "【提及 API】",
+		"level":          "【等级 API】",
+		"pages":          "【独立页面 API】",
+		"users":          "【用户 API】",
+		"links":          "【友链 API】",
+		"banner":         "【轮播 API】",
+		"article":        "【文章 API】",
+		"comment":        "【评论 API】",
+		"placard":        "【公告 API】",
+		"config":         "【配置 API】",
+		"theme":          "【主题配色 API】",
+		"toml":           "【服务配置 API】",
+		"log":            "【日志 API】",
+		"stats":          "【统计 API】",
+		"ip-black":       "【IP黑名单 API】",
+		"ip-white":       "【IP白名单 API】",
+		"qps-warn":       "【QPS预警 API】",
+		"api-keys":       "【接口密钥 API】",
+		"auth-group":     "【权限分组 API】",
+		"auth-pages":     "【页面权限 API】",
+		"auth-rules":     "【权限规则 API】",
+		"links-group":    "【友链分类 API】",
+		"article-group":  "【文章分类 API】",
+		"search":         "【搜索 API】",
+		"rss":            "【RSS订阅 API】",
+		"moments":        "【动态 API】",
+		"feed":           "【聚合流 API】",
+		"attachment":     "【附件 API】",
+		"unlock":         "【内容解锁 API】",
+		"notification":   "【消息通知 API】",
+		"report":         "【举报 API】",
+		"integral":       "【积分 API】",
+		"tip":            "【打赏 API】",
+		"goods":          "【商品 API】",
+		"decoration":     "【装扮 API】",
+		"badge":          "【勋章 API】",
 		"badge-category": "【勋章分类 API】",
-		"checkin":       "【签到 API】",
-		"docs":          "【文档 API】",
-		"docs-group":    "【文档目录 API】",
-		"docs-project":  "【文档项目 API】",
+		"checkin":        "【签到 API】",
+		"docs":           "【文档 API】",
+		"docs-group":     "【文档目录 API】",
+		"docs-project":   "【文档项目 API】",
 	}
 
 	// 基础方法

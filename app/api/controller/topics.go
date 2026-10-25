@@ -274,7 +274,8 @@ func (this *Topics) content(ctx *gin.Context) {
 		pinned = (&model.TopicPins{}).PinnedIds(tagId, model.TopicTargetArticle)
 		query := facade.DB.Model(&[]model.Article{}).Where("audit", 1).Like("tags", like)
 		count, _ = query.Count()
-		data, _ = query.Limit(limit).Page(page).Order(withPinnedOrder(order, pinned)).Select()
+		// 置顶优先的表达式是内部拼装的（id 来自数据库的 int），走 OrderRaw 跳过白名单
+		data, _ = query.Limit(limit).Page(page).OrderRaw(withPinnedOrder(order, pinned)).Select()
 	} else {
 		// 动态：只算已发布 + 审核通过的
 		order := "create_time desc"
@@ -287,7 +288,7 @@ func (this *Topics) content(ctx *gin.Context) {
 		pinned = (&model.TopicPins{}).PinnedIds(tagId, model.TopicTargetMoments)
 		query := facade.DB.Model(&[]model.Moments{}).Where("audit", 1).Where("status", 1).Like("tags", like)
 		count, _ = query.Count()
-		data, _ = query.Limit(limit).Page(page).Order(withPinnedOrder(order, pinned)).Select()
+		data, _ = query.Limit(limit).Page(page).OrderRaw(withPinnedOrder(order, pinned)).Select()
 	}
 
 	// 置顶标记：前端据此显示「置顶」徽标与主持人的取消置顶按钮

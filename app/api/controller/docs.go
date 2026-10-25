@@ -138,20 +138,30 @@ func (this *Docs) one(ctx *gin.Context) {
 		return
 	}
 
-	// 前台只返回已发布内容；后台带 admin=1 可预览草稿 / 待审核
-	if !cast.ToBool(params["admin"]) && item.Status != 1 {
+	// 后台预览：带 admin=1 可以看草稿 / 待审核 / 受限文档，但必须真的具备文档管理权限
+	//
+	// 以前这里只看 admin 这个参数本身，等于把未发布内容的读取权交给了任何会改 URL 的人
+	// （匿名请求 /api/docs/one?id=x&admin=1 就能拿到草稿）。
+	isAdminPreview := cast.ToBool(params["admin"])
+	if isAdminPreview && !this.canPreview(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权预览该文档！"), 403)
+		return
+	}
+
+	// 前台只返回已发布内容
+	if !isAdminPreview && item.Status != 1 {
 		this.json(ctx, nil, facade.Lang(ctx, "文档不存在或未发布！"), 404)
 		return
 	}
 
 	// 可见性校验：受限文档未登录时返回 401，前端据此跳登录并回跳
-	if !cast.ToBool(params["admin"]) && !this.canView(ctx, &item) {
+	if !isAdminPreview && !this.canView(ctx, &item) {
 		this.json(ctx, nil, facade.Lang(ctx, "请登录后查看！"), 401)
 		return
 	}
 
 	// 浏览量：与文章一致，同一 IP + UA 每天只计一次（后台预览不计）
-	if !cast.ToBool(params["admin"]) {
+	if !isAdminPreview {
 		go this.updateViews(ctx, item.Id)
 	}
 
@@ -161,6 +171,12 @@ func (this *Docs) one(ctx *gin.Context) {
 func (this *Docs) all(ctx *gin.Context) {
 	params := this.params(ctx, map[string]any{"version": "latest"})
 	limit := this.meta.limit(ctx)
+
+	// admin=1 会让列表跳过 status 过滤（含草稿 / 待审核），必须真的具备文档管理权限，
+	// 否则匿名带上参数就能把未发布文档整页拉走
+	if cast.ToBool(params["admin"]) && !this.canPreview(ctx) {
+		params["admin"] = false
+	}
 
 	query := facade.DB.Model(&[]model.Docs{}).
 		Where("version", params["version"]).
@@ -985,6 +1001,36 @@ func (this *Docs) prevNext(item model.Docs) (gin.H, gin.H) {
 	next := query("next")
 
 	return gin.H(prev), gin.H(next)
+}
+
+// canPreview - 是否允许后台预览（草稿 / 待审核 / 受限文档）
+func (this *Docs) canPreview(ctx *gin.Context) bool {
+	return docsCanPreview(ctx)
+}
+
+// docsCanPreview - 是否具备文档后台预览权限。
+//
+// 判定口径：
+//  1. permit：与权限中间件一致（root 分组，或当前路由已被授予权限点）
+//  2. 兜底：拥有任意 /api/docs/ 管理权限点（部分站点把管理员放在非 root 分组，
+//     只勾了文档管理，此时访问 docs/one 这种 common 路由不会命中第 1 条）
+//
+// 抽成包级函数是为了让 docs-group 的 tree 也复用：那边同样有 admin=1 绕过
+// status 过滤的写法，匿名带上参数就能看到未启用的目录与草稿。
+func docsCanPreview(ctx *gin.Context) bool {
+	helper := meta{}
+
+	if helper.permit(ctx) {
+		return true
+	}
+
+	for _, item := range helper.rules(ctx) {
+		if strings.Contains(cast.ToString(item), "/api/docs/") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // canView - 可见性校验：1 公开 / 2 登录 / 3 指定角色组

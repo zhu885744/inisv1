@@ -145,6 +145,11 @@ func (this *DocsGroup) tree(ctx *gin.Context) {
 	params := this.params(ctx, map[string]any{"version": "latest"})
 	version := cast.ToString(params["version"])
 
+	// admin=1 会让目录树跳过 status 过滤（含未启用目录 / 草稿），必须真的具备文档管理权限
+	if cast.ToBool(params["admin"]) && !docsCanPreview(ctx) {
+		params["admin"] = false
+	}
+
 	var groups []model.DocsGroup
 	query := facade.DB.Model(&groups).
 		Where("version", version).

@@ -277,14 +277,19 @@ func (this *Goods) Buy(uid int, goodsId int, address string) (order GoodsOrder, 
 			return errors.New("商品库存不足！")
 		}
 
-		// 7. 校验积分余额并扣减
-		if user.Integral < goods.Price {
-			return errors.New("积分不足！")
+		// 7. 扣减积分（条件更新，防止并发把余额扣成负数）
+		//
+		// 不能「先读 user.Integral 再减」：REPEATABLE READ 下并发事务读到同一个快照，
+		// 全部通过校验后串行执行减法，余额会变成负数（零成本拿货）。
+		payResult := tx.Model(&Users{}).
+			Where("id = ?", uid).
+			Where("integral >= ?", goods.Price).
+			UpdateColumn("integral", gorm.Expr("integral - ?", goods.Price))
+		if payResult.Error != nil {
+			return payResult.Error
 		}
-
-		if err := tx.Model(&Users{}).Where("id = ?", uid).
-			UpdateColumn("integral", gorm.Expr("integral - ?", goods.Price)).Error; err != nil {
-			return err
+		if payResult.RowsAffected == 0 {
+			return errors.New("积分不足！")
 		}
 
 		// 8. 销量 +1
@@ -423,7 +428,23 @@ func (this *GoodsOrder) CancelOrder(uid int, orderId int, isRoot bool) (order Go
 
 		now := time.Now().Unix()
 
-		// 1. 回滚库存
+		// 1. 抢占状态（pending → canceled 的条件更新）
+		//
+		// 只靠上面 First 读到的 status 判断是不够的：并发取消同一订单时两个事务
+		// 读到的都是 pending，会各自退款一次（重复退款 + 库存多加）。
+		// 这里先做一次带条件的更新当闸门，只有抢到的那一个事务继续往下走。
+		claim := tx.Model(&GoodsOrder{}).
+			Where("id = ?", order.Id).
+			Where("status = ?", OrderStatusPending).
+			UpdateColumn("status", OrderStatusCanceled)
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			return errors.New("当前订单状态不可取消！")
+		}
+
+		// 2. 回滚库存
 		if err := tx.Model(&Goods{}).Where("id = ?", order.GoodsId).
 			UpdateColumn("stock", gorm.Expr("stock + 1")).Error; err != nil {
 			return err
@@ -466,9 +487,8 @@ func (this *GoodsOrder) CancelOrder(uid int, orderId int, isRoot bool) (order Go
 			}
 		}
 
-		// 4. 更新订单状态
+		// 5. 补上退款金额与取消时间（状态在开头抢占时已写入）
 		if err := tx.Model(&GoodsOrder{}).Where("id = ?", order.Id).Updates(map[string]any{
-			"status":      OrderStatusCanceled,
 			"refund":      order.Price,
 			"cancel_time": now,
 		}).Error; err != nil {
