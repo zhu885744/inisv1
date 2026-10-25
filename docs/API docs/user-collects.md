@@ -1,4 +1,4 @@
-# User Collects 用户收藏接口文档
+# 用户收藏 接口文档
 
 ## 接口概述
 
@@ -21,22 +21,7 @@
 
 ---
 
-## 状态码规范
-
-| 状态码 | 说明 | 使用场景 |
-| :--- | :--- | :--- |
-| **200** | 请求成功 | 获取数据成功、操作成功 |
-| **202** | 接受请求 | 请求已接受（无实际功能） |
-| **204** | 无内容 | 查询无数据、无可操作数据 |
-| **400** | 请求错误 | 参数校验失败、操作失败 |
-| **401** | 未授权 | 用户未登录 |
-| **403** | 无权限 | 无操作权限 |
-| **405** | 方法不允许 | 请求方法错误或方法名错误 |
-| **500** | 服务器错误 | 系统内部错误 |
-
----
-
-## 数据模型
+### 数据模型
 
 ### UserCollects 结构
 
@@ -55,15 +40,29 @@
 
 ---
 
+## 状态码规范
+
+| 状态码 | 说明 | 使用场景 |
+| :--- | :--- | :--- |
+| **200** | 请求成功 | 获取数据成功、操作成功 |
+| **202** | 接受请求 | 请求已接受（无实际功能） |
+| **204** | 无内容 | 查询无数据、无可操作数据 |
+| **400** | 请求错误 | 参数校验失败、操作失败 |
+| **401** | 未授权 | 用户未登录 |
+| **403** | 无权限 | 无操作权限 |
+| **405** | 方法不允许 | 请求方法错误或方法名错误 |
+| **500** | 服务器错误 | 系统内部错误 |
+
+---
+
 ## 接口列表
 
-### 1. GET 请求接口
+### 1. 获取单个收藏记录 [one]
 
-#### 1.1 获取单个收藏记录 [基础接口-获取指定]
-
-- **路径**: `/api/user-collects/one`
-- **方法**: `GET`
-- **描述**: 根据条件获取单个收藏记录
+- **接口类型**: 基础接口 / 获取指定
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/one`
+- **说明**: 根据条件获取单个收藏记录
 
 **请求参数**:
 
@@ -78,6 +77,7 @@
 | `like` | json | 否 | 模糊查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -102,11 +102,12 @@
 
 **权限说明**: 非管理员只能查看自己的收藏记录
 
-#### 1.2 获取所有收藏记录 [基础接口-获取全部]
+### 2. 获取所有收藏记录 [all]
 
-- **路径**: `/api/user-collects/all`
-- **方法**: `GET`
-- **描述**: 分页获取收藏记录列表
+- **接口类型**: 基础接口 / 获取全部
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/all`
+- **说明**: 分页获取收藏记录列表
 
 **请求参数**:
 
@@ -120,6 +121,7 @@
 | `like` | json | 否 | 模糊查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -134,11 +136,12 @@
 
 **权限说明**: 非管理员只能查看自己的收藏记录
 
-#### 1.3 随机获取收藏记录 [基础接口-随机获取]
+### 3. 随机获取收藏记录 [rand]
 
-- **路径**: `/api/user-collects/rand`
-- **方法**: `GET`
-- **描述**: 随机获取指定数量的收藏记录
+- **接口类型**: 基础接口 / 随机获取
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/rand`
+- **说明**: 随机获取指定数量的收藏记录
 
 **请求参数**:
 
@@ -149,6 +152,7 @@
 | `field` | string | 否 | 返回字段 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -159,11 +163,12 @@
 
 **权限说明**: 非管理员只能获取自己的收藏记录
 
-#### 1.4 查询数量 [基础接口-查询数量]
+### 4. 查询数量 [count]
 
-- **路径**: `/api/user-collects/count`
-- **方法**: `GET`
-- **描述**: 查询收藏记录数量
+- **接口类型**: 基础接口 / 查询数量
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/count`
+- **说明**: 查询收藏记录数量
 
 **请求参数**:
 
@@ -172,6 +177,7 @@
 | `where` | json | 否 | 条件查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -180,11 +186,12 @@
 }
 ```
 
-#### 1.5 求和 [基础接口-求和]
+### 5. 求和 [sum]
 
-- **路径**: `/api/user-collects/sum`
-- **方法**: `GET`
-- **描述**: 对指定字段求和
+- **接口类型**: 基础接口 / 求和
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/sum`
+- **说明**: 对指定字段求和
 
 **请求参数**:
 
@@ -195,6 +202,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -205,11 +213,12 @@
 }
 ```
 
-#### 1.6 最小值 [基础接口-最小值]
+### 6. 最小值 [min]
 
-- **路径**: `/api/user-collects/min`
-- **方法**: `GET`
-- **描述**: 获取指定字段最小值
+- **接口类型**: 基础接口 / 最小值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/min`
+- **说明**: 获取指定字段最小值
 
 **请求参数**:
 
@@ -220,6 +229,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -230,11 +240,12 @@
 }
 ```
 
-#### 1.7 最大值 [基础接口-最大值]
+### 7. 最大值 [max]
 
-- **路径**: `/api/user-collects/max`
-- **方法**: `GET`
-- **描述**: 获取指定字段最大值
+- **接口类型**: 基础接口 / 最大值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/max`
+- **说明**: 获取指定字段最大值
 
 **请求参数**:
 
@@ -245,6 +256,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -255,11 +267,12 @@
 }
 ```
 
-#### 1.8 查询列 [基础接口-查询列]
+### 8. 查询列 [column]
 
-- **路径**: `/api/user-collects/column`
-- **方法**: `GET`
-- **描述**: 获取指定字段列表
+- **接口类型**: 基础接口 / 查询列
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/column`
+- **说明**: 获取指定字段列表
 
 **请求参数**:
 
@@ -271,6 +284,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -279,11 +293,12 @@
 }
 ```
 
-#### 1.9 检查是否已收藏 [业务接口]
+### 9. 检查是否已收藏 [is-collected]
 
-- **路径**: `/api/user-collects/is-collected`
-- **方法**: `GET`
-- **描述**: 检查当前用户是否已收藏指定目标，同时返回收藏总数
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/is-collected`
+- **说明**: 检查当前用户是否已收藏指定目标，同时返回收藏总数
 
 **请求参数**:
 
@@ -293,6 +308,7 @@
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -306,11 +322,12 @@
 
 **权限说明**: 公共接口，无需登录。未登录时 `is_collected` 始终为 `false`
 
-#### 1.10 获取收藏列表 [业务接口]
+### 10. 获取收藏列表 [collects]
 
-- **路径**: `/api/user-collects/collects`
-- **方法**: `GET`
-- **描述**: 获取指定用户（或当前登录用户）的收藏列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的收藏数据
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/collects`
+- **说明**: 获取指定用户（或当前登录用户）的收藏列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的收藏数据
 
 **请求参数**:
 
@@ -321,6 +338,7 @@
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -351,11 +369,12 @@
 - 查询他人收藏时，若对方隐私设置中「我的收藏」为关闭（collects=0），返回 `private:true` 及提示「对方设置了私密，无法查看！」
 - 查询自己的收藏不受隐私限制
 
-#### 1.11 批量查询收藏数量 [业务接口]
+### 11. 批量查询收藏数量 [counts]
 
-- **路径**: `/api/user-collects/counts`
-- **方法**: `GET`
-- **描述**: 批量查询指定目标类型和目标ID列表的收藏数量
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/counts`
+- **说明**: 批量查询指定目标类型和目标ID列表的收藏数量
 
 **请求参数**:
 
@@ -365,6 +384,7 @@
 | `target_ids` | string | **是** | 目标ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -380,7 +400,8 @@
 ```
 
 **使用示例**:
-```
+
+```http
 GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 ```
 
@@ -388,13 +409,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 ---
 
-### 2. POST 请求接口
+### 12. 保存收藏 [save]
 
-#### 2.1 保存收藏 [基础接口-保存数据]
-
-- **路径**: `/api/user-collects/save`
-- **方法**: `POST`
-- **描述**: 保存收藏记录（新增或更新，id为空时新增）
+- **接口类型**: 基础接口 / 保存数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-collects/save`
+- **说明**: 保存收藏记录（新增或更新，id为空时新增）
 
 **请求参数**:
 
@@ -406,6 +426,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `target_id` | int | 否 | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -418,11 +439,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能操作自己的数据
 
-#### 2.2 创建收藏 [基础接口-添加数据]
+### 13. 创建收藏 [create]
 
-- **路径**: `/api/user-collects/create`
-- **方法**: `POST`
-- **描述**: 新增收藏记录。注意：target_type 为 "user" 时会返回错误
+- **接口类型**: 基础接口 / 添加数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-collects/create`
+- **说明**: 新增收藏记录。注意：target_type 为 "user" 时会返回错误
 
 **请求参数**:
 
@@ -433,6 +455,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -444,6 +467,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 ```
 
 **错误响应** (400 - 不支持收藏用户):
+
 ```json
 {
     "code": 400,
@@ -452,11 +476,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 }
 ```
 
-#### 2.3 收藏 [业务接口]
+### 14. 收藏 [collect]
 
-- **路径**: `/api/user-collects/collect`
-- **方法**: `POST`
-- **描述**: 收藏指定目标。已收藏时返回错误提示
+- **接口类型**: 业务接口
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-collects/collect`
+- **说明**: 收藏指定目标。已收藏时返回错误提示
 
 **请求参数**:
 
@@ -466,6 +491,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -478,6 +504,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 ```
 
 **错误响应** (400 - 已收藏):
+
 ```json
 {
     "code": 400,
@@ -488,11 +515,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 需要登录。不支持收藏用户（target_type=user）
 
-#### 2.4 取消收藏 [业务接口]
+### 15. 取消收藏 [uncollect]
 
-- **路径**: `/api/user-collects/uncollect`
-- **方法**: `POST` / `PUT`
-- **描述**: 取消收藏指定目标。删除对应记录，即使记录不存在也返回成功
+- **接口类型**: 业务接口
+- **请求方式**: `POST` / `PUT`
+- **请求地址**: `/api/user-collects/uncollect`
+- **说明**: 取消收藏指定目标。删除对应记录，即使记录不存在也返回成功
 
 **请求参数**:
 
@@ -502,6 +530,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -517,13 +546,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 ---
 
-### 3. PUT 请求接口
+### 16. 更新收藏 [update]
 
-#### 3.1 更新收藏 [基础接口-修改数据]
-
-- **路径**: `/api/user-collects/update`
-- **方法**: `PUT`
-- **描述**: 更新收藏记录信息
+- **接口类型**: 基础接口 / 修改数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/user-collects/update`
+- **说明**: 更新收藏记录信息
 
 **请求参数**:
 
@@ -534,6 +562,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `target_id` | int | 否 | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -546,44 +575,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能更新自己的数据
 
-#### 3.2 取消收藏 [业务接口]
+### 17. 删除收藏记录 [remove]
 
-> 与 2.4 相同，支持 `POST` 和 `PUT` 两种请求方式
-
-- **路径**: `/api/user-collects/uncollect`
-- **方法**: `PUT`
-- **描述**: 取消收藏指定目标
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moment |
-| `target_id` | int | **是** | 目标ID |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "取消收藏成功！",
-    "data": {
-        "target_type": "moment",
-        "target_id": 10
-    }
-}
-```
-
-**权限说明**: 需要登录
-
----
-
-### 4. DELETE 请求接口
-
-#### 4.1 删除收藏记录 [基础接口-删除]
-
-- **路径**: `/api/user-collects/remove`
-- **方法**: `DELETE`
-- **描述**: 删除指定的收藏记录（物理删除）
+- **接口类型**: 基础接口 / 删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-collects/remove`
+- **说明**: 删除指定的收藏记录（物理删除）
 
 **请求参数**:
 
@@ -592,6 +589,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `ids` | string | **是** | 收藏记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -604,11 +602,12 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.2 彻底删除收藏 [基础接口-彻底删除]
+### 18. 彻底删除收藏 [delete]
 
-- **路径**: `/api/user-collects/delete`
-- **方法**: `DELETE`
-- **描述**: 永久删除收藏记录，不可恢复
+- **接口类型**: 基础接口 / 彻底删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-collects/delete`
+- **说明**: 永久删除收藏记录，不可恢复
 
 **请求参数**:
 
@@ -617,6 +616,7 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 | `ids` | string | **是** | 收藏记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -629,15 +629,17 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.3 清空所有收藏 [基础接口-清空]
+### 19. 清空所有收藏 [clear]
 
-- **路径**: `/api/user-collects/clear`
-- **方法**: `DELETE`
-- **描述**: 清空所有收藏记录
+- **接口类型**: 基础接口 / 清空
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-collects/clear`
+- **说明**: 清空所有收藏记录
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -650,71 +652,21 @@ GET /api/user-collects/counts?target_type=article&target_ids=1,2,3
 
 ---
 
-### 5. INDEX 接口
+### 20. INDEX 接口
 
-- **路径**: `/api/user-collects/index`
-- **方法**: `GET`
-- **描述**: 用户收藏首页（无实际功能）
+- **接口类型**: INDEX 接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-collects/index`
+- **说明**: 用户收藏首页（无实际功能）
 
 **成功响应** (202):
+
 ```json
 {
     "code": 202,
     "msg": "没什么用！",
     "data": null
 }
-```
-
----
-
-## 前端使用指南
-
-### 场景一：展示文章收藏数并判断是否已收藏
-
-```javascript
-// 获取收藏状态和数量（一个请求搞定）
-const res = await request.get('/api/user-collects/is-collected', {
-    target_type: 'article',
-    target_id: articleId
-})
-// res.data = { is_collected: true, count: 15 }
-```
-
-### 场景二：执行收藏/取消收藏
-
-```javascript
-// 收藏
-await request.post('/api/user-collects/collect', {
-    target_type: 'article',
-    target_id: articleId
-})
-
-// 取消收藏
-await request.post('/api/user-collects/uncollect', {
-    target_type: 'article',
-    target_id: articleId
-})
-```
-
-### 场景三：列表页批量获取收藏数
-
-```javascript
-// 批量获取多个文章的收藏数
-const res = await request.get('/api/user-collects/counts', {
-    target_type: 'article',
-    target_ids: '1,2,3,4,5'
-})
-// res.data.counts = { "1": 10, "2": 5, "3": 3 }
-```
-
-### 场景四：我的收藏列表
-
-```javascript
-// 获取当前用户的收藏历史
-const res = await request.get('/api/user-collects/collects', {
-    target_type: 'article',  // 可选，筛选类型
-    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
-})
 ```
 
 ---
@@ -755,3 +707,55 @@ const res = await request.get('/api/user-collects/collects', {
 - 收藏时如已存在记录，会返回"已经收藏过了"错误
 - 取消收藏不检查记录是否存在，直接执行删除操作
 - uncollect 同时支持 POST 和 PUT 两种请求方式
+
+### 前端使用指南
+
+****
+
+```javascript
+// 获取收藏状态和数量（一个请求搞定）
+const res = await request.get('/api/user-collects/is-collected', {
+    target_type: 'article',
+    target_id: articleId
+})
+// res.data = { is_collected: true, count: 15 }
+```
+
+****
+
+```javascript
+// 收藏
+await request.post('/api/user-collects/collect', {
+    target_type: 'article',
+    target_id: articleId
+})
+
+// 取消收藏
+await request.post('/api/user-collects/uncollect', {
+    target_type: 'article',
+    target_id: articleId
+})
+```
+
+****
+
+```javascript
+// 批量获取多个文章的收藏数
+const res = await request.get('/api/user-collects/counts', {
+    target_type: 'article',
+    target_ids: '1,2,3,4,5'
+})
+// res.data.counts = { "1": 10, "2": 5, "3": 3 }
+```
+
+****
+
+```javascript
+// 获取当前用户的收藏历史
+const res = await request.get('/api/user-collects/collects', {
+    target_type: 'article',  // 可选，筛选类型
+    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
+})
+```
+
+---

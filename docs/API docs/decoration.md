@@ -1,4 +1,4 @@
-# Decoration 装扮接口文档
+# 装扮管理 接口文档
 
 ## 接口概述
 
@@ -24,7 +24,7 @@
 
 ### 可写字段白名单
 
-```
+```text
 type, name, description, preview, payload, price_type, price, rarity,
 duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 ```
@@ -117,12 +117,11 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 ## 接口列表
 
-### 1. GET 请求接口
+### 1. 装扮类型元数据 [types]
 
-#### 1.1 装扮类型元数据 [业务接口]
-
-- **路径**: `/api/decoration/types`　**方法**: `GET`　**权限**: 公开
-- **描述**: 返回装扮类型定义（名称 / 图标 / 挂载位 / 可配字段）与装扮配置
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/types`　**方法**: `GET`　**权限**: 公开
+- **说明**: 返回装扮类型定义（名称 / 图标 / 挂载位 / 可配字段）与装扮配置
 
 ```json
 {
@@ -140,14 +139,16 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 }
 ```
 
-#### 1.2 装扮配置 [业务接口]
+### 2. 装扮配置 [config]
 
-- **路径**: `/api/decoration/config`　**方法**: `GET`　**权限**: 公开
-- **描述**: 返回装扮配置对象（**直接就是配置本体**，不是 `{config:...}` 包裹）
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/config`　**方法**: `GET`　**权限**: 公开
+- **说明**: 返回装扮配置对象（**直接就是配置本体**，不是 `{config:...}` 包裹）
 
-#### 1.3 商城列表 [业务接口]
+### 3. 商城列表 [shop]
 
-- **路径**: `/api/decoration/shop`　**方法**: `GET`　**权限**: 公开
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/shop`　**方法**: `GET`　**权限**: 公开
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -173,9 +174,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
   "count": 1, "types": [ "..." ] } }
 ```
 
-#### 1.4 装扮详情 [业务接口]
+### 4. 装扮详情 [one]
 
-- **路径**: `/api/decoration/one`　**方法**: `GET`　**权限**: 公开
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/one`　**方法**: `GET`　**权限**: 公开
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -199,9 +201,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
             "permanent": true, "category_name": "" }
 ```
 
-#### 1.5 装扮列表 [业务接口]
+### 5. 装扮列表 [all]
 
-- **路径**: `/api/decoration/all`　**方法**: `GET`　**权限**: 公开（含管理分支）
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/all`　**方法**: `GET`　**权限**: 公开（含管理分支）
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -220,9 +223,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 - 走 `Select()` **不触发 `AfterFind`**，因此列表项里**没有** `result` 派生对象、
   `payload` / `json` / `unlock` 也不会被解码成 map（是原始字符串）。需要解码后的结构请用 `one`。
 
-#### 1.6 装扮统计（后台）[业务接口]
+### 6. 装扮统计（后台） [count]
 
-- **路径**: `/api/decoration/count`　**方法**: `GET`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/count`　**方法**: `GET`　**权限**: `default`
 
 ```json
 { "code": 200, "msg": "查询成功！", "data": {
@@ -230,19 +234,22 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
   "by_type": { "avatar_frame": 5, "title": 7 } } }
 ```
 
-#### 1.7 我的装扮 [业务接口]
+### 7. 我的装扮 [mine]
 
-- **路径**: `/api/decoration/mine`　**方法**: `GET`　**权限**: 登录（仅本人，无 `uid` 参数）
-- **描述**: 拥有 + 默认的装扮，按类型分组；响应 `{types, wearing, list}`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/mine`　**方法**: `GET`　**权限**: 登录（仅本人，无 `uid` 参数）
+- **说明**: 拥有 + 默认的装扮，按类型分组；响应 `{types, wearing, list}`
 
-#### 1.8 我佩戴的装扮 [业务接口]
+### 8. 我佩戴的装扮 [wearing]
 
-- **路径**: `/api/decoration/wearing`　**方法**: `GET`　**权限**: 登录
-- **描述**: 按类型返回当前佩戴的装扮（`{type: 装扮}` 的 map，未佩戴则为 `{}`）
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/wearing`　**方法**: `GET`　**权限**: 登录
+- **说明**: 按类型返回当前佩戴的装扮（`{type: 装扮}` 的 map，未佩戴则为 `{}`）
 
-#### 1.9 指定用户的装扮（后台）[业务接口]
+### 9. 指定用户的装扮（后台） [user-decorations]
 
-- **路径**: `/api/decoration/user-decorations`　**方法**: `GET`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/user-decorations`　**方法**: `GET`　**权限**: `default`
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -254,11 +261,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 ---
 
-### 2. POST 请求接口
+### 10. 佩戴装扮 [wear]
 
-#### 2.1 佩戴装扮 [业务接口]
-
-- **路径**: `/api/decoration/wear`　**方法**: `POST`　**权限**: 登录
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/wear`　**方法**: `POST`　**权限**: 登录
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -281,9 +287,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 | `该装扮已过期！` | 拥有记录已过期（同时把状态刷成「过期」） |
 | `请填写头衔文字！` / `头衔最多 N 个字！` | 纯样式模板头衔的文字校验 |
 
-#### 2.2 卸下装扮 [业务接口]
+### 11. 卸下装扮 [unwear]
 
-- **路径**: `/api/decoration/unwear`　**方法**: `POST`　**权限**: 登录
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/unwear`　**方法**: `POST`　**权限**: 登录
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -291,9 +298,10 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 - 成功：`{wearing: {...}}` + `已卸下！`；业务失败同样是 **202**
 
-#### 2.3 兑换装扮 [业务接口]
+### 12. 兑换装扮 [buy]
 
-- **路径**: `/api/decoration/buy`　**方法**: `POST`　**权限**: 登录
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/buy`　**方法**: `POST`　**权限**: 登录
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -329,14 +337,17 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 > 写积分流水（`type = decoration`，含 `balance_after` 快照）→ `GrantDecorationTx` 发放。
 > 任一步失败整体回滚，积分不会白扣。
 
-#### 2.4 保存装扮（后台）[业务接口]
+### 13. 保存装扮（后台） [save]
 
-- **路径**: `/api/decoration/save`　**方法**: `POST`　**权限**: `default`
-- **描述**: 无 `id` 走新增、有 `id` 走更新（等价于 `create` / `update`）
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/save`　**方法**: `POST`　**权限**: `default`
+- **说明**: 无 `id` 走新增、有 `id` 走更新（等价于 `create` / `update`）
 
-#### 2.5 新增装扮（后台）[业务接口]
+### 14. 新增装扮（后台） [create]
 
-- **路径**: `/api/decoration/create`　**方法**: `POST`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/create`　**方法**: `POST`　**权限**: `default`
+
 - **参数**: 上面的可写字段白名单（`type`、`name` 必填）
 
 | code | msg | 触发条件 |
@@ -349,16 +360,17 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 ---
 
-### 3. PUT 请求接口
+### 15. 更新装扮（后台） [update]
 
-#### 3.1 更新装扮（后台）[业务接口]
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/update`　**方法**: `PUT`　**权限**: `default`
 
-- **路径**: `/api/decoration/update`　**方法**: `PUT`　**权限**: `default`
 - **参数**: `id`（必填）+ 可写字段白名单；成功 `{id}` + `更新成功！`
 
-#### 3.2 批量发放装扮（后台）[业务接口]
+### 16. 批量发放装扮（后台） [grant]
 
-- **路径**: `/api/decoration/grant`　**方法**: `PUT`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/grant`　**方法**: `PUT`　**权限**: `default`
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -370,20 +382,22 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 - 目标用户 × 装扮做**笛卡尔积**发放，逐条失败只计数不中断
 - 成功 **200** `发放完成！` + `{success, failed}`
 
-#### 3.3 批量回收装扮（后台）[业务接口]
+### 17. 批量回收装扮（后台） [revoke]
 
-- **路径**: `/api/decoration/revoke`　**方法**: `PUT`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/revoke`　**方法**: `PUT`　**权限**: `default`
+
 - **参数**: `uids`、`decoration_ids`（必填，同上）
 - 正在佩戴的会先卸下；拥有记录**软删除**（便于续期幂等）；成功 `回收完成！` + `{success, failed}`
 
-#### 3.4 恢复装扮 [业务接口]
+### 18. 恢复装扮 [restore]
 
-- **路径**: `/api/decoration/restore`　**方法**: `PUT`　**权限**: `default`
+- **接口类型**: 业务接口
+- **请求地址**: `/api/decoration/restore`　**方法**: `PUT`　**权限**: `default`
+
 - **参数**: `ids`（必填）；只能恢复软删除的记录
 
 ---
-
-### 4. DELETE 请求接口
 
 | 方法 | 路径 | 参数 | 行为 |
 | :--- | :--- | :--- | :--- |
@@ -396,7 +410,7 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 
 ---
 
-## 注意事项
+## 特殊说明
 
 1. **HTTP 状态码恒为 200**，业务码在 body；`202` = 业务拒绝、`204` = 无数据，
    前端不要只判 200；
@@ -420,7 +434,7 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 14. **装扮商品不出现在积分商城列表**：`goods/all` 对非管理员强制 `deliver_type != "decoration"`
     （`app/api/controller/goods.go:399`），「已购 / 未购」判断要走 `decoration/shop` + `decoration/mine`。
 
-## 相关文档
+### 相关文档
 
 | 文档 | 内容 |
 | :--- | :--- |

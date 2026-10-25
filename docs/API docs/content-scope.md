@@ -1,4 +1,6 @@
-# 内容可见范围（Content Scope）
+# 内容可见范围 接口文档
+
+## 接口概述
 
 文章、动态、独立页面、评论共用的「可见范围」能力：公开 / 登录可见 / 付费可见（积分兑换）/ 仅作者可见。
 
@@ -19,7 +21,7 @@
 
 ---
 
-## 字段说明
+### 字段说明
 
 `article`、`moments`、`pages` 三张表各新增两个字段；`comment` 只有 `scope`（评论不支持付费）：
 
@@ -82,7 +84,9 @@
 
 ---
 
-## 兑换接口
+## 接口列表
+
+### 兑换接口
 
 `GET /api/unlock/check`、`POST /api/unlock/pay`、`GET /api/unlock/list`
 （查询可见状态 / 积分兑换 / 我的兑换记录）的详细参数与返回见 [unlock.md](./unlock.md)。
@@ -97,7 +101,9 @@
 
 ---
 
-## 前端使用约定
+## 特殊说明
+
+### 前端使用约定
 
 1. 详情页（文章 / 独立页面 / 动态卡片 / 评论项）判断 `scope_state === 'login' || 'pay'` 时渲染 `<ContentLock>`；
 2. `<ContentLock>` 传参：`state`、`integral`、`bind-type`、`bind-id`；

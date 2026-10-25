@@ -1,4 +1,4 @@
-# User Likes 用户点赞接口文档
+# 用户点赞 接口文档
 
 ## 接口概述
 
@@ -20,22 +20,7 @@
 
 ---
 
-## 状态码规范
-
-| 状态码 | 说明 | 使用场景 |
-| :--- | :--- | :--- |
-| **200** | 请求成功 | 获取数据成功、操作成功 |
-| **202** | 接受请求 | 请求已接受（无实际功能） |
-| **204** | 无内容 | 查询无数据、无可操作数据 |
-| **400** | 请求错误 | 参数校验失败、操作失败 |
-| **401** | 未授权 | 用户未登录 |
-| **403** | 无权限 | 无操作权限 |
-| **405** | 方法不允许 | 请求方法错误或方法名错误 |
-| **500** | 服务器错误 | 系统内部错误 |
-
----
-
-## 数据模型
+### 数据模型
 
 ### UserLikes 结构
 
@@ -54,15 +39,29 @@
 
 ---
 
+## 状态码规范
+
+| 状态码 | 说明 | 使用场景 |
+| :--- | :--- | :--- |
+| **200** | 请求成功 | 获取数据成功、操作成功 |
+| **202** | 接受请求 | 请求已接受（无实际功能） |
+| **204** | 无内容 | 查询无数据、无可操作数据 |
+| **400** | 请求错误 | 参数校验失败、操作失败 |
+| **401** | 未授权 | 用户未登录 |
+| **403** | 无权限 | 无操作权限 |
+| **405** | 方法不允许 | 请求方法错误或方法名错误 |
+| **500** | 服务器错误 | 系统内部错误 |
+
+---
+
 ## 接口列表
 
-### 1. GET 请求接口
+### 1. 获取单个点赞记录 [one]
 
-#### 1.1 获取单个点赞记录 [基础接口-获取指定]
-
-- **路径**: `/api/user-likes/one`
-- **方法**: `GET`
-- **描述**: 根据条件获取单个点赞记录
+- **接口类型**: 基础接口 / 获取指定
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/one`
+- **说明**: 根据条件获取单个点赞记录
 
 **请求参数**:
 
@@ -77,6 +76,7 @@
 | `like` | json | 否 | 模糊查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -101,11 +101,12 @@
 
 **权限说明**: 非管理员只能查看自己的点赞记录
 
-#### 1.2 获取所有点赞记录 [基础接口-获取全部]
+### 2. 获取所有点赞记录 [all]
 
-- **路径**: `/api/user-likes/all`
-- **方法**: `GET`
-- **描述**: 分页获取点赞记录列表
+- **接口类型**: 基础接口 / 获取全部
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/all`
+- **说明**: 分页获取点赞记录列表
 
 **请求参数**:
 
@@ -119,6 +120,7 @@
 | `like` | json | 否 | 模糊查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -133,11 +135,12 @@
 
 **权限说明**: 非管理员只能查看自己的点赞记录
 
-#### 1.3 随机获取点赞记录 [基础接口-随机获取]
+### 3. 随机获取点赞记录 [rand]
 
-- **路径**: `/api/user-likes/rand`
-- **方法**: `GET`
-- **描述**: 随机获取指定数量的点赞记录
+- **接口类型**: 基础接口 / 随机获取
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/rand`
+- **说明**: 随机获取指定数量的点赞记录
 
 **请求参数**:
 
@@ -148,6 +151,7 @@
 | `field` | string | 否 | 返回字段 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -158,11 +162,12 @@
 
 **权限说明**: 非管理员只能获取自己的点赞记录
 
-#### 1.4 查询数量 [基础接口-查询数量]
+### 4. 查询数量 [count]
 
-- **路径**: `/api/user-likes/count`
-- **方法**: `GET`
-- **描述**: 查询点赞记录数量
+- **接口类型**: 基础接口 / 查询数量
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/count`
+- **说明**: 查询点赞记录数量
 
 **请求参数**:
 
@@ -171,6 +176,7 @@
 | `where` | json | 否 | 条件查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -179,11 +185,12 @@
 }
 ```
 
-#### 1.5 求和 [基础接口-求和]
+### 5. 求和 [sum]
 
-- **路径**: `/api/user-likes/sum`
-- **方法**: `GET`
-- **描述**: 对指定字段求和
+- **接口类型**: 基础接口 / 求和
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/sum`
+- **说明**: 对指定字段求和
 
 **请求参数**:
 
@@ -194,6 +201,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -204,11 +212,12 @@
 }
 ```
 
-#### 1.6 最小值 [基础接口-最小值]
+### 6. 最小值 [min]
 
-- **路径**: `/api/user-likes/min`
-- **方法**: `GET`
-- **描述**: 获取指定字段最小值
+- **接口类型**: 基础接口 / 最小值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/min`
+- **说明**: 获取指定字段最小值
 
 **请求参数**:
 
@@ -219,6 +228,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -229,11 +239,12 @@
 }
 ```
 
-#### 1.7 最大值 [基础接口-最大值]
+### 7. 最大值 [max]
 
-- **路径**: `/api/user-likes/max`
-- **方法**: `GET`
-- **描述**: 获取指定字段最大值
+- **接口类型**: 基础接口 / 最大值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/max`
+- **说明**: 获取指定字段最大值
 
 **请求参数**:
 
@@ -244,6 +255,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -254,11 +266,12 @@
 }
 ```
 
-#### 1.8 查询列 [基础接口-查询列]
+### 8. 查询列 [column]
 
-- **路径**: `/api/user-likes/column`
-- **方法**: `GET`
-- **描述**: 获取指定字段列表
+- **接口类型**: 基础接口 / 查询列
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/column`
+- **说明**: 获取指定字段列表
 
 **请求参数**:
 
@@ -270,6 +283,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -278,11 +292,12 @@
 }
 ```
 
-#### 1.9 检查是否已点赞 [业务接口]
+### 9. 检查是否已点赞 [is-liked]
 
-- **路径**: `/api/user-likes/is-liked`
-- **方法**: `GET`
-- **描述**: 检查当前用户是否已点赞指定目标，同时返回点赞总数
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/is-liked`
+- **说明**: 检查当前用户是否已点赞指定目标，同时返回点赞总数
 
 **请求参数**:
 
@@ -292,6 +307,7 @@
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -305,11 +321,12 @@
 
 **权限说明**: 公共接口，无需登录。未登录时 `is_liked` 始终为 `false`
 
-#### 1.10 获取点赞列表 [业务接口]
+### 10. 获取点赞列表 [likes]
 
-- **路径**: `/api/user-likes/likes`
-- **方法**: `GET`
-- **描述**: 获取指定用户（或当前登录用户）的点赞列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的点赞数据
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/likes`
+- **说明**: 获取指定用户（或当前登录用户）的点赞列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的点赞数据
 
 **请求参数**:
 
@@ -320,6 +337,7 @@
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -350,11 +368,12 @@
 - 查询他人点赞时，若对方隐私设置中「公开我的点赞」为关闭（likes=0），返回 `private:true` 及提示「对方设置了私密，无法查看！」
 - 查询自己的点赞不受隐私限制
 
-#### 1.11 批量查询点赞数量 [业务接口]
+### 11. 批量查询点赞数量 [counts]
 
-- **路径**: `/api/user-likes/counts`
-- **方法**: `GET`
-- **描述**: 批量查询指定目标类型和目标ID列表的点赞数量
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/counts`
+- **说明**: 批量查询指定目标类型和目标ID列表的点赞数量
 
 **请求参数**:
 
@@ -364,6 +383,7 @@
 | `target_ids` | string | **是** | 目标ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -379,7 +399,8 @@
 ```
 
 **使用示例**:
-```
+
+```http
 GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 ```
 
@@ -387,11 +408,11 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 
 ---
 
-#### 1.12 批量查询点赞状态 [业务接口]
+### 12. 批量查询点赞状态 [states]
 
-- **路径**: `/api/user-likes/states`
-- **方法**: `GET`
-- **描述**: 一次拿到整页内容的「是否已点赞 + 点赞数」，供列表页替代逐条调用 1.9
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/states`
 
 **请求参数**:
 
@@ -401,6 +422,7 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 | `target_ids` | string | **是** | 目标ID列表，逗号分隔，单次最多 200 个 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -415,11 +437,10 @@ GET /api/user-likes/counts?target_type=article&target_ids=1,2,3
 ```
 
 **使用示例**:
-```
+
+```http
 GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 ```
-
-**说明**:
 
 - 未登录时 `is_liked` 一律为 `false`，`count` 照常返回（游客也要看到点赞数）；
 - 与 1.11 的区别：`counts` 只给数量，`states` 额外带当前用户的点赞状态，
@@ -430,13 +451,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 ---
 
-### 2. POST 请求接口
+### 13. 保存点赞 [save]
 
-#### 2.1 保存点赞 [基础接口-保存数据]
-
-- **路径**: `/api/user-likes/save`
-- **方法**: `POST`
-- **描述**: 保存点赞记录（新增或更新，id为空时新增）
+- **接口类型**: 基础接口 / 保存数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-likes/save`
+- **说明**: 保存点赞记录（新增或更新，id为空时新增）
 
 **请求参数**:
 
@@ -448,6 +468,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `target_id` | int | 否 | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -460,11 +481,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能操作自己的数据
 
-#### 2.2 创建点赞 [基础接口-添加数据]
+### 14. 创建点赞 [create]
 
-- **路径**: `/api/user-likes/create`
-- **方法**: `POST`
-- **描述**: 新增点赞记录
+- **接口类型**: 基础接口 / 添加数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-likes/create`
+- **说明**: 新增点赞记录
 
 **请求参数**:
 
@@ -475,6 +497,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -485,11 +508,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 }
 ```
 
-#### 2.3 点赞 [业务接口]
+### 15. 点赞 [like]
 
-- **路径**: `/api/user-likes/like`
-- **方法**: `POST`
-- **描述**: 点赞指定目标。已点赞时返回错误提示
+- **接口类型**: 业务接口
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-likes/like`
+- **说明**: 点赞指定目标。已点赞时返回错误提示
 
 **请求参数**:
 
@@ -499,6 +523,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -511,6 +536,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 ```
 
 **错误响应** (400 - 已点赞):
+
 ```json
 {
     "code": 400,
@@ -521,11 +547,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 **权限说明**: 需要登录
 
-#### 2.4 取消点赞 [业务接口]
+### 16. 取消点赞 [unlike]
 
-- **路径**: `/api/user-likes/unlike`
-- **方法**: `POST` / `PUT`
-- **描述**: 取消点赞指定目标。删除对应记录，即使记录不存在也返回成功
+- **接口类型**: 业务接口
+- **请求方式**: `POST` / `PUT`
+- **请求地址**: `/api/user-likes/unlike`
+- **说明**: 取消点赞指定目标。删除对应记录，即使记录不存在也返回成功
 
 **请求参数**:
 
@@ -535,6 +562,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `target_id` | int | **是** | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -550,13 +578,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 ---
 
-### 3. PUT 请求接口
+### 17. 更新点赞 [update]
 
-#### 3.1 更新点赞 [基础接口-修改数据]
-
-- **路径**: `/api/user-likes/update`
-- **方法**: `PUT`
-- **描述**: 更新点赞记录信息
+- **接口类型**: 基础接口 / 修改数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/user-likes/update`
+- **说明**: 更新点赞记录信息
 
 **请求参数**:
 
@@ -567,6 +594,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `target_id` | int | 否 | 目标ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -579,44 +607,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能更新自己的数据
 
-#### 3.2 取消点赞 [业务接口]
+### 18. 删除点赞记录 [remove]
 
-> 与 2.4 相同，支持 `POST` 和 `PUT` 两种请求方式
-
-- **路径**: `/api/user-likes/unlike`
-- **方法**: `PUT`
-- **描述**: 取消点赞指定目标
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `target_type` | string | **是** | 目标类型：article/page/moments/comment |
-| `target_id` | int | **是** | 目标ID |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "取消点赞成功！",
-    "data": {
-        "target_type": "moments",
-        "target_id": 10
-    }
-}
-```
-
-**权限说明**: 需要登录
-
----
-
-### 4. DELETE 请求接口
-
-#### 4.1 删除点赞记录 [基础接口-删除]
-
-- **路径**: `/api/user-likes/remove`
-- **方法**: `DELETE`
-- **描述**: 删除指定的点赞记录（物理删除）
+- **接口类型**: 基础接口 / 删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-likes/remove`
+- **说明**: 删除指定的点赞记录（物理删除）
 
 **请求参数**:
 
@@ -625,6 +621,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `ids` | string | **是** | 点赞记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -637,11 +634,12 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.2 彻底删除点赞 [基础接口-彻底删除]
+### 19. 彻底删除点赞 [delete]
 
-- **路径**: `/api/user-likes/delete`
-- **方法**: `DELETE`
-- **描述**: 永久删除点赞记录，不可恢复
+- **接口类型**: 基础接口 / 彻底删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-likes/delete`
+- **说明**: 永久删除点赞记录，不可恢复
 
 **请求参数**:
 
@@ -650,6 +648,7 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 | `ids` | string | **是** | 点赞记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -662,15 +661,17 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.3 清空所有点赞 [基础接口-清空]
+### 20. 清空所有点赞 [clear]
 
-- **路径**: `/api/user-likes/clear`
-- **方法**: `DELETE`
-- **描述**: 清空所有点赞记录
+- **接口类型**: 基础接口 / 清空
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-likes/clear`
+- **说明**: 清空所有点赞记录
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -683,71 +684,21 @@ GET /api/user-likes/states?target_type=article&target_ids=1,2,3
 
 ---
 
-### 5. INDEX 接口
+### 21. INDEX 接口
 
-- **路径**: `/api/user-likes/index`
-- **方法**: `GET`
-- **描述**: 用户点赞首页（无实际功能）
+- **接口类型**: INDEX 接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-likes/index`
+- **说明**: 用户点赞首页（无实际功能）
 
 **成功响应** (202):
+
 ```json
 {
     "code": 202,
     "msg": "没什么用！",
     "data": null
 }
-```
-
----
-
-## 前端使用指南
-
-### 场景一：展示文章点赞数并判断是否已点赞
-
-```javascript
-// 获取点赞状态和数量（一个请求搞定）
-const res = await request.get('/api/user-likes/is-liked', {
-    target_type: 'article',
-    target_id: articleId
-})
-// res.data = { is_liked: true, count: 42 }
-```
-
-### 场景二：执行点赞/取消点赞
-
-```javascript
-// 点赞
-await request.post('/api/user-likes/like', {
-    target_type: 'article',
-    target_id: articleId
-})
-
-// 取消点赞
-await request.post('/api/user-likes/unlike', {
-    target_type: 'article',
-    target_id: articleId
-})
-```
-
-### 场景三：列表页批量获取点赞数
-
-```javascript
-// 批量获取多个文章的点赞数
-const res = await request.get('/api/user-likes/counts', {
-    target_type: 'article',
-    target_ids: '1,2,3,4,5'
-})
-// res.data.counts = { "1": 10, "2": 5, "3": 3 }
-```
-
-### 场景四：我的点赞列表
-
-```javascript
-// 获取当前用户的点赞历史
-const res = await request.get('/api/user-likes/likes', {
-    target_type: 'article',  // 可选，筛选类型
-    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
-})
 ```
 
 ---
@@ -785,3 +736,55 @@ const res = await request.get('/api/user-likes/likes', {
 - 点赞时如已存在记录，会返回"已经点赞过了"错误
 - 取消点赞不检查记录是否存在，直接执行删除操作
 - unlike 同时支持 POST 和 PUT 两种请求方式
+
+### 前端使用指南
+
+****
+
+```javascript
+// 获取点赞状态和数量（一个请求搞定）
+const res = await request.get('/api/user-likes/is-liked', {
+    target_type: 'article',
+    target_id: articleId
+})
+// res.data = { is_liked: true, count: 42 }
+```
+
+****
+
+```javascript
+// 点赞
+await request.post('/api/user-likes/like', {
+    target_type: 'article',
+    target_id: articleId
+})
+
+// 取消点赞
+await request.post('/api/user-likes/unlike', {
+    target_type: 'article',
+    target_id: articleId
+})
+```
+
+****
+
+```javascript
+// 批量获取多个文章的点赞数
+const res = await request.get('/api/user-likes/counts', {
+    target_type: 'article',
+    target_ids: '1,2,3,4,5'
+})
+// res.data.counts = { "1": 10, "2": 5, "3": 3 }
+```
+
+****
+
+```javascript
+// 获取当前用户的点赞历史
+const res = await request.get('/api/user-likes/likes', {
+    target_type: 'article',  // 可选，筛选类型
+    field: 'id,target_type,target_id,result'  // 可选，指定返回字段
+})
+```
+
+---

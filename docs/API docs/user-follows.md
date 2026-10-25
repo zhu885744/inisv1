@@ -1,4 +1,4 @@
-# User Follows 用户关注接口文档
+# 用户关注 接口文档
 
 ## 接口概述
 
@@ -30,13 +30,12 @@
 
 ## 接口列表
 
-### 1. GET 请求接口
+### 1. 获取单个关注记录 [one]
 
-#### 1.1 获取单个关注记录 [基础接口-获取指定]
-
-- **路径**: `/api/user-follows/one`
-- **方法**: `GET`
-- **描述**: 根据条件获取单个关注记录
+- **接口类型**: 基础接口 / 获取指定
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/one`
+- **说明**: 根据条件获取单个关注记录
 
 **请求参数**:
 
@@ -51,6 +50,7 @@
 | `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -67,11 +67,12 @@
 
 **权限说明**: 非管理员只能查看自己的关注记录
 
-#### 1.2 获取所有关注记录 [基础接口-获取全部]
+### 2. 获取所有关注记录 [all]
 
-- **路径**: `/api/user-follows/all`
-- **方法**: `GET`
-- **描述**: 分页获取关注记录列表
+- **接口类型**: 基础接口 / 获取全部
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/all`
+- **说明**: 分页获取关注记录列表
 
 **请求参数**:
 
@@ -87,6 +88,7 @@
 | `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -101,11 +103,12 @@
 
 **权限说明**: 非管理员只能查看自己的关注记录
 
-#### 1.3 随机获取关注记录 [基础接口-随机获取]
+### 3. 随机获取关注记录 [rand]
 
-- **路径**: `/api/user-follows/rand`
-- **方法**: `GET`
-- **描述**: 随机获取指定数量的关注记录
+- **接口类型**: 基础接口 / 随机获取
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/rand`
+- **说明**: 随机获取指定数量的关注记录
 
 **请求参数**:
 
@@ -118,6 +121,7 @@
 | `withTrashed` | bool | 否 | 是否包含已删除数据 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -128,11 +132,12 @@
 
 **权限说明**: 非管理员只能获取自己的关注记录
 
-#### 1.4 查询数量 [基础接口-查询数量]
+### 4. 查询数量 [count]
 
-- **路径**: `/api/user-follows/count`
-- **方法**: `GET`
-- **描述**: 查询关注记录数量
+- **接口类型**: 基础接口 / 查询数量
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/count`
+- **说明**: 查询关注记录数量
 
 **请求参数**:
 
@@ -143,6 +148,7 @@
 | `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -151,11 +157,12 @@
 }
 ```
 
-#### 1.5 求和 [基础接口-求和]
+### 5. 求和 [sum]
 
-- **路径**: `/api/user-follows/sum`
-- **方法**: `GET`
-- **描述**: 对指定字段求和
+- **接口类型**: 基础接口 / 求和
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/sum`
+- **说明**: 对指定字段求和
 
 **请求参数**:
 
@@ -166,6 +173,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -176,11 +184,12 @@
 }
 ```
 
-#### 1.6 最小值 [基础接口-最小值]
+### 6. 最小值 [min]
 
-- **路径**: `/api/user-follows/min`
-- **方法**: `GET`
-- **描述**: 获取指定字段最小值
+- **接口类型**: 基础接口 / 最小值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/min`
+- **说明**: 获取指定字段最小值
 
 **请求参数**:
 
@@ -191,6 +200,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -201,11 +211,12 @@
 }
 ```
 
-#### 1.7 最大值 [基础接口-最大值]
+### 7. 最大值 [max]
 
-- **路径**: `/api/user-follows/max`
-- **方法**: `GET`
-- **描述**: 获取指定字段最大值
+- **接口类型**: 基础接口 / 最大值
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/max`
+- **说明**: 获取指定字段最大值
 
 **请求参数**:
 
@@ -216,6 +227,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -226,11 +238,12 @@
 }
 ```
 
-#### 1.8 查询列 [基础接口-查询列]
+### 8. 查询列 [column]
 
-- **路径**: `/api/user-follows/column`
-- **方法**: `GET`
-- **描述**: 获取指定字段列表
+- **接口类型**: 基础接口 / 查询列
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/column`
+- **说明**: 获取指定字段列表
 
 **请求参数**:
 
@@ -242,6 +255,7 @@
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -250,11 +264,12 @@
 }
 ```
 
-#### 1.9 获取关注列表 [业务接口]
+### 9. 获取关注列表 [following]
 
-- **路径**: `/api/user-follows/following`
-- **方法**: `GET`
-- **描述**: 获取指定用户（或当前登录用户）的关注列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的关注数据
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/following`
+- **说明**: 获取指定用户（或当前登录用户）的关注列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的关注数据
 
 **请求参数**:
 
@@ -265,6 +280,7 @@
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -296,11 +312,12 @@
 - 查询他人关注列表时，若对方隐私设置中「关注与粉丝列表」为「全部私密」(none) 或「仅公开粉丝」(followers)，返回 `private:true` 及提示「对方设置了私密，无法查看！」
 - 查询自己的关注列表不受隐私限制
 
-#### 1.10 获取粉丝列表 [业务接口]
+### 10. 获取粉丝列表 [followers]
 
-- **路径**: `/api/user-follows/followers`
-- **方法**: `GET`
-- **描述**: 获取指定用户（或当前登录用户）的粉丝列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的粉丝数据
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/followers`
+- **说明**: 获取指定用户（或当前登录用户）的粉丝列表。**公共接口**，任何人都能通过 `uid` 查询对应用户的粉丝数据
 
 **请求参数**:
 
@@ -311,6 +328,7 @@
 | `field` | string | 否 | 返回字段，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -343,11 +361,12 @@
 - 查询他人粉丝列表时，若对方隐私设置中「关注与粉丝列表」为「全部私密」(none) 或「仅公开关注」(following)，返回 `private:true` 及提示「对方设置了私密，无法查看！」
 - 查询自己的粉丝列表不受隐私限制
 
-#### 1.11 检查是否已关注 [业务接口]
+### 11. 检查是否已关注 [is-following]
 
-- **路径**: `/api/user-follows/is-following`
-- **方法**: `GET`
-- **描述**: 检查当前用户是否已关注指定用户
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/is-following`
+- **说明**: 检查当前用户是否已关注指定用户
 
 **请求参数**:
 
@@ -356,6 +375,7 @@
 | `follow_uid` | int | **是** | 被关注用户ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -368,11 +388,12 @@
 
 **权限说明**: 需要登录
 
-#### 1.12 批量查询关注/粉丝数量 [业务接口]
+### 12. 批量查询关注/粉丝数量 [counts]
 
-- **路径**: `/api/user-follows/counts`
-- **方法**: `GET`
-- **描述**: 批量查询指定用户的关注数或粉丝数
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/counts`
+- **说明**: 批量查询指定用户的关注数或粉丝数
 
 **请求参数**:
 
@@ -382,6 +403,7 @@
 | `target_ids` | string | **是** | 用户ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -397,7 +419,8 @@
 ```
 
 **使用示例**:
-```
+
+```http
 # 查询用户ID为1,2,3的关注数
 GET /api/user-follows/counts?target_type=following&target_ids=1,2,3
 
@@ -407,12 +430,15 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 公共接口，无需登录
 
-#### 1.13 查询互关状态 [业务接口]
+### 13. 查询互关状态 [relation]
 
-- **路径**: `/api/user-follows/relation`
-- **方法**: `GET`
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/relation`
+- **说明**: 返回「我」与目标用户的关注关系，主页按钮据此显示四种状态
+
 - **权限**: `type=login`（未登录 401）
-- **描述**: 返回「我」与目标用户的关注关系，主页按钮据此显示四种状态
+
   （未关注 → `关注`；已关注 → `已关注`；对方关注我 → `回关`；互相关注 → `互关`）
 
 **请求参数**:
@@ -422,6 +448,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `follow_uid` | int | **是** | 目标用户ID；`<=0` 返回 400 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -437,17 +464,21 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 > ⚠️ **查自己主页时 `is_follower` 强制为 `false`**（`follow_uid != uid` 判定），
 > 避免按钮显示成「互关自己」。
 
-#### 1.14 可能认识的人 [业务接口]
+### 14. 可能认识的人 [suggest]
 
-- **路径**: `/api/user-follows/suggest`
-- **方法**: `GET`
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/suggest`
+- **说明**: 基于「共同关注」的二度人脉推荐：我关注的人 A → A 们关注的人 B，
+
 - **权限**: `type=login`（未登录 401）
-- **描述**: 基于「共同关注」的二度人脉推荐：我关注的人 A → A 们关注的人 B，
+
   排除自己与已关注的人，按共同关注数降序（同分按 uid 升序，保证顺序稳定），最多 **6** 个
 
 **请求参数**: **无**（不读任何参数，也不支持分页）
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -475,12 +506,14 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 > 隐私：只返回 `id / nickname / avatar / description / json / result / title` 白名单字段
 > （已过 `SanitizeAuthor`），**不暴露任何关注关系明细**，`mutual_count` 只是聚合数字。
 
-#### 1.15 社交数据卡片 [业务接口]
+### 15. 社交数据卡片 [stats]
 
-- **路径**: `/api/user-follows/stats`
-- **方法**: `GET`
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/stats`
+- **说明**: 用户主页的社交数字：关注 / 粉丝 / 动态 / 文章 / 获赞
+
 - **权限**: `type=common`（**无需登录**，主页数字本来就公开）
-- **描述**: 用户主页的社交数字：关注 / 粉丝 / 动态 / 文章 / 获赞
 
 **请求参数**:
 
@@ -489,6 +522,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `uid` | int | 否 | 目标用户；不传时取当前登录用户（都取不到则 400） |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -520,13 +554,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 ---
 
-### 2. POST 请求接口
+### 16. 保存关注 [save]
 
-#### 2.1 保存关注 [基础接口-保存数据]
-
-- **路径**: `/api/user-follows/save`
-- **方法**: `POST`
-- **描述**: 保存关注记录（新增或更新，id为空时新增）
+- **接口类型**: 基础接口 / 保存数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-follows/save`
+- **说明**: 保存关注记录（新增或更新，id为空时新增）
 
 **请求参数**:
 
@@ -539,6 +572,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `description` | string | 否 | 描述 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -551,11 +585,13 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 非管理员只能操作自己的数据
 
-#### 2.2 创建关注 [基础接口-添加数据]
+### 17. 创建关注 [create]
 
-- **路径**: `/api/user-follows/create`
-- **方法**: `POST`
-- **描述**: 新增关注记录。注意：不能关注自己。**幂等**：与 `follow` 共用同一套逻辑，
+- **接口类型**: 基础接口 / 添加数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-follows/create`
+- **说明**: 新增关注记录。注意：不能关注自己。**幂等**：与 `follow` 共用同一套逻辑，
+
   同一对 `(uid, follow_uid)` 只会有一条记录，已存在（含已取消 / 软删除）时复用并置 `status=1`，不会新增行
 
 **请求参数**:
@@ -568,6 +604,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `description` | string | 否 | 描述，非空时覆盖已有记录的描述 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -578,11 +615,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 }
 ```
 
-#### 2.3 关注用户 [业务接口]
+### 18. 关注用户 [follow]
 
-- **路径**: `/api/user-follows/follow`
-- **方法**: `POST`
-- **描述**: 关注指定用户。重复关注直接返回成功，不会报错。不能关注自己
+- **接口类型**: 业务接口
+- **请求方式**: `POST`
+- **请求地址**: `/api/user-follows/follow`
+- **说明**: 关注指定用户。重复关注直接返回成功，不会报错。不能关注自己
 
 **请求参数**:
 
@@ -591,6 +629,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `follow_uid` | int | **是** | 被关注用户ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -603,11 +642,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 需要登录
 
-#### 2.4 取消关注 [业务接口]
+### 19. 取消关注 [unfollow]
 
-- **路径**: `/api/user-follows/unfollow`
-- **方法**: `POST` / `PUT`
-- **描述**: 取消关注指定用户。即使没有关注记录也返回成功
+- **接口类型**: 业务接口
+- **请求方式**: `POST` / `PUT`
+- **请求地址**: `/api/user-follows/unfollow`
+- **说明**: 取消关注指定用户。即使没有关注记录也返回成功
 
 **请求参数**:
 
@@ -616,6 +656,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `follow_uid` | int | **是** | 被关注用户ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -630,13 +671,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 ---
 
-### 3. PUT 请求接口
+### 20. 更新关注 [update]
 
-#### 3.1 更新关注 [基础接口-修改数据]
-
-- **路径**: `/api/user-follows/update`
-- **方法**: `PUT`
-- **描述**: 更新关注记录信息
+- **接口类型**: 基础接口 / 修改数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/user-follows/update`
+- **说明**: 更新关注记录信息
 
 **请求参数**:
 
@@ -648,6 +688,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `description` | string | 否 | 描述 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -660,11 +701,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 非管理员只能更新自己的数据
 
-#### 3.2 恢复关注 [基础接口-恢复数据]
+### 21. 恢复关注 [restore]
 
-- **路径**: `/api/user-follows/restore`
-- **方法**: `PUT`
-- **描述**: 从回收站恢复关注记录
+- **接口类型**: 基础接口 / 恢复数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/user-follows/restore`
+- **说明**: 从回收站恢复关注记录
 
 **请求参数**:
 
@@ -673,6 +715,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `ids` | string | **是** | 关注记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -683,42 +726,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 }
 ```
 
-#### 3.3 取消关注 [业务接口]
+### 22. 软删除关注 [remove]
 
-> 与 2.4 相同，支持 `POST` 和 `PUT` 两种请求方式
-
-- **路径**: `/api/user-follows/unfollow`
-- **方法**: `PUT`
-- **描述**: 取消关注指定用户。即使没有关注记录也返回成功
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `follow_uid` | int | **是** | 被关注用户ID |
-
-**成功响应** (200):
-```json
-{
-    "code": 200,
-    "msg": "取消关注成功！",
-    "data": {
-        "follow_uid": 123
-    }
-}
-```
-
-**权限说明**: 需要登录
-
----
-
-### 4. DELETE 请求接口
-
-#### 4.1 软删除关注 [基础接口-软删除]
-
-- **路径**: `/api/user-follows/remove`
-- **方法**: `DELETE`
-- **描述**: 将关注记录移入回收站
+- **接口类型**: 基础接口 / 软删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-follows/remove`
+- **说明**: 将关注记录移入回收站
 
 **请求参数**:
 
@@ -727,6 +740,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `ids` | string | **是** | 关注记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -739,11 +753,12 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.2 彻底删除关注 [基础接口-彻底删除]
+### 23. 彻底删除关注 [delete]
 
-- **路径**: `/api/user-follows/delete`
-- **方法**: `DELETE`
-- **描述**: 永久删除关注记录，不可恢复
+- **接口类型**: 基础接口 / 彻底删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-follows/delete`
+- **说明**: 永久删除关注记录，不可恢复
 
 **请求参数**:
 
@@ -752,6 +767,7 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 | `ids` | string | **是** | 关注记录ID列表，逗号分隔 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -764,15 +780,17 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 **权限说明**: 非管理员只能删除自己的数据
 
-#### 4.3 清空回收站 [基础接口-清空回收站]
+### 24. 清空回收站 [clear]
 
-- **路径**: `/api/user-follows/clear`
-- **方法**: `DELETE`
-- **描述**: 清空所有已删除的关注记录
+- **接口类型**: 基础接口 / 清空回收站
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/user-follows/clear`
+- **说明**: 清空所有已删除的关注记录
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -785,13 +803,15 @@ GET /api/user-follows/counts?target_type=followers&target_ids=1,2,3
 
 ---
 
-### 5. INDEX 接口
+### 25. INDEX 接口
 
-- **路径**: `/api/user-follows/index`
-- **方法**: `GET`
-- **描述**: 用户关注首页（无实际功能）
+- **接口类型**: INDEX 接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/user-follows/index`
+- **说明**: 用户关注首页（无实际功能）
 
 **成功响应** (202):
+
 ```json
 {
     "code": 202,

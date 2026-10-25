@@ -1,4 +1,4 @@
-# Notification 消息通知接口文档
+# 消息通知 接口文档
 
 ## 接口概述
 
@@ -65,22 +65,7 @@
 
 ---
 
-## 状态码规范
-
-| 状态码 | 说明 | 使用场景 |
-| :--- | :--- | :--- |
-| **200** | 请求成功 | 获取数据成功、操作成功 |
-| **202** | 接受请求 | 请求已接受（无实际功能） |
-| **204** | 无内容 | 查询无数据、无可操作数据 |
-| **400** | 请求错误 | 参数校验失败、操作失败 |
-| **401** | 未授权 | 用户未登录 |
-| **403** | 无权限 | 无操作权限 |
-| **405** | 方法不允许 | 请求方法错误或方法名错误 |
-| **500** | 服务器错误 | 系统内部错误 |
-
----
-
-## 数据模型
+### 数据模型
 
 ### Notification 结构
 
@@ -118,15 +103,29 @@
 
 ---
 
+## 状态码规范
+
+| 状态码 | 说明 | 使用场景 |
+| :--- | :--- | :--- |
+| **200** | 请求成功 | 获取数据成功、操作成功 |
+| **202** | 接受请求 | 请求已接受（无实际功能） |
+| **204** | 无内容 | 查询无数据、无可操作数据 |
+| **400** | 请求错误 | 参数校验失败、操作失败 |
+| **401** | 未授权 | 用户未登录 |
+| **403** | 无权限 | 无操作权限 |
+| **405** | 方法不允许 | 请求方法错误或方法名错误 |
+| **500** | 服务器错误 | 系统内部错误 |
+
+---
+
 ## 接口列表
 
-### 1. GET 请求接口
+### 1. 获取通知列表 [list]
 
-#### 1.1 获取通知列表 [业务接口]
-
-- **路径**: `/api/notification/list`
-- **方法**: `GET`
-- **描述**: 分页获取当前用户的通知列表，支持按类型和已读状态筛选
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/list`
+- **说明**: 分页获取当前用户的通知列表，支持按类型和已读状态筛选
 
 **请求参数**:
 
@@ -144,6 +143,7 @@
 > 因此同一条广播在不同用户视角下的 `is_read` 可能不同。
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -179,21 +179,24 @@
 ```
 
 **使用示例**:
-```
+
+```http
 GET /api/notification/list?type=comment&is_read=0&page=1&size=20
 ```
 
 **权限说明**: 需要登录，仅返回「当前用户的通知 + 广播通知」；无法读取其它用户的个人通知
 
-#### 1.2 获取未读通知数量 [业务接口]
+### 2. 获取未读通知数量 [unread-count]
 
-- **路径**: `/api/notification/unread-count`
-- **方法**: `GET`
-- **描述**: 获取当前用户的未读通知总数
+- **接口类型**: 业务接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/unread-count`
+- **说明**: 获取当前用户的未读通知总数
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -205,6 +208,7 @@ GET /api/notification/list?type=comment&is_read=0&page=1&size=20
 ```
 
 **使用示例**:
+
 ```javascript
 // 前端轮询（或进入消息页时）更新未读角标
 const res = await request.get('/api/notification/unread-count')
@@ -213,11 +217,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录
 
-#### 1.3 获取单个通知 [基础接口-获取指定]
+### 3. 获取单个通知 [one]
 
-- **路径**: `/api/notification/one`
-- **方法**: `GET`
-- **描述**: 根据条件获取单个通知记录
+- **接口类型**: 基础接口 / 获取指定
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/one`
+- **说明**: 根据条件获取单个通知记录
 
 **请求参数**:
 
@@ -233,6 +238,7 @@ const res = await request.get('/api/notification/unread-count')
 | `onlyTrashed` | bool | 否 | 是否只查询已删除数据 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -261,11 +267,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录，用户只能查询自己的通知；管理员（root）可同时查询广播通知（uid=0）
 
-#### 1.4 获取所有通知 [基础接口-获取全部]
+### 4. 获取所有通知 [all]
 
-- **路径**: `/api/notification/all`
-- **方法**: `GET`
-- **描述**: 分页获取通知记录列表
+- **接口类型**: 基础接口 / 获取全部
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/all`
+- **说明**: 分页获取通知记录列表
 
 **请求参数**:
 
@@ -280,6 +287,7 @@ const res = await request.get('/api/notification/unread-count')
 | `like` | json | 否 | 模糊查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -298,11 +306,12 @@ const res = await request.get('/api/notification/unread-count')
 后台「个人消息」列表与统计都传自己的 `uid`，避免把全体可见的系统消息混入个人消息口径；
 后台「消息管理」则用 `scope=admin`（可按 `where={"type":"system"}` / `where={"is_read":0}` / `onlyTrashed` 收窄）。
 
-#### 1.5 随机获取通知 [基础接口-随机获取]
+### 5. 随机获取通知 [rand]
 
-- **路径**: `/api/notification/rand`
-- **方法**: `GET`
-- **描述**: 随机获取指定数量的通知记录
+- **接口类型**: 基础接口 / 随机获取
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/rand`
+- **说明**: 随机获取指定数量的通知记录
 
 **请求参数**:
 
@@ -313,6 +322,7 @@ const res = await request.get('/api/notification/unread-count')
 | `field` | string | 否 | 返回字段 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -323,11 +333,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录，可见范围同 `all`（普通用户仅自己，管理员含广播）
 
-#### 1.6 查询数量 [基础接口-查询数量]
+### 6. 查询数量 [count]
 
-- **路径**: `/api/notification/count`
-- **方法**: `GET`
-- **描述**: 查询通知记录数量
+- **接口类型**: 基础接口 / 查询数量
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/count`
+- **说明**: 查询通知记录数量
 
 **请求参数**:
 
@@ -336,6 +347,7 @@ const res = await request.get('/api/notification/unread-count')
 | `where` | json | 否 | 条件查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -347,11 +359,12 @@ const res = await request.get('/api/notification/unread-count')
 **权限说明**: 需要登录，可见范围同上（管理员可用 `scope=admin` 统计全站通知）；
 可用 `where` / `uid` 进一步收窄（后台「个人消息」统计即传自己的 `uid`）
 
-#### 1.7 求和 [基础接口-求和]
+### 7. 求和 [sum]
 
-- **路径**: `/api/notification/sum`
-- **方法**: `GET`
-- **描述**: 对指定字段求和
+- **接口类型**: 基础接口 / 求和
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/sum`
+- **说明**: 对指定字段求和
 
 **请求参数**:
 
@@ -361,6 +374,7 @@ const res = await request.get('/api/notification/unread-count')
 | `where` | json | 否 | 条件查询 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -373,11 +387,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录，可见范围同上
 
-#### 1.8 最小值 [基础接口-最小值]
+### 8. 最小值 [min]
 
-- **路径**: `/api/notification/min`
-- **方法**: `GET`
-- **描述**: 获取指定字段最小值
+- **接口类型**: 基础接口 / 最小值
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/min`
+- **说明**: 获取指定字段最小值
 
 **请求参数**:
 
@@ -386,6 +401,7 @@ const res = await request.get('/api/notification/unread-count')
 | `field` | string | **是** | 字段名 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -398,11 +414,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录，可见范围同上
 
-#### 1.9 最大值 [基础接口-最大值]
+### 9. 最大值 [max]
 
-- **路径**: `/api/notification/max`
-- **方法**: `GET`
-- **描述**: 获取指定字段最大值
+- **接口类型**: 基础接口 / 最大值
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/max`
+- **说明**: 获取指定字段最大值
 
 **请求参数**:
 
@@ -411,6 +428,7 @@ const res = await request.get('/api/notification/unread-count')
 | `field` | string | **是** | 字段名 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -423,11 +441,12 @@ const res = await request.get('/api/notification/unread-count')
 
 **权限说明**: 需要登录，可见范围同上
 
-#### 1.10 查询列 [基础接口-查询列]
+### 10. 查询列 [column]
 
-- **路径**: `/api/notification/column`
-- **方法**: `GET`
-- **描述**: 获取指定字段列表
+- **接口类型**: 基础接口 / 查询列
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/column`
+- **说明**: 获取指定字段列表
 
 **请求参数**:
 
@@ -439,6 +458,7 @@ const res = await request.get('/api/notification/unread-count')
 | `ids` | string | 否 | 指定ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -451,13 +471,12 @@ const res = await request.get('/api/notification/unread-count')
 
 ---
 
-### 2. POST 请求接口
+### 11. 保存通知 [save]
 
-#### 2.1 保存通知 [基础接口-保存数据]
-
-- **路径**: `/api/notification/save`
-- **方法**: `POST`
-- **描述**: 保存通知记录（id为空时新增，不为空时更新）
+- **接口类型**: 基础接口 / 保存数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/notification/save`
+- **说明**: 保存通知记录（id为空时新增，不为空时更新）
 
 **请求参数**:
 
@@ -474,6 +493,7 @@ const res = await request.get('/api/notification/unread-count')
 | `is_read` | int | 否 | 已读状态 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -487,11 +507,12 @@ const res = await request.get('/api/notification/unread-count')
 **权限说明**: 需要登录。id 为空时等同 `create`；不为空时等同 `update`，
 两者都带归属校验（普通用户只能操作自己的通知）
 
-#### 2.2 创建通知 [基础接口-添加数据]
+### 12. 创建通知 [create]
 
-- **路径**: `/api/notification/create`
-- **方法**: `POST`
-- **描述**: 新增通知记录（仅落库，前台通过 API 拉取，无 WebSocket 推送）
+- **接口类型**: 基础接口 / 添加数据
+- **请求方式**: `POST`
+- **请求地址**: `/api/notification/create`
+- **说明**: 新增通知记录（仅落库，前台通过 API 拉取，无 WebSocket 推送）
 
 **请求参数**:
 
@@ -507,6 +528,7 @@ const res = await request.get('/api/notification/unread-count')
 | `is_read` | int | 否 | 已读状态，默认0 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -523,11 +545,12 @@ const res = await request.get('/api/notification/unread-count')
 - 管理员（root）：可指定 `uid` / `from_uid`；
 - 需要「给全体用户或指定用户发送系统消息」请使用业务接口 `send-system`（有独立的管理员校验）。
 
-#### 2.3 系统消息推送 [业务接口]
+### 13. 系统消息推送 [send-system]
 
-- **路径**: `/api/notification/send-system`
-- **方法**: `POST`
-- **描述**: 管理员向全体 / 指定用户推送系统消息（同时可选发送邮件）
+- **接口类型**: 业务接口
+- **请求方式**: `POST`
+- **请求地址**: `/api/notification/send-system`
+- **说明**: 管理员向全体 / 指定用户推送系统消息（同时可选发送邮件）
 
 **请求参数**:
 
@@ -572,13 +595,12 @@ const res = await request.get('/api/notification/unread-count')
 
 ---
 
-### 3. PUT 请求接口
+### 14. 标记已读 [read]
 
-#### 3.1 标记已读 [业务接口]
-
-- **路径**: `/api/notification/read`
-- **方法**: `PUT`
-- **描述**: 将指定通知标记为已读
+- **接口类型**: 业务接口
+- **请求方式**: `PUT`
+- **请求地址**: `/api/notification/read`
+- **说明**: 将指定通知标记为已读
 
 **请求参数**:
 
@@ -587,6 +609,7 @@ const res = await request.get('/api/notification/unread-count')
 | `id` | int | **是** | 通知ID |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -598,6 +621,7 @@ const res = await request.get('/api/notification/unread-count')
 ```
 
 **错误响应** (400):
+
 ```json
 {
     "code": 400,
@@ -609,15 +633,17 @@ const res = await request.get('/api/notification/unread-count')
 **权限说明**: 需要登录。个人通知只能标记自己的（非本人的通知为无操作的空结果）；
 广播通知（uid=0）会写入该用户在 `notification_read` 中的已读状态。
 
-#### 3.2 全部标记已读 [业务接口]
+### 15. 全部标记已读 [read-all]
 
-- **路径**: `/api/notification/read-all`
-- **方法**: `PUT`
-- **描述**: 将当前用户所有未读通知标记为已读
+- **接口类型**: 业务接口
+- **请求方式**: `PUT`
+- **请求地址**: `/api/notification/read-all`
+- **说明**: 将当前用户所有未读通知标记为已读
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -632,11 +658,12 @@ const res = await request.get('/api/notification/unread-count')
 - 广播通知：只处理「该用户未读且未隐藏」的广播再写入已读状态，
   已读/已隐藏的广播不会重复写状态记录（避免无谓的全量 upsert）。
 
-#### 3.3 批量标记已读 [业务接口]
+### 16. 批量标记已读 [read-batch]
 
-- **路径**: `/api/notification/read-batch`
-- **方法**: `PUT`
-- **描述**: 批量将多条通知标记为已读
+- **接口类型**: 业务接口
+- **请求方式**: `PUT`
+- **请求地址**: `/api/notification/read-batch`
+- **说明**: 批量将多条通知标记为已读
 
 **请求参数**:
 
@@ -645,6 +672,7 @@ const res = await request.get('/api/notification/unread-count')
 | `ids` | array/string | **是** | 通知ID列表，支持数组 `[1,2,3]` 或字符串 `"1,2,3"`，**单次最多 200 个** |
 
 **请求示例**:
+
 ```json
 PUT /api/notification/read-batch
 Content-Type: application/json
@@ -655,6 +683,7 @@ Content-Type: application/json
 ```
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -666,6 +695,7 @@ Content-Type: application/json
 ```
 
 **错误响应** (400):
+
 ```json
 {
     "code": 400,
@@ -677,11 +707,12 @@ Content-Type: application/json
 **权限说明**: 需要登录。个人通知只更新属于当前用户的（其它 ID 被忽略）；
 广播通知写入该用户的已读状态。
 
-#### 3.4 更新通知 [基础接口-修改数据]
+### 17. 更新通知 [update]
 
-- **路径**: `/api/notification/update`
-- **方法**: `PUT`
-- **描述**: 更新通知记录信息
+- **接口类型**: 基础接口 / 修改数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/notification/update`
+- **说明**: 更新通知记录信息
 
 **请求参数**:
 
@@ -695,6 +726,7 @@ Content-Type: application/json
 | `uid` / `from_uid` | int | 否 | **仅管理员可改**，普通用户提交会被忽略 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -706,6 +738,7 @@ Content-Type: application/json
 ```
 
 **无权限/无数据** (204):
+
 ```json
 {
     "code": 204,
@@ -721,11 +754,12 @@ Content-Type: application/json
 - 管理员（root）：可更新自己的与广播通知（`uid IN (0, 自己)`），允许修改投递字段；
 - 管理员 + `scope=admin`（管理端视角）：可更新任意用户的通知（后台「消息管理」修改发给指定用户的消息）。
 
-#### 3.5 恢复通知 [基础接口-恢复数据]
+### 18. 恢复通知 [restore]
 
-- **路径**: `/api/notification/restore`
-- **方法**: `PUT`
-- **描述**: 恢复已软删除的通知记录
+- **接口类型**: 基础接口 / 恢复数据
+- **请求方式**: `PUT`
+- **请求地址**: `/api/notification/restore`
+- **说明**: 恢复已软删除的通知记录
 
 **请求参数**:
 
@@ -734,6 +768,7 @@ Content-Type: application/json
 | `ids` | array/string | **是** | 通知ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -750,13 +785,12 @@ Content-Type: application/json
 
 ---
 
-### 4. DELETE 请求接口
+### 19. 删除通知 [remove]
 
-#### 4.1 删除通知 [基础接口-删除]
-
-- **路径**: `/api/notification/remove`
-- **方法**: `DELETE`
-- **描述**: 软删除指定的通知记录
+- **接口类型**: 基础接口 / 删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/notification/remove`
+- **说明**: 软删除指定的通知记录
 
 **请求参数**:
 
@@ -765,6 +799,7 @@ Content-Type: application/json
 | `ids` | array/string | **是** | 通知ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -778,11 +813,12 @@ Content-Type: application/json
 **权限说明**: 需要登录。普通用户只能删除（撤回）自己的通知；管理员（root）删除广播 = 全体撤回；
 管理员 + `scope=admin`（管理端视角）可撤回任意用户的通知（后台「消息管理」）。
 
-#### 4.2 彻底删除通知 [基础接口-彻底删除]
+### 20. 彻底删除通知 [delete]
 
-- **路径**: `/api/notification/delete`
-- **方法**: `DELETE`
-- **描述**: 永久删除通知记录，不可恢复
+- **接口类型**: 基础接口 / 彻底删除
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/notification/delete`
+- **说明**: 永久删除通知记录，不可恢复
 
 **请求参数**:
 
@@ -791,6 +827,7 @@ Content-Type: application/json
 | `ids` | array/string | **是** | 通知ID列表 |
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -804,11 +841,12 @@ Content-Type: application/json
 **权限说明**: 需要登录。普通用户只能彻底删除自己的通知；管理员（root）可彻底删除自己的与广播通知；
 管理员 + `scope=admin`（管理端视角）可彻底删除任意用户的通知。
 
-#### 4.3 清空通知 [业务接口]
+### 21. 清空通知 [remove-all]
 
-- **路径**: `/api/notification/remove-all`
-- **方法**: `DELETE`
-- **描述**: 清空当前用户的通知，支持按类型批量清空、支持只清空已读
+- **接口类型**: 业务接口
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/notification/remove-all`
+- **说明**: 清空当前用户的通知，支持按类型批量清空、支持只清空已读
 
 **请求参数**:
 
@@ -818,6 +856,7 @@ Content-Type: application/json
 | `is_read` | int | 否 | 传 `1` 时只清空「已读」通知（未读不受影响），不传则全部清空 |
 
 **请求示例**:
+
 ```json
 DELETE /api/notification/remove-all
 Content-Type: application/json
@@ -834,6 +873,7 @@ DELETE /api/notification/remove-all?is_read=1
 ```
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -862,15 +902,17 @@ DELETE /api/notification/remove-all?is_read=1
 - 广播通知：只写该用户的「隐藏」状态（`notification_read.is_deleted=1`），
   不会删除全体共享的广播记录；`is_read=1` 时只隐藏「该用户已读」的广播。
 
-#### 4.4 清空回收站 [基础接口-清空回收站]
+### 22. 清空回收站 [clear]
 
-- **路径**: `/api/notification/clear`
-- **方法**: `DELETE`
-- **描述**: 永久删除所有已软删除的通知记录（清空回收站）
+- **接口类型**: 基础接口 / 清空回收站
+- **请求方式**: `DELETE`
+- **请求地址**: `/api/notification/clear`
+- **说明**: 永久删除所有已软删除的通知记录（清空回收站）
 
 **请求参数**: 无
 
 **成功响应** (200):
+
 ```json
 {
     "code": 200,
@@ -885,140 +927,20 @@ DELETE /api/notification/remove-all?is_read=1
 
 ---
 
-### 5. INDEX 接口
+### 23. INDEX 接口
 
-- **路径**: `/api/notification/index`
-- **方法**: `GET`
-- **描述**: 通知首页（无实际功能）
+- **接口类型**: INDEX 接口
+- **请求方式**: `GET`
+- **请求地址**: `/api/notification/index`
+- **说明**: 通知首页（无实际功能）
 
 **成功响应** (202):
+
 ```json
 {
     "code": 202,
     "msg": "没什么用！",
     "data": null
-}
-```
-
----
-
-## 通知获取方式（API 拉取，无 WebSocket 推送）
-
-### 机制
-
-通知创建时**只落库**（`model.Notification.CreateNotification` / `CreateBroadcastNotification`），
-不做任何 WebSocket 推送；前台统一通过 API 获取：
-
-| 场景 | 接口 |
-| :--- | :--- |
-| 消息列表（含广播，按已读/隐藏过滤） | `GET /api/notification/list` |
-| 基础列表 / 后台「消息管理」 | `GET /api/notification/all` |
-| 未读角标 | `GET /api/notification/unread-count` |
-| 未读数（可带筛选条件） | `GET /api/notification/count` |
-
-### 示例
-
-```javascript
-// 进入消息页 / 定时轮询时拉取未读角标
-const { data } = await request.get('/api/notification/unread-count')
-
-// 消息列表
-const list = await request.get('/api/notification/list', {
-    params: { page: 1, size: 20, order: 'create_time desc' }
-})
-```
-
-> 说明：`/socket`（`app/socket`）是独立的实时通道，目前仅用于后台系统状态推送与通用消息转发，
-> 与通知模块无关；通知的投递、已读、隐藏完全由上面的查询接口决定。
-
----
-
-## 前端使用指南
-
-### 场景一：页面初始化获取通知列表
-
-```javascript
-const res = await request.get('/api/notification/list', {
-    params: {
-        page: 1,
-        size: 20,
-        order: 'create_time desc'
-    }
-})
-const { data: notifications, count, page } = res.data.data
-```
-
-### 场景二：获取未读数量显示角标
-
-```javascript
-const res = await request.get('/api/notification/unread-count')
-const unreadCount = res.data.data.count
-// 在导航栏显示未读角标
-```
-
-### 场景三：点击通知标记已读
-
-```javascript
-await request.put('/api/notification/read', { id: 5 })
-```
-
-### 场景四：一键全部已读
-
-```javascript
-await request.put('/api/notification/read-all')
-```
-
-### 场景五：按类型筛选通知
-
-```javascript
-// 只看评论回复通知
-const res = await request.get('/api/notification/list', {
-    params: { type: 'comment', page: 1, size: 20 }
-})
-```
-
-### 场景六：清空某类通知
-
-```javascript
-// 清除所有点赞通知
-await request.delete('/api/notification/remove-all', {
-    data: { type: 'like' }
-})
-```
-
-### 场景七：跳转到关联内容
-
-```javascript
-// 官方主题 Mellow 的实现见 Mellow/src/utils/notification.js
-// 内容类直接拼详情；comment 需要先查评论拿到所属内容；其余为固定页面
-function contentLink(bindType, bindId, commentId = 0) {
-    const id = Number(bindId) || 0
-    if (!id) return ''
-    const hash = commentId ? `?comment=${commentId}` : ''
-    switch (bindType) {
-        case 'article': return `/archives/${id}${hash}`
-        case 'moments': return `/moments/${id}${hash}`
-        case 'page':    return `/page/${id}${hash}`
-        default:        return ''
-    }
-}
-
-async function notificationLink(notif) {
-    switch (notif.bind_type) {
-        case 'links':         return '/manage/links'
-        case 'integral-card': return '/user/integral'
-        case 'decoration':    return '/user/decorations'
-        case 'user':          return `/author/${notif.bind_id}`
-        case 'comment': {
-            // comment/one 是公开接口（field=id,bind_type,bind_id），据此定位所属内容
-            const res = await request.get('/api/comment/one', {
-                params: { id: notif.bind_id, field: 'id,bind_type,bind_id' }
-            })
-            return contentLink(res.data.bind_type, res.data.bind_id, notif.bind_id)
-        }
-        default:
-            return contentLink(notif.bind_type, notif.bind_id)
-    }
 }
 ```
 
@@ -1086,3 +1008,125 @@ async function notificationLink(notif) {
 - `idx_notifications_create_time`：按时间排序 / 过期清理
 - `idx_notification_reads_uid`：按用户查询广播的已读/隐藏状态
 - 唯一索引 `uk_notification_reads_nid_uid`（`notification_id + uid`）：保证同一用户对同一广播只有一条状态记录
+
+### 前端使用指南
+
+****
+
+```javascript
+const res = await request.get('/api/notification/list', {
+    params: {
+        page: 1,
+        size: 20,
+        order: 'create_time desc'
+    }
+})
+const { data: notifications, count, page } = res.data.data
+```
+
+****
+
+```javascript
+const res = await request.get('/api/notification/unread-count')
+const unreadCount = res.data.data.count
+// 在导航栏显示未读角标
+```
+
+****
+
+```javascript
+await request.put('/api/notification/read', { id: 5 })
+```
+
+****
+
+```javascript
+await request.put('/api/notification/read-all')
+```
+
+****
+
+```javascript
+// 只看评论回复通知
+const res = await request.get('/api/notification/list', {
+    params: { type: 'comment', page: 1, size: 20 }
+})
+```
+
+****
+
+```javascript
+// 清除所有点赞通知
+await request.delete('/api/notification/remove-all', {
+    data: { type: 'like' }
+})
+```
+
+****
+
+```javascript
+// 官方主题 Mellow 的实现见 Mellow/src/utils/notification.js
+// 内容类直接拼详情；comment 需要先查评论拿到所属内容；其余为固定页面
+function contentLink(bindType, bindId, commentId = 0) {
+    const id = Number(bindId) || 0
+    if (!id) return ''
+    const hash = commentId ? `?comment=${commentId}` : ''
+    switch (bindType) {
+        case 'article': return `/archives/${id}${hash}`
+        case 'moments': return `/moments/${id}${hash}`
+        case 'page':    return `/page/${id}${hash}`
+        default:        return ''
+    }
+}
+
+async function notificationLink(notif) {
+    switch (notif.bind_type) {
+        case 'links':         return '/manage/links'
+        case 'integral-card': return '/user/integral'
+        case 'decoration':    return '/user/decorations'
+        case 'user':          return `/author/${notif.bind_id}`
+        case 'comment': {
+            // comment/one 是公开接口（field=id,bind_type,bind_id），据此定位所属内容
+            const res = await request.get('/api/comment/one', {
+                params: { id: notif.bind_id, field: 'id,bind_type,bind_id' }
+            })
+            return contentLink(res.data.bind_type, res.data.bind_id, notif.bind_id)
+        }
+        default:
+            return contentLink(notif.bind_type, notif.bind_id)
+    }
+}
+```
+
+---
+
+### 通知获取方式（API 拉取，无 WebSocket 推送）
+
+****
+
+通知创建时**只落库**（`model.Notification.CreateNotification` / `CreateBroadcastNotification`），
+不做任何 WebSocket 推送；前台统一通过 API 获取：
+
+| 场景 | 接口 |
+| :--- | :--- |
+| 消息列表（含广播，按已读/隐藏过滤） | `GET /api/notification/list` |
+| 基础列表 / 后台「消息管理」 | `GET /api/notification/all` |
+| 未读角标 | `GET /api/notification/unread-count` |
+| 未读数（可带筛选条件） | `GET /api/notification/count` |
+
+****
+
+```javascript
+// 进入消息页 / 定时轮询时拉取未读角标
+const { data } = await request.get('/api/notification/unread-count')
+
+// 消息列表
+const list = await request.get('/api/notification/list', {
+    params: { page: 1, size: 20, order: 'create_time desc' }
+})
+```
+
+> 说明：`/socket`（`app/socket`）是独立的实时通道，目前仅用于后台系统状态推送与通用消息转发，
+> 与通知模块无关；通知的投递、已读、隐藏完全由上面的查询接口决定。
+
+---

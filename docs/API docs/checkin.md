@@ -1,4 +1,4 @@
-# Checkin API 文档
+# 每日签到 接口文档
 
 ## 接口概述
 
@@ -15,9 +15,9 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
   每条奖励项都能选**资产**（内置经验、积分，可扩展注册新资产）；
 - **机制增强**：每日重置时间可配（如凌晨 4 点算新一天）、补签（消耗积分）、签到文案池、站内信通知。
 
-**接口类型**：业务接口（无通用 CRUD）
+- **接口类型**: 业务接口（无通用 CRUD）
 
-### 接口列表
+### 接口一览
 
 | 方法 | 路径 | 权限 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -41,7 +41,7 @@ Checkin 控制器负责**每日签到**（`/api/checkin/*`）。签到原先寄�
 
 ---
 
-## 签到配置（`SYSTEM_CHECKIN_RULES`）
+### 签到配置（`SYSTEM_CHECKIN_RULES`）
 
 配置存在 `config` 表的 `SYSTEM_CHECKIN_RULES` 键（JSON），读写走通用的
 `GET /api/config/one?key=SYSTEM_CHECKIN_RULES` 与 `POST /api/config/save`（仅管理员，root）。
@@ -275,7 +275,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 
 ---
 
-## 奖励构成
+### 奖励构成
 
 一次签到可能同时命中多种来源，响应里的 `rewards` 按来源分组返回：
 
@@ -293,7 +293,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 
 ---
 
-## 数据表 `inis_checkin`
+### 数据表 `inis_checkin`
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
@@ -314,16 +314,18 @@ model.RegisterRewardAsset(model.RewardAsset{
 
 ---
 
-## 接口详情
+## 接口列表
 
-### 1. 签到状态 [业务接口]
+### 1. 签到状态
+
+- **接口类型**: 业务接口
 
 - **路径**：`/api/checkin/status`
 - **方法**：`GET`
 - **权限**：需登录
 - **说明**：签到页的主数据源。未签到时返回「签到后」的**预期奖励**；已签到时返回今天的实际明细。
 
-**响应字段**：
+**响应字段**:
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
@@ -357,7 +359,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 | tips | string | 未签到时给出随机文案；已签到时为本次文案 |
 | record | object | 已签到时返回今天的记录摘要（date / days / cycle / source / exp / integral / tips / rewards） |
 
-**响应示例（未签到）**：
+**响应示例（未签到）**:
 
 ```json
 {
@@ -412,13 +414,15 @@ model.RegisterRewardAsset(model.RewardAsset{
 }
 ```
 
-### 2. 签到 [业务接口]
+### 2. 签到
+
+- **接口类型**: 业务接口
+- **说明**: 签到成功后按配置计算并发放奖励，「写签到记录 + 发奖励」在同一事务里，
 
 - **路径**：`/api/checkin/sign`
 - **方法**：`POST`
 - **权限**：需登录
 
-**说明**：签到成功后按配置计算并发放奖励，「写签到记录 + 发奖励」在同一事务里，
 任一步失败整体回滚。重复签到由 `(uid, date)` 唯一索引兜底，并发请求只会成功一个。
 
 **响应字段**（成功）：
@@ -438,7 +442,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 | milestone | array | 本次命中的里程碑奖励（无则省略） |
 | next_milestone | object | 下一个里程碑 |
 
-**响应示例**：
+**成功响应**:
 
 ```json
 {
@@ -476,19 +480,21 @@ model.RegisterRewardAsset(model.RewardAsset{
 | `签到功能已关闭！` | `enabled = 0` |
 | `签到失败，请稍后重试！` | 数据库异常（已回滚） |
 
-### 3. 补签 [业务接口]
+### 3. 补签
+
+- **接口类型**: 业务接口
 
 - **路径**：`/api/checkin/makeup`
 - **方法**：`POST`
 - **权限**：需登录
 
-**请求参数**：
+**请求参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | date | int | 否 | 补签日键 `yyyymmdd`，不传则补昨天 |
 
-**响应字段**：`date`、`date_text`、`days`（补签后的连签天数）、`items`、`total`、`cards`、
+**响应字段**:`date`、`date_text`、`days`（补签后的连签天数）、`items`、`total`、`cards`、
 `crossed`（补签跨越的里程碑 / 月档位，如 `{ streak: [7], monthly: [] }`）、
 `cost`（`{ integral: 5 }`）、`month_days`、`makeup`（剩余次数与可补签日期）。
 
@@ -503,15 +509,17 @@ model.RegisterRewardAsset(model.RewardAsset{
 | `本月补签次数已用完！` | 超过 `makeup.limit` |
 | `积分不足！` | 消耗检查失败（资产为积分时） |
 
-### 4. 签到日历 [业务接口]
+### 4. 签到日历
+
+- **接口类型**: 业务接口
 
 - **路径**：`/api/checkin/calendar`
 - **方法**：`GET`
 - **权限**：需登录
 
-**请求参数**：`year`、`month`（不传为当前月）。
+**请求参数**:`year`、`month`（不传为当前月）。
 
-**响应字段**：
+**响应字段**:
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
@@ -522,13 +530,15 @@ model.RegisterRewardAsset(model.RewardAsset{
 | today | int | 今天（非当月为 0） |
 | monthly / next_monthly | array / object | 月度档位与下一个档位 |
 
-### 5. 签到排行榜 [业务接口]
+### 5. 签到排行榜
+
+- **接口类型**: 业务接口
 
 - **路径**：`/api/checkin/rank`
 - **方法**：`GET`
 - **权限**：公开
 
-**请求参数**：
+**请求参数**:
 
 | 参数名 | 类型 | 必填 | 默认 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -536,18 +546,19 @@ model.RegisterRewardAsset(model.RewardAsset{
 | end | int | 否 | 本月末 23:59:59 | 结束时间戳（秒） |
 | limit | int | 否 | 10 | 条数（上限受 `SYSTEM_PAGE_LIMIT` 限制） |
 
-**响应字段**：`list`（`[{ id, nickname, avatar, description, title, rank, check_in_count, total_exp, total_integral, is_me }]`）、
+**响应字段**:`list`（`[{ id, nickname, avatar, description, title, rank, check_in_count, total_exp, total_integral, is_me }]`）、
 `my_rank`、`my_count`。
 
-### 6. 签到规则 [业务接口]
+### 6. 签到规则
+
+- **接口类型**: 业务接口
+- **说明**: 给前台渲染「签到规则说明 / 周期奖励表」用，未登录也能看。
 
 - **路径**：`/api/checkin/rules`
 - **方法**：`GET`
 - **权限**：公开
 
-**说明**：给前台渲染「签到规则说明 / 周期奖励表」用，未登录也能看。
-
-**响应字段**：`enabled`、`name`、`reset_hour`、`tips`、`assets`、`base`、`cycle`
+**响应字段**:`enabled`、`name`、`reset_hour`、`tips`、`assets`、`base`、`cycle`
 （`{ enabled, loop, days }`）、`streak`、`milestones`、`monthly`、`random`、`makeup`。
 
 ---
