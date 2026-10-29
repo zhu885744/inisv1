@@ -647,6 +647,8 @@ func (this *UserFollows) follow(ctx *gin.Context) {
 
 	// 关注关系变了 → 清掉双方的社交数据卡片缓存（粉丝 / 关注数）
 	this.invalidateSocialStats(uid, followUid)
+	// 粉丝数是认证申请条件之一，被关注者的条件进度缓存要立刻失效
+	model.CertStatsFlush(followUid)
 
 	this.json(ctx, gin.H{"follow_uid": followUid}, facade.Lang(ctx, "关注成功！"), 200)
 }
@@ -676,6 +678,8 @@ func (this *UserFollows) unfollow(ctx *gin.Context) {
 
 	// 关注关系变了 → 清掉双方的社交数据卡片缓存（粉丝 / 关注数）
 	this.invalidateSocialStats(uid, followUid)
+	// 同上：取消关注同样会改变被关注者的粉丝数
+	model.CertStatsFlush(followUid)
 
 	this.json(ctx, gin.H{"follow_uid": followUid}, facade.Lang(ctx, "取消关注成功！"), 200)
 }
@@ -830,8 +834,9 @@ const (
 // relation - 我与目标用户的关注关系（需登录）
 //
 // 返回 {is_following, is_follower, mutual}，主页按钮据此显示四种状态：
-//   未关注 → 关注      已关注（对方没关注我）→ 已关注
-//   对方关注我 → 回关   互相关注 → 互关
+//
+//	未关注 → 关注      已关注（对方没关注我）→ 已关注
+//	对方关注我 → 回关   互相关注 → 互关
 func (this *UserFollows) relation(ctx *gin.Context) {
 
 	params := this.params(ctx)
@@ -863,10 +868,10 @@ func (this *UserFollows) relation(ctx *gin.Context) {
 // suggest - 可能认识的人（共同关注二度推荐，需登录）
 //
 // 算法（不引入新表，全部基于现有 user_follows）：
-//   1. 取我关注的人 A
-//   2. 取 A 们关注的人 B（二度人脉）
-//   3. 排除：我自己、我已经关注的人
-//   4. 按「共同关注数」降序，最多 suggestLimit 个
+//  1. 取我关注的人 A
+//  2. 取 A 们关注的人 B（二度人脉）
+//  3. 排除：我自己、我已经关注的人
+//  4. 按「共同关注数」降序，最多 suggestLimit 个
 //
 // 隐私：只返回公开的作者字段（白名单 + SanitizeAuthor），不暴露任何关注关系明细，
 // 前端只展示「你们有 N 个共同关注」这一条聚合信息。
@@ -1082,7 +1087,7 @@ func (this *UserFollows) attachRelation(data []map[string]any, myUid int, kind s
 	}
 
 	follows := &model.UserFollows{}
-	iFollow := follows.FilterFollowingUids(myUid, uids)  // 我关注了谁
+	iFollow := follows.FilterFollowingUids(myUid, uids) // 我关注了谁
 	followMe := follows.FilterFollowerUids(myUid, uids) // 谁关注了我
 
 	for _, item := range data {

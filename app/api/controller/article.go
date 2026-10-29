@@ -153,6 +153,8 @@ func (this *Article) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "article"})
 	// 文章变动会影响标签的引用文章数（tags 接口的 article_count），同步清理标签缓存
 	facade.Cache.DelTags([]any{"[GET]", "tags"})
+	// 认证申请条件里有「已发布文章数」，发布 / 删除 / 审核都会改变这个数字
+	model.CertStatsFlushAll()
 }
 
 func (this *Article) one(ctx *gin.Context) {

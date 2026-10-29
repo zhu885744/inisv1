@@ -1,5 +1,12 @@
 最新版下载地址：[inisv1/releases](https://github.com/zhu885744/inisv1/releases)
 
+## INIS v1.0.5「待发布」
+- 新增了用户认证功能，支持强大的认证规则设置，强大的自定义
+- 优化了作者主页勋章展示：默认只显示佩戴中的那一枚，全部勋章收进折叠入口，切换用户主页时自动收起
+- 优化了评论头像：改用统一的 AvatarFrame 组件，与其它场景共用头像框、占位首字与认证角标，移动端尺寸保持 36px
+- 优化了（/user/integral）今日任务提示词
+- 更新了 API 文档：user-certification 增补 grant / revoke 两个接口与说明，users / moments / feed 补充 `cert` 字段口径
+
 ## INIS v1.0.4
 - 新增批量数据接口：comment/counts（批量评论数）、user-likes/states（批量点赞状态与点赞数）、users/batch（批量用户，按入参顺序返回），列表页可一次取数减少请求数
 - 新增后台文档管理批量操作（/admin/docs/{项目}）：支持多选批量删除文档，回收站支持批量恢复、批量彻底删除

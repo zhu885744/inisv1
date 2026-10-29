@@ -89,6 +89,11 @@ func InitTable() {
 		{"UserFollows", InitUserFollows},
 		{"UserBlocks", InitUserBlocks},
 		{"Report", InitReport},
+		// 认证类型配置（类型 / 领域 / 申请字段 / 认证说明，后台可自定义）
+		// 必须先于 UserCertification：认证记录的类型文案与字段校验都读这张表
+		{"CertType", InitCertType},
+		// 用户认证：申请人一条记录，后台审核后主页展示
+		{"UserCertification", InitUserCertification},
 		{"UserBanRecords", InitUserBanRecords},
 		{"Notification", InitNotification},
 		{"NotificationRead", InitNotificationRead},

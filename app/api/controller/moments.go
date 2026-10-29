@@ -193,6 +193,8 @@ func (this *Moments) INDEX(ctx *gin.Context) {
 
 func (this *Moments) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "moments"})
+	// 认证申请条件里有「已发布动态数」，发布 / 删除 / 审核都会改变这个数字
+	model.CertStatsFlushAll()
 }
 
 func (this *Moments) one(ctx *gin.Context) {

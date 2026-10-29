@@ -11,6 +11,16 @@
 | **基础接口** | one、all、rand、count、sum、min、max、column、remove、delete、clear、restore、save、create、update |
 | **特殊接口** | email（修改邮箱）、phone（修改手机号）、change-password（修改密码）、verify-code（发送身份验证码）、status（修改状态）、ban（封禁用户）、unban（解封用户）、clear-ban（清空封禁信息）、appeal-handle（处理申诉）、blackroom（小黑屋公示）、appeal（用户申诉）、appeal-public（公开申诉）、destroy（注销账户） |
 
+### 用户对象补充字段
+
+返回的用户对象（`one` / `batch` 以及其它接口内嵌的作者对象）会带一个 `cert` 认证摘要：
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `cert` | object | `{uid, cert_type, type_text, color, title}`；未认证 / 审核中 / 已过期时**该字段不存在** |
+
+`cert` 供前台头像右下角的认证角标直接渲染，调用方不必再按 `uid` 请求 `user-certification/one`。摘要按 `uid` 缓存 60 秒，认证变更（授予 / 审核 / 修改 / 收回）会主动失效，口径见 [用户认证 接口文档](./user-certification.md)。
+
 ---
 
 ## 状态码规范

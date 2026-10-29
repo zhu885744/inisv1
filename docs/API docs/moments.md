@@ -760,6 +760,7 @@ PUT /api/moments/set_top
 ### 1. 作者信息
 - 动态查询时会自动关联作者信息（用户昵称、头像等）
 - 作者信息存储在 `result.author` 字段中
+- 作者对象带 `cert` 认证摘要（`{uid, cert_type, type_text, color, title}`，未认证时无该字段），供头像右下角的认证角标渲染；口径见 [用户认证 接口文档](./user-certification.md) 的特殊说明
 
 ### 2. 图片处理
 - `images` 字段支持数组格式，会自动序列化为逗号分隔的字符串

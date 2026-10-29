@@ -96,7 +96,7 @@
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| `data` | array | 动态列表，字段同 `moments` 表 + `result.author` / `result.comment` |
+| `data` | array | 动态列表，字段同 `moments` 表 + `result.author`（含 `cert` 认证摘要）/ `result.comment` |
 | `count` | int | `follow`：命中总条数；`hot` / `recommend`：**候选池总数（≤ 300）** |
 | `page` | number | **总页数** `ceil(count/limit)`，不是当前页码 |
 | `type` | string | 回显实际生效的流类型 |

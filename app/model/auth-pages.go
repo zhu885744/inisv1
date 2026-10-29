@@ -78,6 +78,10 @@ func InitAuthPages() {
 		{Name: "签到管理", Icon: "bi bi-calendar-check", Path: "/admin/checkin", Size: "14px"},
 		{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
 		{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
+		// 用户认证：审核认证申请（类型 / 领域 / 字段由「认证类型」页配置）
+		{Name: "用户认证", Icon: "bi bi-patch-check", Path: "/admin/certifications", Size: "14px"},
+		// 认证类型：自定义认证类型、该类型下的领域与申请字段、认证说明
+		{Name: "认证类型", Icon: "bi bi-sliders", Path: "/admin/cert-types", Size: "14px"},
 		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
 		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
 		// 主题配色：编辑设计 token（浅色 / 深色两套），保存后 /theme-custom.css 立即生效

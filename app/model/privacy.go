@@ -222,6 +222,11 @@ func SanitizeUserResult(item map[string]any, isSelf bool) {
 		hideDerivedAvatar(item)
 	}
 
+	// 认证摘要（头像右下角的盾牌）：各接口的用户对象都会经过这里，
+	// 在这里补一次即可覆盖 users/one、users/batch、内嵌作者等全部场景，
+	// 前端不必再按 uid 逐条请求认证接口。属于公开展示信息，不受脱敏影响。
+	attachAuthorCert(item)
+
 	result, ok := item["result"].(map[string]any)
 	if !ok || result == nil {
 		return
@@ -291,6 +296,9 @@ func SanitizeBanRecord(record map[string]any, isSelf bool) {
 // （operator_ip/operator_ua）、封禁证据（evidence）、申诉原文（appeal_content）。
 // 这些字段不应随公开内容一起对外提供，因此统一按「他人」规则清洗。
 //
+// 同时在这里补上认证摘要 cert（见 attachAuthorCert）：这是内嵌作者的唯一收敛点，
+// 列表页才能直接把盾牌画在头像右下角，不必再按 uid 逐条请求认证接口。
+//
 // 兼容 map[string]any、[]any、[]map[string]any 三种形态。
 func SanitizeAuthor(data any) {
 	switch v := data.(type) {
@@ -306,5 +314,24 @@ func SanitizeAuthor(data any) {
 				SanitizeUserResult(m, false)
 			}
 		}
+	}
+}
+
+// attachAuthorCert - 给内嵌的作者对象补认证摘要（头像右下角的盾牌读它）
+//
+// 认证摘要本身是纯展示型公开信息（title / 类型 / 配色），与脱敏不冲突：
+// 联系方式、证明材料、公司全称都不在 CertBadgeSummary 的返回里。
+func attachAuthorCert(item map[string]any) {
+	if item == nil {
+		return
+	}
+
+	uid := cast.ToInt(item["id"])
+	if uid <= 0 {
+		return
+	}
+
+	if cert := CertBadgeSummary(uid); cert != nil {
+		item["cert"] = cert
 	}
 }
