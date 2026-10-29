@@ -22,7 +22,8 @@ import (
 //	1. 登录：第三方账号已绑定过本站账号 → 直接发 token 登录；
 //	2. 绑定：第三方账号未绑定 + 已登录 → 直接绑到当前账号；
 //	3. 二选一：第三方账号未绑定 + 未登录 → 发一张短票据，回调页让用户自己选：
-//	     - 创建新账号：POST /api/oauth/register（票据，受注册开关与「允许第三方建号」约束）
+//	     - 创建新账号：POST /api/oauth/register（票据 + 邮箱 + 验证码 + 密码，
+//	       受注册开关与「允许第三方建号」约束；邮箱密码必填，不再直接拿第三方资料建号）
 //	     - 绑定已有账号：POST /api/oauth/bind-account（票据 + 账号密码，口径与密码登录一致）
 //
 // 前端拿到的结果分三种：
@@ -396,11 +397,28 @@ func (this *OAuth) register(ctx *gin.Context) {
 		return
 	}
 
-	newUid, needAudit, msg := this.registerUser(ctx, identity)
+	// 建号必须自带「邮箱 + 密码」：第三方只给昵称头像，缺了这两样用户既改不了密码、
+	// 也没法自助找回，账号等于半废。邮箱要验证码验过，不能直接占用别人的。
+	email, cacheName, msg := this.registerContact(ctx, params)
 	if !utils.Is.Empty(msg) {
 		this.json(ctx, nil, msg, 400)
 		return
 	}
+
+	password := cast.ToString(params["password"])
+	if weak := passwordWeakMessage(password); !utils.Is.Empty(weak) {
+		this.json(ctx, nil, facade.Lang(ctx, weak), 400)
+		return
+	}
+
+	newUid, needAudit, msg := this.registerUser(ctx, identity, email, password)
+	if !utils.Is.Empty(msg) {
+		this.json(ctx, nil, msg, 400)
+		return
+	}
+
+	// 验证码一次性，建号成功后立即作废
+	go facade.Cache.Del(cacheName)
 
 	// 建号即绑定：无论是否需要人工审核都先绑上，审核通过后直接点第三方登录就能进
 	if !this.bindTo(ctx, newUid, identity) {
@@ -413,6 +431,8 @@ func (this *OAuth) register(ctx *gin.Context) {
 	if needAudit {
 		table := model.Users{}
 		item, _ := facade.DB.Model(&table).Where("id", newUid).Find()
+		// 现在建号带真实密码，响应里的用户对象必须走同一套脱敏，不能把密码哈希带出去
+		this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), newUid)
 		this.json(ctx, gin.H{
 			"user":       item,
 			"need_audit": true,
@@ -714,13 +734,48 @@ func (this *OAuth) loginResult(ctx *gin.Context, uid int, extra facade.H) bool {
 	return true
 }
 
-// registerUser - 用第三方资料创建新账号
+// registerContact - 校验第三方建号时填的邮箱（格式 / 域名限制 / 是否已注册 / 验证码）
+//
+// 验证码复用常规注册的缓存键 [register][email=xxx]，前端发码直接调 comm/register（不带 code）。
+//	返回值：规范化后的邮箱 / 缓存键 / 错误信息（空串表示通过）
+func (this *OAuth) registerContact(ctx *gin.Context, params map[string]any) (string, string, string) {
+
+	// 不做大小写转换：comm/register 发码时缓存键用的是用户原样输入的邮箱，这里改了就对不上
+	email := strings.TrimSpace(cast.ToString(params["email"]))
+	if utils.Is.Empty(email) {
+		return "", "", facade.Lang(ctx, "请填写邮箱！")
+	}
+	if !utils.Is.Email(email) {
+		return "", "", facade.Lang(ctx, "邮箱格式不正确！")
+	}
+
+	// 与常规注册同一套域名限制（/admin/system?tab=register）
+	setting := model.RegisterSettings()
+	if err := model.CheckEmailDomain(setting, email); err != nil {
+		return "", "", facade.Lang(ctx, err.Error())
+	}
+
+	// 带 WithTrashed：注销的账号也占着 email 唯一索引，放过去会在建号时撞库报错
+	ok, _ := facade.DB.Model(&model.Users{}).WithTrashed().Where("email", email).Exist()
+	if ok {
+		return "", "", facade.Lang(ctx, "该邮箱已经注册！")
+	}
+
+	cacheName := fmt.Sprintf("[register][email=%v]", email)
+	if cast.ToString(params["code"]) != cast.ToString(facade.Cache.Get(cacheName)) {
+		return "", "", facade.Lang(ctx, "验证码错误！")
+	}
+
+	return email, cacheName, ""
+}
+
+// registerUser - 用第三方资料 + 用户自填的邮箱密码创建新账号
 //
 //	返回值：用户ID / 是否需要人工审核 / 错误信息（空串表示成功）
 //
-// 不写第三方邮箱手机号：这两个字段在本站是唯一索引，也用于登录与找回密码，
-// 直接回写可能与已有账号冲突（甚至把别人的邮箱占掉）。需要邮箱请走「联系方式」页的验证码流程。
-func (this *OAuth) registerUser(ctx *gin.Context, identity oauthIdentity) (int, bool, string) {
+// 不再回写第三方平台的邮箱：那个邮箱在本站既可能是别人的登录账号，也没有经过验证。
+// 现在邮箱与密码都由用户在回调页自己填，邮箱走验证码验证，密码按注册规则校验强度。
+func (this *OAuth) registerUser(ctx *gin.Context, identity oauthIdentity, email string, password string) (int, bool, string) {
 
 	setting := model.RegisterSettings()
 
@@ -728,6 +783,8 @@ func (this *OAuth) registerUser(ctx *gin.Context, identity oauthIdentity) (int, 
 	utils.Struct.Set(&table, "nickname", oauthNickname(identity.Nickname))
 	utils.Struct.Set(&table, "avatar", oauthAvatar(identity.Avatar))
 	utils.Struct.Set(&table, "source", "oauth")
+	utils.Struct.Set(&table, "email", email)
+	utils.Struct.Set(&table, "password", utils.Password.Create(password))
 	utils.Struct.Set(&table, "login_time", time.Now().Unix())
 
 	// 账号：随机生成「小写字母 + 数字」，借 account 唯一索引防撞（与注册流程同一套办法）
