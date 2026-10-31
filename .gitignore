@@ -9,5 +9,4 @@
 *.exe*
 *.conf
 /SimpleBlog
-/inis-app
 /inis-cms

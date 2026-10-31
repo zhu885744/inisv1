@@ -231,13 +231,23 @@ func (this *Topic) countByModel(table any) map[string]int {
 		query = query.Where("status", 1)
 	}
 
-	column, err := query.Column("tags")
-	if err != nil || utils.Is.Empty(column) {
+	// 取 id + tags 两列在内存里统计（一次查询，避免 N+1）。
+	//
+	// ⚠ 这里不能用 query.Column("tags") 这种单列形态：它内部走 GORM 的 Pluck 到
+	// []string，而 tags 字段是 default:Null（见 Article / Moments 的模型定义），
+	// 历史数据里存在 NULL 行，Pluck 扫到 NULL 会整条查询报错
+	// （converting NULL to string is unsupported），err 一返回就得到空 map。
+	// 表现：话题榜 / 我关注的话题 计数恒为 0，而话题详情（走 countContent 的
+	// LIKE 查询）计数正常。多列形态内部是 Scan 到 []map[string]any，
+	// NULL 会扫成 nil，cast 后即空串，不影响统计。
+	rows, err := query.Column("id", "tags")
+	if err != nil || utils.Is.Empty(rows) {
 		return result
 	}
 
-	for _, item := range cast.ToStringSlice(column) {
-		for _, id := range this.TagsFieldIds(item) {
+	list, _ := rows.([]map[string]any)
+	for _, row := range list {
+		for _, id := range this.TagsFieldIds(cast.ToString(row["tags"])) {
 			result[cast.ToString(id)]++
 		}
 	}
