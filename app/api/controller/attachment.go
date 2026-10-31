@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"inis/app/facade"
@@ -100,15 +101,33 @@ func (this *Attachment) safeDeleteFile(path string) {
 	}()
 }
 
+// isFtypContainer - 是否 ISO Base Media 容器（mp4 / mov / 3gp / heic / avif 共用）
+//
+// 第 4~7 字节固定是 "ftyp"，第 8 字节起是品牌（isom / mp42 / qt / heic / avif …）
+func isFtypContainer(headerBytes []byte) bool {
+	return len(headerBytes) >= 12 &&
+		headerBytes[4] == 'f' && headerBytes[5] == 't' && headerBytes[6] == 'y' && headerBytes[7] == 'p'
+}
+
+// ftypBrand - 取 ISO Base Media 的主品牌（不是 ftyp 容器时为空）
+func ftypBrand(headerBytes []byte) string {
+	if !isFtypContainer(headerBytes) {
+		return ""
+	}
+	return string(headerBytes[8:12])
+}
+
 func (this *Attachment) verifyFileContent(headerBytes []byte, fileExt string) bool {
 	if len(headerBytes) == 0 {
 		return true
 	}
 
 	switch fileExt {
-	case "jpg", "jpeg":
+	// jfif / jpe 都是 JPEG 的另一种后缀，内容头一致
+	case "jpg", "jpeg", "jfif", "jpe":
 		return len(headerBytes) >= 2 && headerBytes[0] == 0xFF && headerBytes[1] == 0xD8
-	case "png":
+	// apng 只是「会动的 png」，文件头完全相同
+	case "png", "apng":
 		return len(headerBytes) >= 8 &&
 			headerBytes[0] == 0x89 && headerBytes[1] == 0x50 && headerBytes[2] == 0x4E && headerBytes[3] == 0x47 &&
 			headerBytes[4] == 0x0D && headerBytes[5] == 0x0A && headerBytes[6] == 0x1A && headerBytes[7] == 0x0A
@@ -122,6 +141,25 @@ func (this *Attachment) verifyFileContent(headerBytes []byte, fileExt string) bo
 			headerBytes[8] == 'W' && headerBytes[9] == 'E' && headerBytes[10] == 'B' && headerBytes[11] == 'P'
 	case "bmp":
 		return len(headerBytes) >= 2 && headerBytes[0] == 'B' && headerBytes[1] == 'M'
+	case "ico":
+		// ICO / CUR：保留字 0 + 类型 1（图标）/ 2（光标）
+		return len(headerBytes) >= 4 &&
+			headerBytes[0] == 0x00 && headerBytes[1] == 0x00 &&
+			(headerBytes[2] == 0x01 || headerBytes[2] == 0x02) && headerBytes[3] == 0x00
+	case "tif", "tiff":
+		// 小端 II*\0 或大端 MM\0*
+		return len(headerBytes) >= 4 &&
+			((headerBytes[0] == 'I' && headerBytes[1] == 'I' && headerBytes[2] == 0x2A && headerBytes[3] == 0x00) ||
+				(headerBytes[0] == 'M' && headerBytes[1] == 'M' && headerBytes[2] == 0x00 && headerBytes[3] == 0x2A))
+	case "avif":
+		brand := ftypBrand(headerBytes)
+		return brand == "avif" || brand == "avis"
+	case "heic", "heif":
+		switch ftypBrand(headerBytes) {
+		case "heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "msf1":
+			return true
+		}
+		return false
 	case "pdf":
 		return len(headerBytes) >= 4 &&
 			headerBytes[0] == '%' && headerBytes[1] == 'P' && headerBytes[2] == 'D' && headerBytes[3] == 'F'
@@ -153,14 +191,52 @@ func (this *Attachment) verifyFileContent(headerBytes []byte, fileExt string) bo
 		return len(headerBytes) >= 6 &&
 			headerBytes[0] == 0x37 && headerBytes[1] == 0x7A && headerBytes[2] == 0xBC && headerBytes[3] == 0xAF &&
 			headerBytes[4] == 0x27 && headerBytes[5] == 0x1C
-	case "txt":
-		return true
-	case "md":
+	case "txt", "md", "csv":
 		return true
 	case "svg":
-		return len(headerBytes) >= 5 &&
-			(headerBytes[0] == '<' && headerBytes[1] == 's' && headerBytes[2] == 'v' && headerBytes[3] == 'g') ||
-			(headerBytes[0] == '<' && headerBytes[1] == '?' && headerBytes[2] == 'x' && headerBytes[3] == 'm')
+		// 原来这里少了外层括号：&& 优先于 ||，短文件会走到第二个分支导致越界 panic
+		return len(headerBytes) >= 4 &&
+			((headerBytes[0] == '<' && headerBytes[1] == 's' && headerBytes[2] == 'v' && headerBytes[3] == 'g') ||
+				(headerBytes[0] == '<' && headerBytes[1] == '?' && headerBytes[2] == 'x' && headerBytes[3] == 'm'))
+	case "mp4", "m4v", "mov", "3gp", "3g2":
+		// ISO Base Media 容器：第 4~7 字节固定是 "ftyp"，第 8 字节起是品牌
+		// （qt  = QuickTime/mov，其余如 isom / mp42 / heic 系列）。
+		// mov 与 mp4 只认容器头，不按品牌卡死：iPhone 的实况图视频经常是
+		// 「.mov 扩展名 + mp4 品牌」，反之也有，卡太严会误伤。
+		return isFtypContainer(headerBytes)
+	case "webm", "mkv":
+		// EBML 头（WebM / MKV 同源，两者只能靠 DocType 区分，这里不再细分）
+		return len(headerBytes) >= 4 &&
+			headerBytes[0] == 0x1A && headerBytes[1] == 0x45 && headerBytes[2] == 0xDF && headerBytes[3] == 0xA3
+	case "avi":
+		return len(headerBytes) >= 12 &&
+			string(headerBytes[0:4]) == "RIFF" && string(headerBytes[8:12]) == "AVI "
+	case "flv":
+		return len(headerBytes) >= 4 &&
+			headerBytes[0] == 'F' && headerBytes[1] == 'L' && headerBytes[2] == 'V'
+	case "wmv", "asf":
+		// ASF 头：30 26 B2 75 8E 66 CF 11
+		return len(headerBytes) >= 8 &&
+			headerBytes[0] == 0x30 && headerBytes[1] == 0x26 && headerBytes[2] == 0xB2 && headerBytes[3] == 0x75 &&
+			headerBytes[4] == 0x8E && headerBytes[5] == 0x66 && headerBytes[6] == 0xCF && headerBytes[7] == 0x11
+	case "mpg", "mpeg", "m2v":
+		// MPEG-PS 起始码 00 00 01 BA（打包）/ B3（视频序列）
+		return len(headerBytes) >= 4 &&
+			headerBytes[0] == 0x00 && headerBytes[1] == 0x00 && headerBytes[2] == 0x01 &&
+			(headerBytes[3] == 0xBA || headerBytes[3] == 0xB3)
+	case "ogv", "ogg", "oga":
+		return len(headerBytes) >= 4 && string(headerBytes[0:4]) == "OggS"
+	case "tar":
+		// POSIX tar 在偏移 257 处有 "ustar"（读取的头部缓冲是 512 字节，够用）
+		return len(headerBytes) >= 262 && string(headerBytes[257:262]) == "ustar"
+	case "gz", "tgz":
+		return len(headerBytes) >= 2 && headerBytes[0] == 0x1F && headerBytes[1] == 0x8B
+	case "bz2", "tbz2":
+		return len(headerBytes) >= 3 && headerBytes[0] == 'B' && headerBytes[1] == 'Z' && headerBytes[2] == 'h'
+	case "xz", "txz":
+		return len(headerBytes) >= 6 &&
+			headerBytes[0] == 0xFD && headerBytes[1] == 0x37 && headerBytes[2] == 0x7A &&
+			headerBytes[3] == 0x58 && headerBytes[4] == 0x5A && headerBytes[5] == 0x00
 	default:
 		return false
 	}
@@ -205,6 +281,50 @@ func (this *Attachment) sniffFileExt(headerBytes []byte) (ext string, label stri
 		return "rar", "RAR 压缩包"
 	case has(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C):
 		return "7z", "7z 压缩包"
+	case has(0x1A, 0x45, 0xDF, 0xA3):
+		// EBML 头：WebM 与 MKV 同源，靠 DocType 里的关键字区分
+		if bytes.Contains(headerBytes, []byte("matroska")) {
+			return "mkv", "Matroska 视频"
+		}
+		return "webm", "WebM 视频"
+	case has('R', 'I', 'F', 'F') && len(headerBytes) >= 12 &&
+		headerBytes[8] == 'A' && headerBytes[9] == 'V' && headerBytes[10] == 'I' && headerBytes[11] == ' ':
+		return "avi", "AVI 视频"
+	case has(0x00, 0x00, 0x01, 0x00):
+		return "ico", "ICO 图标"
+	case has('I', 'I', 0x2A, 0x00), has('M', 'M', 0x00, 0x2A):
+		return "tiff", "TIFF 图片"
+	case has('F', 'L', 'V'):
+		return "flv", "FLV 视频"
+	case has(0x30, 0x26, 0xB2, 0x75):
+		return "wmv", "WMV 视频"
+	case has(0x1F, 0x8B):
+		return "gz", "GZIP 压缩包"
+	case has('B', 'Z', 'h'):
+		return "bz2", "BZIP2 压缩包"
+	case has(0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00):
+		return "xz", "XZ 压缩包"
+	case has('O', 'g', 'g', 'S'):
+		return "ogg", "OGG 音频 / 视频"
+	case has('M', 'S', 'C', 'F'):
+		return "cab", "CAB 压缩包"
+	case has(0x00, 0x00, 0x01, 0xBA), has(0x00, 0x00, 0x01, 0xB3):
+		return "mpg", "MPEG 视频"
+	}
+
+	// ISO Base Media（mp4 / mov / 3gp / heic / avif）：ftyp 在第 4 字节，品牌在第 8 字节
+	if brand := ftypBrand(headerBytes); brand != "" {
+		switch brand {
+		case "qt  ":
+			return "mov", "QuickTime 视频"
+		case "avif", "avis":
+			return "avif", "AVIF 图片"
+		case "heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "msf1":
+			return "heic", "HEIC 图片"
+		case "3gp4", "3gp5", "3gp6", "3g2a", "3g2b", "3g2c":
+			return "3gp", "3GP 视频"
+		}
+		return "mp4", "MP4 视频"
 	}
 
 	return "", ""
@@ -313,14 +433,14 @@ func (this *Attachment) releaseUploadSlot(count int) {
 func (this *Attachment) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 	allow := map[string]any{
-		"one":    this.one,
-		"all":    this.all,
-		"sum":    this.sum,
-		"min":    this.min,
-		"max":    this.max,
-		"rand":   this.rand,
-		"count":  this.count,
-		"column": this.column,
+		"one":     this.one,
+		"all":     this.all,
+		"sum":     this.sum,
+		"min":     this.min,
+		"max":     this.max,
+		"rand":    this.rand,
+		"count":   this.count,
+		"column":  this.column,
 		"list":    this.list,
 		"emoji":   this.emoji,
 		"storage": this.storage,
@@ -834,6 +954,9 @@ type uploadResult struct {
 	Error      error
 	IsExist    bool
 	IsSuccess  bool
+	// MotionVideo 实况图拆出的视频访问地址（安卓实况照片的 jpg 里内嵌 MP4，
+	// 见 motion_photo.go）；普通图片为空
+	MotionVideo string
 }
 
 func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart.FileHeader, userId uint, params map[string]any) *uploadResult {
@@ -913,6 +1036,11 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 
 	var uploadReader io.Reader
 	var fileContent []byte
+	// 安卓实况照片（Motion Photo）：JPEG 尾巴里追加了一段 MP4。
+	// 这里先整份读出来拆分，主附件只存封面（截到视频起始处），
+	// 视频随后单独存一条附件，前端按「图片::视频」使用。
+	var motionVideo []byte
+	uploadSize := fileHeader.Size
 
 	if fileExt == "svg" {
 		fileContent, err = io.ReadAll(file)
@@ -922,7 +1050,22 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		}
 		sanitizedContent := this.sanitizeSVG(string(fileContent))
 		uploadReader = strings.NewReader(sanitizedContent)
-	} else {
+	} else if fileExt == "jpg" || fileExt == "jpeg" {
+		// 图片可能有几十 MB，但附件大小在上面已经卡过上限，整读是安全的
+		if seeker, ok := file.(io.Seeker); ok {
+			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr == nil {
+				if content, readErr := io.ReadAll(file); readErr == nil {
+					if cover, video, found := splitMotionPhoto(content); found {
+						motionVideo = video
+						uploadReader = bytes.NewReader(cover)
+						uploadSize = int64(len(cover))
+					}
+				}
+			}
+		}
+	}
+
+	if uploadReader == nil {
 		if seeker, ok := file.(io.Seeker); ok {
 			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 				result.Error = fmt.Errorf("重置文件指针失败")
@@ -962,13 +1105,18 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		}
 		result.Existing = existing
 		result.IsExist = true
+		// 封面命中已有附件时也要把视频挂上：同一条实况图重复上传
+		// 不该出现「第一次有视频、第二次退化成静态图」
+		if len(motionVideo) > 0 {
+			result.MotionVideo = this.saveMotionVideo(fileName, suffix, motionVideo, userId, params)
+		}
 		return result
 	}
 
 	fullUrl := item.Domain + item.Path
 	attachment := model.Attachment{
 		Uuid: (&model.Attachment{}).GenerateUUID(), OriginalName: fileName, SaveName: saveName,
-		SavePath: item.Path, FullUrl: fullUrl, FileSize: fileHeader.Size,
+		SavePath: item.Path, FullUrl: fullUrl, FileSize: uploadSize,
 		MimeType: mimeType, FileExt: fileExt,
 		StorageDriver: cast.ToString(facade.StorageToml.Get("default")), UploaderId: userId,
 		TargetType: cast.ToString(params["target_type"]), TargetId: cast.ToUint(params["target_id"]),
@@ -981,9 +1129,82 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		return result
 	}
 
+	// 实况图：视频单独存一条附件，返回地址供前端拼「图片::视频」
+	if len(motionVideo) > 0 {
+		result.MotionVideo = this.saveMotionVideo(fileName, suffix, motionVideo, userId, params)
+	}
+
 	result.Attachment = &attachment
 	result.IsSuccess = true
 	return result
+}
+
+/**
+ * saveMotionVideo - 把安卓实况图里拆出的视频单独存成一条附件
+ *
+ * 走与普通附件相同的存储规则（目录 / 文件名 / 驱动），并按内容 hash 去重，
+ * 这样重复上传同一张实况图不会产生多份视频。
+ *
+ * 站点没放开 mp4 时静默跳过：图仍能正常用，只是没有实况效果。
+ *
+ * @return 视频的访问地址（失败 / 跳过时为空）
+ */
+func (this *Attachment) saveMotionVideo(fileName string, suffix string, content []byte, userId uint, params map[string]any) string {
+
+	config := facade.AttachmentConfigInstance
+	if config == nil || len(content) == 0 {
+		return ""
+	}
+
+	if !config.IsExtensionAllowed("mp4") {
+		facade.Log.Info(map[string]any{
+			"file": fileName,
+		}, "站点未允许 mp4，实况图视频已跳过（图片仍正常上传）")
+		return ""
+	}
+
+	fileHash := fmt.Sprintf("%x", sha256.Sum256(content))
+	if existing := (&model.Attachment{}).GetByHash(fileHash); !utils.Is.Empty(existing) {
+		return utils.Replace(cast.ToString(existing["full_url"]), model.DomainTemp1())
+	}
+
+	// 与封面同一套命名规则，只把扩展名换成 mp4；
+	// 名字加 -live 后缀，附件库里一眼能看出这是实况图拆出来的视频
+	baseName := strings.TrimSuffix(fileName, suffix)
+	key := facade.Storage.Path(facade.StorageRuleContext{
+		Uid:      int(userId),
+		Filename: baseName + "-live",
+		Ext:      "mp4",
+	})
+	item := facade.Storage.Upload(key, bytes.NewReader(content))
+	if item.Error != nil {
+		facade.Log.Error(map[string]any{"file": fileName, "error": item.Error}, "实况图视频上传失败")
+		return ""
+	}
+
+	attachment := model.Attachment{
+		Uuid:          (&model.Attachment{}).GenerateUUID(),
+		OriginalName:  baseName + "-live.mp4",
+		SaveName:      path.Base(key),
+		SavePath:      item.Path,
+		FullUrl:       item.Domain + item.Path,
+		FileSize:      int64(len(content)),
+		MimeType:      "video/mp4",
+		FileExt:       "mp4",
+		StorageDriver: cast.ToString(facade.StorageToml.Get("default")),
+		UploaderId:    userId,
+		TargetType:    cast.ToString(params["target_type"]),
+		TargetId:      cast.ToUint(params["target_id"]),
+		FileHash:      fileHash,
+	}
+
+	if _, err := facade.DB.Model(&attachment).Create(&attachment); err != nil {
+		this.safeDeleteFile(item.Path)
+		facade.Log.Error(map[string]any{"file": fileName, "error": err.Error()}, "实况图视频记录保存失败")
+		return ""
+	}
+
+	return utils.Replace(attachment.FullUrl, model.DomainTemp1())
 }
 
 func (this *Attachment) checkType(ctx *gin.Context) {
@@ -1096,23 +1317,33 @@ func (this *Attachment) batch(ctx *gin.Context) {
 		}
 
 		if result.IsExist {
-			results = append(results, map[string]any{
+			row := map[string]any{
 				"original_name": result.Existing["original_name"],
 				"full_url":      utils.Replace(cast.ToString(result.Existing["full_url"]), model.DomainTemp1()),
 				"status":        "exist",
-			})
+			}
+			// 实况图（安卓 Motion Photo）：附上拆出来的视频地址，前端自动配成实况图
+			if result.MotionVideo != "" {
+				row["live_video"] = result.MotionVideo
+			}
+			results = append(results, row)
 			successCount++
 			continue
 		}
 
 		if result.IsSuccess && result.Attachment != nil {
-			results = append(results, map[string]any{
+			row := map[string]any{
 				"id": result.Attachment.Id, "uuid": result.Attachment.Uuid,
 				"original_name": result.Attachment.OriginalName,
 				"full_url":      utils.Replace(result.Attachment.FullUrl, model.DomainTemp1()),
 				"file_size":     result.Attachment.FileSize,
 				"status":        "success",
-			})
+			}
+			// 实况图（安卓 Motion Photo）：附上拆出来的视频地址，前端自动配成实况图
+			if result.MotionVideo != "" {
+				row["live_video"] = result.MotionVideo
+			}
+			results = append(results, row)
 			successCount++
 		} else {
 			failCount++

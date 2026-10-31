@@ -1124,7 +1124,7 @@ categories.forEach(category => {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `allow_extensions` | string | `jpg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,zip,rar,7z,txt,md` | 允许上传的文件类型，多个用逗号分隔（小写） |
+| `allow_extensions` | string | `jpg,jpeg,jfif,png,apng,gif,webp,bmp,svg,ico,tif,tiff,avif,heic,heif,mp4,m4v,mov,webm,mkv,avi,flv,wmv,3gp,mpg,mpeg,ogv,zip,rar,7z,tar,gz,tgz,bz2,tbz2,xz,txz,pdf,doc,docx,xls,xlsx,ppt,pptx,csv,txt,md` | 允许上传的文件类型，多个用逗号分隔（小写）；留空表示不限制 |
 | `max_file_size` | int | `51200` | 单个文件最大大小（KB），默认50MB |
 | `concurrent_limit` | int | `5` | 并发上传限制（同时上传的最大文件数），使用互斥锁保证并发安全 |
 
