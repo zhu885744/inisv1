@@ -222,6 +222,9 @@ func (this *Comm) login(ctx *gin.Context) {
 	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
 	// （操作人 IP/UA、封禁证据、申诉原文等，见 privacy.go）
 	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
+	// 本人认证摘要：登录返回的 user 会直接进前端 store，侧边栏 / 用户中心的
+	// 头像右下角靠它画认证角标（与列表内嵌作者同一口径）
+	attachUserCert(item)
 	// 更新用户登录时间
 	item["login_time"] = time.Now().Unix()
 	facade.DB.Model(&table).Where("id", table.Id).Update(map[string]any{
@@ -498,6 +501,9 @@ func (this *Comm) signCode(ctx *gin.Context) {
 	// 但移除密码、管理员备注（remark），并清理封禁记录里的管理侧数据
 	// （操作人 IP/UA、封禁证据、申诉原文等，见 privacy.go）
 	this.meta.privacyUserAs(item, this.meta.privacyLevel(ctx), cast.ToInt(item["id"]))
+	// 本人认证摘要：登录返回的 user 会直接进前端 store，侧边栏 / 用户中心的
+	// 头像右下角靠它画认证角标（与列表内嵌作者同一口径）
+	attachUserCert(item)
 	// 更新用户登录时间
 	item["login_time"] = time.Now().Unix()
 	facade.DB.Model(&table).Where("id", table.Id).Update(map[string]any{
@@ -1092,11 +1098,36 @@ func (this *Comm) checkToken(ctx *gin.Context) {
 	// （不依赖「改装扮 → 同步佩戴者」那条链路是否跑成功）。
 	item = model.ApplyUserFrameRenderState(item)
 
+	// 本人认证摘要：前端把它存进 user store，侧边栏 / 用户中心的头像右下角
+	// 靠它画认证角标；别人的认证在列表接口里由 model.SanitizeAuthor 附加，
+	// 本人数据不走那条链路，所以这里补一次
+	attachUserCert(item)
+
 	this.json(ctx, gin.H{
 		"user":       item,
 		"token":      token,
 		"valid_time": valid,
 	}, facade.Lang(ctx, facade.Lang(ctx, "合法的token！")), 200)
+}
+
+// attachUserCert - 给「本人」用户数据补上认证摘要 cert
+//
+// 公开列表里的作者信息由 model.SanitizeAuthor → attachAuthorCert 统一附加，
+// 但登录 / check-token 返回的是本人数据，不经过那条链路。不补的话，
+// 前端 user.cert 为空，SidebarUserCard 等位置的认证角标就不会渲染。
+func attachUserCert(item map[string]any) {
+	if utils.Is.Empty(item) {
+		return
+	}
+
+	uid := cast.ToInt(item["id"])
+	if uid <= 0 {
+		return
+	}
+
+	if cert := model.CertBadgeSummary(uid); cert != nil {
+		item["cert"] = cert
+	}
 }
 
 // captcha - 获取滑块验证题（公开）
