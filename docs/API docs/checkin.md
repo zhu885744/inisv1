@@ -544,7 +544,7 @@ model.RegisterRewardAsset(model.RewardAsset{
 | :--- | :--- | :--- | :--- | :--- |
 | start | int | 否 | 本月 1 日 0 点 | 起始时间戳（秒） |
 | end | int | 否 | 本月末 23:59:59 | 结束时间戳（秒） |
-| limit | int | 否 | 10 | 条数（上限受 `SYSTEM_PAGE_LIMIT` 限制） |
+| limit | int | 否 | 10 | 条数（`<=0` 按默认 10 处理） |
 
 **响应字段**:`list`（`[{ id, nickname, avatar, description, title, rank, check_in_count, total_exp, total_integral, is_me }]`）、
 `my_rank`、`my_count`。

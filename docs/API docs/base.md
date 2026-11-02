@@ -184,13 +184,13 @@ func (this meta) root(ctx *gin.Context) bool
 
 - **说明**: 判断当前用户是否拥有超级管理员权限
 
-**meta.limit - 分页限制**
+**meta.limit - 分页条数**
 
 ```go
 func (this meta) limit(ctx *gin.Context) int
 ```
 
-- **说明**: 获取分页限制数量（受系统配置限制）
+- **说明**: 获取分页条数（取请求参数 `limit`，未传或 `<=0` 返回默认 10，不设全站上限）
 
 ---
 

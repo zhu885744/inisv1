@@ -209,7 +209,7 @@ duration, unlock, category, status, sort, is_default, stock, min_exp, json, text
 | 参数名 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `page` | int | 否 | 页码，默认 1 |
-| `limit` | int | 否 | 每页条数，默认取 `this.meta.limit(ctx)`（默认 10，可被配置 `SYSTEM_PAGE_LIMIT` 覆盖） |
+| `limit` | int | 否 | 每页条数，默认取 `this.meta.limit(ctx)`（未传或 `<=0` 时为 10） |
 | `order` | string | 否 | 排序，仅白名单生效，默认 `sort desc, id desc` |
 | `status` | string | 否 | **仅在有权限点时生效**，否则强制只看上架的 |
 | `type` | string | 否 | 装扮类型 |

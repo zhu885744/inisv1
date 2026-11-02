@@ -45,7 +45,6 @@ func InitConfig() {
 			"count": 200, "second": "60 * 60",
 		}), Remark: "满足QPS阈值后自动拦截"},
 		{Key: "SYSTEM_MAIL_NOTIFY", Value: "1", Json: utils.Json.Encode(MailNotifyDefaultConfig()), Remark: "统一邮件通知（各场景开关 + 管理员收件邮箱）"},
-		{Key: "SYSTEM_PAGE_LIMIT", Value: "1", Text: "50", Remark: "限制分页查询单次最大数据量"},
 		// 账号（用户名）修改规则：开关 / 冷却天数 / 是否要求绑定联系方式与身份验证
 		// （见 model/account-change.go，前台接口在 api/controller/users-account.go）
 		// 默认关闭：改账号是不可逆的敏感操作，开放与否由站点决定
