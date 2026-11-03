@@ -154,8 +154,11 @@ func isMp4BoxAt(data []byte, start int) bool {
 	}
 
 	// ftyp 盒子至少 16 字节：4 字节长度 + "ftyp" + 4 字节主品牌 + 4 字节版本
+	// size == 0 是 ISO BMFF 的合法写法（表示「一直延伸到文件末尾」），
+	// 部分安卓机型（含华为 / 鸿蒙导出的动态照片）就是这么写的，
+	// 按 16 字节下限卡会把整段视频漏判成普通图片。
 	size := int(binary.BigEndian.Uint32(data[start : start+4]))
-	return size >= 16 && size <= len(data)-start
+	return size == 0 || (size >= 16 && size <= len(data)-start)
 }
 
 // motionPhotoAt - 校验并截取 start 之后的视频段

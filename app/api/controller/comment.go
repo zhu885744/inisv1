@@ -213,12 +213,206 @@ func (this *Comment) IGET(ctx *gin.Context) {
 	}
 }
 
+// repairLive - 回填历史评论的实况图（管理员手动触发，可重复执行）
+//
+// 背景：早期评论上传时前端只读了封面地址、忽略了后端拆出来的视频，
+// 但视频附件本身还在库里 —— 命名约定是「<封面原始文件名去扩展名>-live.mp4」
+// （见 attachment.go 的 saveMotionVideo）。这里按这个约定把 comments.images
+// 里的「封面」改写成「封面::视频」，历史评论就能正常播放实况。
+//
+// 只处理不含 "::" 的项、命中才写库，所以重复执行不会重复拼接。
+func (this *Comment) repairLive(ctx *gin.Context) {
+
+	if !this.meta.permit(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	const batchSize = 500
+
+	lastId := 0
+	scanned := 0
+	fixed := 0
+
+	for {
+
+		data, err := facade.DB.Model(&model.Comment{}).
+			Where("id", ">", lastId).
+			OrderRaw("id asc").
+			Limit(batchSize).
+			Column("id", "images")
+
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询评论失败")
+			break
+		}
+
+		rows, _ := data.([]map[string]any)
+		if len(rows) == 0 {
+			break
+		}
+
+		// 本批待处理的项：评论 id -> 配图原始项；covers 是待反查的封面地址（模板化后）
+		commentParts := make(map[int][]string, len(rows))
+		covers := make([]any, 0, len(rows))
+		coverSet := make(map[string]bool, len(rows))
+
+		for _, row := range rows {
+
+			id := cast.ToInt(row["id"])
+			if id > lastId {
+				lastId = id
+			}
+			scanned++
+
+			raw := strings.TrimSpace(cast.ToString(row["images"]))
+			if raw == "" {
+				continue
+			}
+
+			parts := make([]string, 0, 4)
+			for _, part := range strings.Split(raw, ",") {
+				item := strings.TrimSpace(part)
+				if item == "" {
+					continue
+				}
+				parts = append(parts, item)
+				// 已经是实况图（封面::视频）的跳过
+				if strings.Contains(item, "::") {
+					continue
+				}
+				templated := utils.Replace(item, model.DomainTemp2())
+				if !coverSet[templated] {
+					coverSet[templated] = true
+					covers = append(covers, templated)
+				}
+			}
+
+			if len(parts) > 0 {
+				commentParts[id] = parts
+			}
+		}
+
+		if len(covers) == 0 {
+			continue
+		}
+
+		// 1) 封面地址 -> 附件原始文件名，再由命名约定推出视频文件名
+		coverRows, err := facade.DB.Model(&model.Attachment{}).
+			WhereIn("full_url", covers).
+			Column("full_url", "original_name", "uploader_id")
+
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询封面附件失败")
+			continue
+		}
+
+		coverList, _ := coverRows.([]map[string]any)
+
+		videoNames := make(map[string]string, len(coverList))
+		videoUids := make(map[string]int, len(coverList))
+		names := make([]any, 0, len(coverList))
+
+		for _, row := range coverList {
+			url := cast.ToString(row["full_url"])
+			name := cast.ToString(row["original_name"])
+			if url == "" || name == "" {
+				continue
+			}
+			base := name
+			if index := strings.LastIndex(name, "."); index > 0 {
+				base = name[:index]
+			}
+			videoNames[url] = base + "-live.mp4"
+			videoUids[url] = cast.ToInt(row["uploader_id"])
+			names = append(names, base+"-live.mp4")
+		}
+
+		if len(names) == 0 {
+			continue
+		}
+
+		// 2) 查配对视频：优先「上传者 + 文件名」精确匹配，退化到按文件名匹配
+		videoRows, err := facade.DB.Model(&model.Attachment{}).
+			WhereIn("original_name", names).
+			Where("file_ext", "mp4").
+			Column("full_url", "original_name", "uploader_id")
+
+		if err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询视频附件失败")
+			continue
+		}
+
+		videoList, _ := videoRows.([]map[string]any)
+
+		byUid := make(map[string]string, len(videoList))
+		byName := make(map[string]string, len(videoList))
+
+		for _, row := range videoList {
+			url := cast.ToString(row["full_url"])
+			name := cast.ToString(row["original_name"])
+			if url == "" {
+				continue
+			}
+			byName[name] = url
+			byUid[fmt.Sprintf("%d|%s", cast.ToInt(row["uploader_id"]), name)] = url
+		}
+
+		// 3) 逐条回写：封面 --> 封面::视频（视频地址按当前域名展开）
+		for id, parts := range commentParts {
+
+			changed := false
+
+			for index, item := range parts {
+
+				if strings.Contains(item, "::") {
+					continue
+				}
+
+				templated := utils.Replace(item, model.DomainTemp2())
+				videoName, ok := videoNames[templated]
+				if !ok {
+					continue
+				}
+
+				videoURL := byUid[fmt.Sprintf("%d|%s", videoUids[templated], videoName)]
+				if videoURL == "" {
+					videoURL = byName[videoName]
+				}
+				if videoURL == "" {
+					continue
+				}
+
+				parts[index] = item + "::" + utils.Replace(videoURL, model.DomainTemp1())
+				changed = true
+			}
+
+			if !changed {
+				continue
+			}
+
+			if _, err := facade.DB.Model(&model.Comment{}).Where("id", id).UpdateColumn("images", strings.Join(parts, ",")); err != nil {
+				facade.Log.Error(map[string]any{"error": err.Error(), "id": id}, "实况图回填：更新评论失败")
+				continue
+			}
+
+			fixed++
+		}
+	}
+
+	this.json(ctx, gin.H{
+		"scanned": scanned,
+		"fixed":   fixed,
+	}, fmt.Sprintf("已扫描 %d 条评论，补全 %d 条实况图", scanned, fixed), 200)
+}
+
 func (this *Comment) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"save":   this.save,
-		"create": this.create,
+		"save":        this.save,
+		"create":      this.create,
+		"repair-live": this.repairLive,
 	}
 	err := this.call(allow, method, ctx)
 

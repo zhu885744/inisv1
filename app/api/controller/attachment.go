@@ -623,6 +623,88 @@ func (this *Attachment) appendUploaderName(items []map[string]any) []map[string]
 	return items
 }
 
+// appendLiveVideo - 为附件列表补「实况视频」地址（一次性批量查询，避免 N+1）
+//
+// 实况图上传时是两条附件：封面 jpg + 拆分出来的 MP4，视频按约定命名
+// （<封面原始文件名去掉扩展名>-live.mp4，见 saveMotionVideo）。
+// 附件库选图只能拿到封面 URL，这里按这个约定把配对视频补成 live_video，
+// 前端据此拼「图片::视频」，从附件库挑历史实况图时也带得动。
+//
+// 只处理带 original_name / file_ext 的行：field 裁剪掉这两个字段时直接跳过，
+// 不会因为缺字段就把普通图片误判成实况图。
+func (this *Attachment) appendLiveVideo(items []map[string]any) []map[string]any {
+
+	type pending struct {
+		item  map[string]any
+		uid   int
+		video string
+	}
+
+	list := make([]pending, 0, len(items))
+	names := make([]any, 0, len(items))
+
+	for _, item := range items {
+
+		ext := strings.ToLower(strings.TrimPrefix(cast.ToString(item["file_ext"]), "."))
+		if ext != "jpg" && ext != "jpeg" {
+			continue
+		}
+
+		name := cast.ToString(item["original_name"])
+		if name == "" {
+			continue
+		}
+
+		base := name
+		if index := strings.LastIndex(name, "."); index > 0 {
+			base = name[:index]
+		}
+
+		video := base + "-live.mp4"
+		list = append(list, pending{item: item, uid: cast.ToInt(item["uploader_id"]), video: video})
+		names = append(names, video)
+	}
+
+	if len(list) == 0 {
+		return items
+	}
+
+	rows, err := facade.DB.Model(&[]model.Attachment{}).WhereIn("original_name", names).Where("file_ext", "mp4").Select()
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error()}, "实况图配对视频查询失败")
+		return items
+	}
+
+	// 上传者已知时按「uid + 文件名」精确匹配，避免不同用户同名封面互相串台；
+	// 字段被裁剪（附件库默认不取 uploader_id）时退化为按文件名匹配。
+	byUid := make(map[string]string, len(rows))
+	byName := make(map[string]string, len(rows))
+	for _, row := range rows {
+		url := utils.Replace(cast.ToString(row["full_url"]), model.DomainTemp1())
+		if url == "" {
+			continue
+		}
+		name := cast.ToString(row["original_name"])
+		byName[name] = url
+		byUid[fmt.Sprintf("%d|%s", cast.ToInt(row["uploader_id"]), name)] = url
+	}
+
+	for _, item := range list {
+		var url string
+		if item.uid > 0 {
+			url = byUid[fmt.Sprintf("%d|%s", item.uid, item.video)]
+		}
+		if url == "" {
+			url = byName[item.video]
+		}
+		if url != "" {
+			item.item["live_video"] = url
+		}
+	}
+
+	return items
+}
+
 func (this *Attachment) all(ctx *gin.Context) {
 	code := 204
 	msg := []string{"无数据！", ""}
@@ -676,6 +758,11 @@ func (this *Attachment) all(ctx *gin.Context) {
 		}
 	}
 
+	// 实况图：给封面补上配对视频地址（附件库选中历史实况图时用）
+	if rows := this.uploaderRows(data); len(rows) > 0 {
+		data = this.appendLiveVideo(rows)
+	}
+
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
@@ -702,7 +789,9 @@ func (this *Attachment) list(ctx *gin.Context) {
 		this.json(ctx, gin.H{"data": []any{}, "count": 0, "page": 0}, facade.Lang(ctx, "暂无附件！"), 204)
 		return
 	}
-	this.json(ctx, gin.H{"data": utils.ArrayMapWithField(data, params["field"]), "count": count, "page": math.Ceil(float64(count) / float64(limit))}, facade.Lang(ctx, "查询成功！"), 200)
+	// 实况图：给封面补上配对视频地址，附件库选中历史实况图时也能带出视频
+	rows := this.appendLiveVideo(this.uploaderRows(utils.ArrayMapWithField(data, params["field"])))
+	this.json(ctx, gin.H{"data": rows, "count": count, "page": math.Ceil(float64(count) / float64(limit))}, facade.Lang(ctx, "查询成功！"), 200)
 }
 
 func (this *Attachment) rand(ctx *gin.Context) {
