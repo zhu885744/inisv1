@@ -195,6 +195,10 @@ func EnsureAuthGroups() {
 		facade.Cache.DelTags([]any{"user["})
 		facade.Log.Info(map[string]any{"id": table.Id, "key": builtin.Key, "name": builtin.Name}, "已补齐系统内置权限分组")
 	}
+
+	// 菜单合并（37 → 15）：把权限组里旧页面（文章分类 / 勋章管理 …）的 hash 折算成一级模块。
+	// 放在这里是因为它既要在安装时跑，也要在每次启动的维护任务里跑（timer.Run 调本函数）。
+	migrateAuthGroupPages()
 }
 
 // OrdinaryAuthGroupId - 取「普通用户」分组的 ID（不存在时返回 0）

@@ -50,6 +50,79 @@ func (this *AuthPages) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
+// defaultAuthPages - 后台页面权限点（菜单合并后的一级模块）
+//
+// 菜单合并（37 → 15）：侧边栏只保留这些一级模块入口，子功能（文章分类 / 用户认证 /
+// 主题配色 / IP 黑白名单 …）在页内以标签页承载（前端 views/admin/AdminHub.vue）。
+// 页面权限同样按一级模块授权：勾选一个模块 = 可以使用该模块下的全部标签页。
+//
+// Icon 统一使用 Bootstrap Icons 类名（https://icons.getbootstrap.com/），前端 <i :class="icon"> 直接可用
+var defaultAuthPages = []AuthPages{
+	{Name: "文章管理", Icon: "bi bi-file-earmark-text", Path: "/admin/article", Size: "14px"},
+	{Name: "独立页面", Icon: "bi bi-window", Path: "/admin/pages", Size: "14px"},
+	// 文档站：先「文档库」选项目，再进项目管目录 + 页面，前台 /docs/:项目 阅读
+	{Name: "文档库", Icon: "bi bi-journal-bookmark", Path: "/admin/docs", Size: "14px"},
+	// 内容管理：动态 / 公告 / 轮播 / 话题
+	{Name: "内容管理", Icon: "bi bi-collection-play", Path: "/admin/content", Size: "14px"},
+	// 用户管理：用户列表 / 用户认证 / 认证类型 / 等级 / 经验 / 勋章
+	{Name: "用户管理", Icon: "bi bi-people", Path: "/admin/users", Size: "14px"},
+	{Name: "评论管理", Icon: "bi bi-chat-square-text", Path: "/admin/comment", Size: "14px"},
+	// 商城管理：商品 / 积分 / 装扮 / 签到
+	{Name: "商城管理", Icon: "bi bi-bag", Path: "/admin/goods", Size: "14px"},
+	{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
+	{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
+	// 友链管理：友链列表 / 友链分组
+	{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
+	{Name: "附件管理", Icon: "bi bi-folder2-open", Path: "/admin/attachment", Size: "14px"},
+	// 系统配置：网站设置 / 主题配色 / 后台页面管理
+	{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
+	// 安全中心：权限规则 / 权限分组 / 接口密钥 / IP 黑白名单 / QPS 预警
+	{Name: "安全中心", Icon: "bi bi-shield-lock", Path: "/admin/security", Size: "14px"},
+	// 数据统计：实时资源 / 数据库 / 在线用户（数据来自 socket 推送，见 app/socket/controller/status.go）
+	{Name: "数据统计", Icon: "bi bi-graph-up-arrow", Path: "/admin/stats", Size: "14px"},
+	{Name: "查看日志", Icon: "bi bi-journal-text", Path: "/admin/logs", Size: "14px"},
+}
+
+// mergedAuthPages - 菜单合并（37 → 15）后被并入一级模块的旧页面路径
+//
+// key 是合并前的页面路径，value 是它归属的一级模块。
+// 老库里这些记录由 mergeAuthPages 软删除（进回收站，可手动恢复），
+// 权限组里对它们的勾选由 migrateAuthGroupPages 折算成一级模块。
+var mergedAuthPages = map[string]string{
+	// 文章管理
+	"/admin/article/write": "/admin/article",
+	"/admin/article/group": "/admin/article",
+	// 独立页面
+	"/admin/pages/write": "/admin/pages",
+	// 内容管理
+	"/admin/moments": "/admin/content",
+	"/admin/placard": "/admin/content",
+	"/admin/banner":  "/admin/content",
+	"/admin/tags":    "/admin/content",
+	// 用户管理
+	"/admin/certifications": "/admin/users",
+	"/admin/cert-types":     "/admin/users",
+	"/admin/level":          "/admin/users",
+	"/admin/exp":            "/admin/users",
+	"/admin/badges":         "/admin/users",
+	// 商城管理
+	"/admin/integral":   "/admin/goods",
+	"/admin/decoration": "/admin/goods",
+	"/admin/checkin":    "/admin/goods",
+	// 友链管理
+	"/admin/links/group": "/admin/links",
+	// 系统配置
+	"/admin/theme": "/admin/system",
+	// 安全中心（后台页面管理维护的是页面权限点，与权限规则同属安全域）
+	"/admin/auth/pages": "/admin/security",
+	"/admin/auth/rules": "/admin/security",
+	"/admin/auth/group": "/admin/security",
+	"/admin/api/keys":   "/admin/security",
+	"/admin/ip/black":   "/admin/security",
+	"/admin/ip/white":   "/admin/security",
+	"/admin/qps/warn":   "/admin/security",
+}
+
 // InitAuthPages - 初始化AuthPages表
 func InitAuthPages() {
 	// 迁移表
@@ -59,53 +132,7 @@ func InitAuthPages() {
 		return
 	}
 
-	// 后台管理页面列表
-	// Icon 统一使用 Bootstrap Icons 类名（https://icons.getbootstrap.com/），前端 <i :class="icon"> 直接可用
-	pages := []AuthPages{
-		{Name: "撰写文章", Icon: "bi bi-pencil-square", Path: "/admin/article/write", Size: "14px"},
-		{Name: "文章管理", Icon: "bi bi-file-earmark-text", Path: "/admin/article", Size: "14px"},
-		{Name: "文章分类", Icon: "bi bi-collection", Path: "/admin/article/group", Size: "14px"},
-		{Name: "用户管理", Icon: "bi bi-people", Path: "/admin/users", Size: "14px"},
-		{Name: "评论管理", Icon: "bi bi-chat-square-text", Path: "/admin/comment", Size: "14px"},
-		{Name: "公告管理", Icon: "bi bi-megaphone", Path: "/admin/placard", Size: "14px"},
-		{Name: "轮播管理", Icon: "bi bi-images", Path: "/admin/banner", Size: "14px"},
-		{Name: "话题管理", Icon: "bi bi-tags", Path: "/admin/tags", Size: "14px"},
-		{Name: "等级管理", Icon: "bi bi-graph-up-arrow", Path: "/admin/level", Size: "14px"},
-		{Name: "经验管理", Icon: "bi bi-star-half", Path: "/admin/exp", Size: "14px"},
-		{Name: "商品管理", Icon: "bi bi-bag", Path: "/admin/goods", Size: "14px"},
-		{Name: "积分管理", Icon: "bi bi-coin", Path: "/admin/integral", Size: "14px"},
-		{Name: "装扮管理", Icon: "bi bi-palette", Path: "/admin/decoration", Size: "14px"},
-		{Name: "签到管理", Icon: "bi bi-calendar-check", Path: "/admin/checkin", Size: "14px"},
-		{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
-		{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
-		// 用户认证：审核认证申请（类型 / 领域 / 字段由「认证类型」页配置）
-		{Name: "用户认证", Icon: "bi bi-patch-check", Path: "/admin/certifications", Size: "14px"},
-		// 认证类型：自定义认证类型、该类型下的领域与申请字段、认证说明
-		{Name: "认证类型", Icon: "bi bi-sliders", Path: "/admin/cert-types", Size: "14px"},
-		{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
-		{Name: "系统配置", Icon: "bi bi-gear", Path: "/admin/system", Size: "14px"},
-		// 主题配色：编辑设计 token（浅色 / 深色两套），保存后 /theme-custom.css 立即生效
-		{Name: "主题配色", Icon: "bi bi-palette2", Path: "/admin/theme", Size: "14px"},
-		{Name: "查看日志", Icon: "bi bi-journal-text", Path: "/admin/logs", Size: "14px"},
-		// 数据统计：实时资源 / 数据库 / 在线用户（数据来自 socket 推送，见 app/socket/controller/status.go）
-		{Name: "数据统计", Icon: "bi bi-graph-up-arrow", Path: "/admin/stats", Size: "14px"},
-		{Name: "独立页面", Icon: "bi bi-window", Path: "/admin/pages", Size: "14px"},
-		{Name: "撰写独立页面", Icon: "bi bi-file-earmark-plus", Path: "/admin/pages/write", Size: "14px"},
-		// 文档站：先「文档库」选项目，再进项目管目录 + 页面，前台 /docs/:项目 阅读
-		{Name: "文档库", Icon: "bi bi-journal-bookmark", Path: "/admin/docs", Size: "14px"},
-		{Name: "友链分组", Icon: "bi bi-diagram-3", Path: "/admin/links/group", Size: "14px"},
-		{Name: "权限规则", Icon: "bi bi-shield-check", Path: "/admin/auth/rules", Size: "14px"},
-		{Name: "权限分组", Icon: "bi bi-shield-lock", Path: "/admin/auth/group", Size: "14px"},
-		{Name: "接口密钥", Icon: "bi bi-key", Path: "/admin/api/keys", Size: "14px"},
-		{Name: "IP黑名单", Icon: "bi bi-slash-circle", Path: "/admin/ip/black", Size: "14px"},
-		{Name: "IP白名单", Icon: "bi bi-check-circle", Path: "/admin/ip/white", Size: "14px"},
-		{Name: "QPS预警", Icon: "bi bi-speedometer2", Path: "/admin/qps/warn", Size: "14px"},
-		{Name: "后台页面管理", Icon: "bi bi-layout-text-window", Path: "/admin/auth/pages", Size: "14px"},
-		{Name: "动态管理", Icon: "bi bi-chat-square-quote", Path: "/admin/moments", Size: "14px"},
-		{Name: "附件管理", Icon: "bi bi-folder2-open", Path: "/admin/attachment", Size: "14px"},
-		// 勋章：定义 + 任务条件 + 手动发放/收回（见 app/model/badge.go）
-		{Name: "勋章管理", Icon: "bi bi-award", Path: "/admin/badges", Size: "14px"},
-	}
+	pages := defaultAuthPages
 
 	// legacyIcons - v1 版本的短图标名，仅用于判断「是否可以把旧值升级为 Bootstrap Icons」
 	// 管理员自己在「后台页面管理」里改过的图标不会被覆盖
@@ -157,10 +184,137 @@ func InitAuthPages() {
 
 	wg.Wait()
 
-	// 兼容旧库：文档多项目化后 /admin/docs 的职责从「直接管文档」变成「文档库入口」，
-	// 这里把仍是旧默认名的记录对齐一次；管理员自定义过名称的不动。
-	facade.DB.Model(&AuthPages{}).
-		Where("path", "/admin/docs").
-		Where("name", "文档管理").
-		Update(map[string]any{"name": "文档库"})
+	// 兼容旧库：菜单合并后有两个模块换了更贴切的名字（文档多项目化 → 文档库、
+	// 商品管理升级为商城管理），这里把仍是旧默认名的记录对齐一次；管理员自定义过名称的不动。
+	for path, names := range map[string][2]string{
+		"/admin/docs":  {"文档管理", "文档库"},
+		"/admin/goods": {"商品管理", "商城管理"},
+	} {
+		facade.DB.Model(&AuthPages{}).
+			Where("path", path).
+			Where("name", names[0]).
+			Update(map[string]any{"name": names[1]})
+	}
+
+	// 合并前遗留的细粒度页面记录：并入一级模块后软删除（见 mergedAuthPages）
+	mergeAuthPages()
+}
+
+// mergeAuthPages - 把被合并的细粒度页面记录并入一级模块（幂等，可重复执行）
+//
+// 为什么需要它：seed 只补不删，老库里的「文章分类 / 用户认证 / 主题配色 …」会一直留着 ——
+// 后台页面管理里就成了 37 个开关配 15 个菜单，管理员根本对不上。这里把它们软删除
+// （进回收站，可在「后台页面管理」里恢复），权限折算见 migrateAuthGroupPages。
+//
+// 调用时机：InitAuthPages（安装 / 迁移 / 每次启动的维护）
+func mergeAuthPages() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "合并后台页面权限时发生panic")
+		}
+	}()
+
+	total := int64(0)
+	for path := range mergedAuthPages {
+		// 只处理「存在且未删除」的记录：已软删的跳过，避免每次启动重复计数
+		exist, _ := facade.DB.Model(&AuthPages{}).Where("path", path).Exist()
+		if !exist {
+			continue
+		}
+
+		tx, err := facade.DB.Model(&AuthPages{}).Where("path", path).Delete()
+		if err != nil {
+			facade.Log.Warn(map[string]any{"error": err.Error(), "path": path}, "合并后台页面失败")
+			continue
+		}
+		if tx != nil {
+			total += tx.RowsAffected
+		}
+	}
+
+	if total <= 0 {
+		return
+	}
+
+	facade.Log.Info(map[string]any{"rows": total}, "已把旧的细粒度后台页面并入一级模块")
+	if facade.Cache != nil {
+		facade.Cache.DelTags([]any{"[GET]", "auth-pages"})
+	}
+}
+
+// migrateAuthGroupPages - 把权限组里的旧页面 hash 折算成一级模块 hash（幂等）
+//
+// auth-group.pages 存的是 auth-pages.hash（Sum32(path)）的逗号串。菜单合并后旧 hash
+// 对应的记录已被 mergeAuthPages 软删，不折算的话，那些只勾选过子页面（如「勋章管理」）
+// 的权限组会连「用户管理」都看不到。折算规则：勾过某个模块下任意一个子页面，
+// 即让该组拥有这个一级模块 —— 这正是「模块级授权」的语义。
+//
+// 调用时机：InitAuthGroup（EnsureAuthGroups 之后），与页面合并一起构成一次幂等迁移
+func migrateAuthGroupPages() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			facade.Log.Error(map[string]any{"error": err}, "折算权限组页面权限时发生panic")
+		}
+	}()
+
+	oldHashToNew := map[string]string{}
+	for path, target := range mergedAuthPages {
+		oldHashToNew[utils.Hash.Sum32(path)] = utils.Hash.Sum32(target)
+	}
+
+	groups, err := facade.DB.Model(&[]AuthGroup{}).WithTrashed().Select()
+	if err != nil {
+		facade.Log.Warn(map[string]any{"error": err.Error()}, "读取权限组失败")
+		return
+	}
+
+	changed := 0
+	for _, group := range groups {
+		raw := cast.ToString(group["pages"])
+		if strings.Contains(raw, "all") {
+			continue
+		}
+
+		next := make([]string, 0, len(raw))
+		owned := map[string]bool{}
+		for _, hash := range strings.Split(raw, ",") {
+			hash = strings.TrimSpace(hash)
+			if hash == "" {
+				continue
+			}
+			// 旧页面的 hash → 它归属的一级模块
+			if target, ok := oldHashToNew[hash]; ok {
+				hash = target
+			}
+			if owned[hash] {
+				continue
+			}
+			owned[hash] = true
+			next = append(next, hash)
+		}
+
+		value := strings.Join(next, ",")
+		if value == raw {
+			continue
+		}
+
+		if _, err := facade.DB.Model(&AuthGroup{}).WithTrashed().Where("id", group["id"]).Update(map[string]any{"pages": value}); err != nil {
+			facade.Log.Warn(map[string]any{"error": err.Error(), "id": group["id"]}, "折算权限组页面权限失败")
+			continue
+		}
+		changed++
+	}
+
+	if changed <= 0 {
+		return
+	}
+
+	facade.Log.Info(map[string]any{"groups": changed}, "已把权限组的旧页面权限折算到一级模块")
+	if facade.Cache != nil {
+		facade.Cache.DelTags([]any{"user["})
+	}
 }

@@ -1047,9 +1047,11 @@ func createAuthRules() (result []AuthRules) {
 				"path=suggest&type=login&name=可能认识的人",
 				"path=stats&type=common&name=获取社交数据卡片",
 			),
-			"POST":   loginCreate("path=follow&type=login&name=关注用户"),
-			"PUT":    loginUpdate("path=unfollow&type=login&name=取消关注"),
-			"DELETE": loginDelete(),
+			"POST": loginCreate("path=follow&type=login&name=关注用户"),
+			"PUT":  loginUpdate("path=unfollow&type=login&name=取消关注"),
+			// 移除粉丝：粉丝记录里 uid 是对方、follow_uid 是自己，不能复用 remove，
+			// 单独开一个接口并同样只要求登录（社交关系不设权限点）
+			"DELETE": loginDelete("path=remove-fans&type=login&name=移除粉丝"),
 		},
 		// 点赞：同上
 		"user-likes": {

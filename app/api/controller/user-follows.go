@@ -127,9 +127,10 @@ func (this *UserFollows) IDEL(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"remove": this.remove,
-		"delete": this.delete,
-		"clear":  this.clear,
+		"remove":      this.remove,
+		"remove-fans": this.removeFans,
+		"delete":      this.delete,
+		"clear":       this.clear,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -513,6 +514,59 @@ func (this *UserFollows) remove(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
+}
+
+// removeFans - 移除粉丝（只能移除「关注我」的记录）
+//
+// 与 remove 的区别：remove 删的是「我关注的人」，记录里 uid = 我；
+// 而粉丝记录的 uid 是粉丝本人、follow_uid 才是我 —— 用 remove 传粉丝的记录 id
+// 会被 uid 条件全部挡掉，所以单独开一个方法，条件反过来写。
+//
+// 越权防护：where 固定 follow_uid = 当前登录用户，传入别人的记录 id 也删不到。
+func (this *UserFollows) removeFans(ctx *gin.Context) {
+	params := this.params(ctx)
+
+	uid := this.meta.user(ctx).Id
+	if uid == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	ids := utils.Unity.Ids(params["ids"])
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "ids"), 400)
+		return
+	}
+
+	item := facade.DB.Model(&model.UserFollows{}).Where("follow_uid", uid)
+	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
+
+	if utils.Is.Empty(ids) {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+		return
+	}
+
+	// 删除前先记下粉丝 uid：删完就查不到了，而社交数据缓存需要按 uid 清
+	rows, _ := facade.DB.Model(&[]model.UserFollows{}).Where("follow_uid", uid).WhereIn("id", ids).Select()
+	fanUids := make([]int, 0, len(rows))
+	for _, row := range rows {
+		if fanUid := cast.ToInt(row["uid"]); fanUid > 0 {
+			fanUids = append(fanUids, fanUid)
+		}
+	}
+
+	if _, err := item.Delete(ids); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "移除失败！"), 400)
+		return
+	}
+
+	// 我的粉丝数、这些人的关注数都变了 → 清掉双方的社交数据卡片缓存
+	this.invalidateSocialStats(append(fanUids, uid)...)
+	for _, fanUid := range fanUids {
+		model.CertStatsFlush(fanUid)
+	}
+
+	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "已移除 %v 位粉丝！", len(ids)), 200)
 }
 
 func (this *UserFollows) delete(ctx *gin.Context) {
