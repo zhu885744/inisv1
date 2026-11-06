@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,16 @@ type client struct {
 	info *info
 	// 出站消息的缓冲通道。
 	send chan []byte
+	// done - 连接关闭信号。
+	//
+	// 为什么不直接 close(send)：send 有多个投递方（广播、单播、私聊、离线补发），
+	// 一旦关闭，任何还在途的 `send <- msg` 都会 panic。改成「关闭 done + 投递方 select」后，
+	// 关闭与投递都安全，投递方也能立刻感知连接已断开。
+	done   chan struct{}
+	closed atomic.Bool
+	// pongCh - 收到协议层 ping 后交给写协程回 pong。
+	// gorilla/websocket 只允许一个写协程，读协程里直接 WriteMessage 会与写协程并发写。
+	pongCh chan struct{}
 	// websocket 连接。
 	conn *websocket.Conn
 	// 是否为管理员（用于系统状态的分级推送）
@@ -43,8 +54,96 @@ type client struct {
 	ip string
 	// 用户名（登录用户昵称，访客为空）
 	username string
+	// 登录用户 ID（0 = 访客）。
+	//
+	// 用原子变量而不是直接改 info.ID：握手时带 Cookie 的连接是 user_<uid>，
+	// 跨域场景下连接先落地成 guest_<uuid>、之后才发 {type:'auth'} 升级身份，
+	// 这时 info.ID 不能再动（read/write goroutine 都在读它），但私聊必须知道「我是谁」，
+	// 于是单独记一份 uid —— 投递目标仍按 uid 索引（见 hub.userClients）。
+	uid atomic.Int64
 	// 最后活跃时间（Unix 秒，原子操作避免并发读写竞争）
 	lastActive atomic.Int64
+}
+
+// push - 非阻塞投递一条出站消息
+//
+// 返回值表示“有没有进队列”：false 时由调用方决定是丢弃还是摘除连接。
+// 刻意不 close(send)：投递方很多（广播 / 单播 / 私聊 / 离线补发 / 回 pong），
+// 关闭 channel 会让在途写入直接 panic。
+func (this *client) push(message []byte) bool {
+	if this.closed.Load() {
+		return false
+	}
+
+	select {
+	case <-this.done:
+		return false
+	default:
+	}
+
+	select {
+	case this.send <- message:
+		return true
+	case <-this.done:
+		return false
+	default:
+		return false
+	}
+}
+
+// signalPong 请求写协程回一个协议层 pong（缓冲 1，连续 ping 合并成一次）
+func (this *client) signalPong() {
+	select {
+	case this.pongCh <- struct{}{}:
+	default:
+	}
+}
+
+// connSet - 同一个 uid 的所有在线连接（多端在线）
+//
+// 成员只由 hub goroutine 增删；其它 goroutine（HTTP 控制器查在线状态）只读，
+// 因此内部用读写锁保护 map。
+type connSet struct {
+	mu      sync.RWMutex
+	clients map[*client]struct{}
+}
+
+func newConnSet() *connSet {
+	return &connSet{clients: make(map[*client]struct{})}
+}
+
+// add - 加入连接，返回当前连接数
+func (set *connSet) add(client *client) int {
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	set.clients[client] = struct{}{}
+	return len(set.clients)
+}
+
+// remove - 移除连接，返回剩余连接数
+func (set *connSet) remove(client *client) int {
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	delete(set.clients, client)
+	return len(set.clients)
+}
+
+// snapshot - 当前连接快照（推送时不要持锁遍历，避免写阻塞读）
+func (set *connSet) snapshot() []*client {
+	set.mu.RLock()
+	defer set.mu.RUnlock()
+	list := make([]*client, 0, len(set.clients))
+	for client := range set.clients {
+		list = append(list, client)
+	}
+	return list
+}
+
+// size - 当前连接数（在线判定）
+func (set *connSet) size() int {
+	set.mu.RLock()
+	defer set.mu.RUnlock()
+	return len(set.clients)
 }
 
 // 客户端信息结构体
@@ -180,6 +279,13 @@ type hub struct {
 	security             *securityConfig
 	chatSessions         map[string]*chatSession
 	messageStatuses      map[string]*messageStatus
+	// userClients - 登录用户 uid → 该用户在线的所有连接（多端在线）。
+	//
+	// 为什么需要它：clients 的 key 是客户端 ID，跨域（无 Cookie）握手时是 guest_<uuid>，
+	// 认领身份后也不会改 key —— 用 clients["user_3"] 找不到人，私信就送不到。
+	// 为什么是集合：同一个人可能手机 + 电脑同时在线，私聊要推给他的每一台设备。
+	// 只由 hub goroutine 改变集合成员，其它 goroutine 通过 connSet 的读写锁读取。
+	userClients sync.Map
 	// 当前在线的管理员连接数（由 hub.run 在 connect / close / upgrade 时维护）。
 	// 系统状态推送任务据此判断「是否有人在看」：无人在线就跳过采集，避免空转打数据库。
 	// 用原子计数而不是直接读 clients —— clients 只在 hub goroutine 内读写，跨 goroutine 读会产生数据竞争。
@@ -601,13 +707,11 @@ func (hub *hub) SendPrivateMessage(from, to string, content map[string]any) (str
 			sentAt:    time.Now(),
 		}
 
-		select {
-		case client.send <- data:
+		if client.push(data) {
 			hub.messageStatuses[msgId].delivered[to] = true
 			return msgId, nil
-		default:
-			return msgId, fmt.Errorf("发送队列满")
 		}
+		return msgId, fmt.Errorf("发送队列满")
 	} else {
 		hub.storeOfflineMessage(to, content["data"].([]byte))
 		return msgId, nil

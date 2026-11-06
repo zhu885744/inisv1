@@ -95,6 +95,11 @@ func InitTable() {
 		// 用户认证：申请人一条记录，后台审核后主页展示
 		{"UserCertification", InitUserCertification},
 		{"UserBanRecords", InitUserBanRecords},
+		// 用户私聊：会话 / 消息（依赖 Users；未读数由消息表聚合，无冗余计数表）
+		{"ChatConversations", InitChatConversations},
+		{"ChatMessages", InitChatMessages},
+		// 同步水位（每会话每用户一条：ACK / 已读的最大 seq）
+		{"ChatStates", InitChatStates},
 		{"Notification", InitNotification},
 		{"NotificationRead", InitNotificationRead},
 		{"Integral", InitIntegral},

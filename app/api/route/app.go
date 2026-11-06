@@ -59,6 +59,7 @@ var controllers = map[string]controller.ApiInterface{
 	"moments":            &controller.Moments{},
 	"feed":               &controller.Feed{},
 	"user-blocks":        &controller.UserBlocks{},
+	"chat":               &controller.Chat{},
 	"report":             &controller.Report{},
 	"cert-type":          &controller.CertType{},
 	"user-certification": &controller.UserCertification{},

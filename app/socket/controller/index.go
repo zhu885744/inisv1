@@ -97,7 +97,10 @@ func (this Index) Connect(ctx *gin.Context) {
 	client := &client{
 		hub:  Hub,
 		conn: conn,
-		send: make(chan []byte, 256),
+		// 256 的出站缓冲：正常聊天足够，慢消费者宁可丢帧也不阻塞 hub
+		send:   make(chan []byte, 256),
+		done:   make(chan struct{}),
+		pongCh: make(chan struct{}, 1),
 		info: &info{
 			ID:      cast.ToString(id),
 			Type:    "connect",
@@ -107,10 +110,14 @@ func (this Index) Connect(ctx *gin.Context) {
 		ip:      clientIP,
 	}
 	client.lastActive.Store(time.Now().Unix())
-	// 登录用户：记录用户名（访客无用户名，前端显示「访客」）
+	// 登录用户：记录 uid 与用户名（访客无用户名，前端显示「访客」）
+	// uid 是私聊投递的唯一依据：握手带 Cookie 时中间件已解析出用户，直接落一份
 	if user, ok := ctx.Get("user"); ok {
 		if userMap, ok := user.(map[string]any); ok {
 			client.username = cast.ToString(userMap["nickname"])
+			if uid := cast.ToInt(userMap["id"]); uid > 0 {
+				client.uid.Store(int64(uid))
+			}
 		}
 	}
 
@@ -149,8 +156,10 @@ func (this *client) read() {
 		this.lastActive.Store(time.Now().Unix())
 
 		if wsMsgType == websocket.PingMessage {
-			socketLog("收到ping消息，回复pong: %s", this.info.ID)
-			this.conn.WriteMessage(websocket.PongMessage, []byte{})
+			// 协议层 pong 必须由写协程发：gorilla/websocket 同一时刻只允许一个写者，
+			// 在读协程里直接 WriteMessage 会与写协程并发写，轻则丢帧重则 panic
+			socketLog("收到ping消息，转交写协程回pong: %s", this.info.ID)
+			this.signalPong()
 			continue
 		}
 
@@ -174,22 +183,24 @@ func (this *client) read() {
 			msgType := cast.ToString(item["type"])
 
 			if msgType == "ack" {
-				msgId := cast.ToString(item["msg_id"])
-				this.handleAck(msgId)
+				// 批量送达确认：{ type:'ack', data:{ target_uid, seq } }
+				// 只写数据库（见 model.ChatStates.Ack），不碰 hub 里的任何 map ——
+				// 多个读协程并发写 map 会直接 fatal。
+				this.applyChatWatermark(item, false)
 				continue
 			}
 
 			if msgType == "read" {
-				msgId := cast.ToString(item["msg_id"])
-				this.hub.MarkMessageRead(msgId, this.info.ID)
-				socketLog("消息已读: %s, msgId: %s", this.info.ID, msgId)
+				// 已读上报：{ type:'read', data:{ target_uid, seq } }
+				// 与 ACK 同理，只推进 last_read_seq；给对方的 chat_read 回执仍走 HTTP。
+				this.applyChatWatermark(item, true)
 				continue
 			}
 
 			if msgType == "ping" {
 				socketLog("收到JSON ping消息，回复pong: %s", this.info.ID)
 				pongMsg, _ := json.Marshal(map[string]any{"type": "pong"})
-				this.send <- pongMsg
+				this.push(pongMsg)
 				continue
 			}
 
@@ -213,7 +224,9 @@ func (this *client) read() {
 			// 转发类消息的身份要求（防止匿名的跨连接投递）：
 			//   - 全站广播只给管理员，否则任意游客都能向所有在线连接下发任意内容；
 			//   - 定向消息要求已登录，否则游客可以往 user_<uid>（可枚举）投递伪造的私信。
-			// 客户端 ID 由 socket 中间件生成，只有 user_<uid> / guest_<uuid> 两种形态。
+			// 客户端 ID 由 socket 中间件生成，只有 user_<uid> / guest_<uuid> 两种形态；
+			// 跨域握手认不出用户时连接是 guest_*，完成 {type:'auth'} 后 uid 才有值 ——
+			// 所以身份判断看 uid，不要看 info.ID 前缀。
 			if utils.Is.Empty(item["to"]) {
 				if !this.isAdmin {
 					socketLog("非管理员尝试广播，已丢弃: %s", this.info.ID)
@@ -221,10 +234,20 @@ func (this *client) read() {
 				}
 			} else {
 				target := cast.ToString(item["to"])
-				guest := strings.HasPrefix(this.info.ID, "guest_")
 				legal := len(target) <= 80 &&
 					(strings.HasPrefix(target, "user_") || strings.HasPrefix(target, "guest_"))
-				if guest || !legal {
+				if !legal {
+					socketLog("非法的定向消息，已丢弃: %s -> %s", this.info.ID, target)
+					continue
+				}
+				// 私聊：必须已登录（guest 或还没完成 auth 升级的连接一律拒绝）
+				if msgType == "private" && this.uid.Load() <= 0 {
+					socketLog("未登录尝试发私信，已丢弃: %s", this.info.ID)
+					this.reply(map[string]any{"type": "error", "content": "请先登录后再发送私信"})
+					continue
+				}
+				// 其它定向消息（single）：沿用老口径，只要求不是访客
+				if msgType != "private" && strings.HasPrefix(this.info.ID, "guest_") {
 					socketLog("非法的定向消息，已丢弃: %s -> %s", this.info.ID, target)
 					continue
 				}
@@ -244,6 +267,19 @@ func (this *client) read() {
 				}
 			}
 
+			// 私聊：先落库，再用「规范化后的消息」替换 payload 里的 data
+			// （与 HTTP 发送共用 model.ChatMessages.Send，两边得到的历史记录完全一致）
+			if msgType == "private" {
+				message, err := this.persistPrivate(cast.ToString(item["to"]), item)
+				if err != nil {
+					socketLog("私聊落库失败: %s -> %s, 错误: %v", this.info.ID, item["to"], err)
+					this.reply(map[string]any{"type": "error", "content": err.Error()})
+					continue
+				}
+				item["data"] = message
+				item["from_uid"] = cast.ToInt(message["from_uid"])
+			}
+
 			delete(item, "to")
 			info.Content = item
 
@@ -252,13 +288,6 @@ func (this *client) read() {
 		} else {
 			socketLog("无效的JSON数据: %s, 内容: %s", this.info.ID, string(msg))
 		}
-	}
-}
-
-func (this *client) handleAck(msgId string) {
-	if _, ok := this.hub.pendingMessages[msgId]; ok {
-		socketLog("收到ACK确认: %s, 客户端: %s", msgId, this.info.ID)
-		delete(this.hub.pendingMessages, msgId)
 	}
 }
 
@@ -303,59 +332,10 @@ func (this *client) handleAuth(token string) {
 	}
 }
 
-func (this *client) sendWithAck(message []byte) {
-	msgId := guid()
-
-	var content map[string]any
-	if err := json.Unmarshal(message, &content); err == nil {
-		content["msg_id"] = msgId
-		message, _ = json.Marshal(content)
-	}
-
-	this.hub.pendingMessages[msgId] = &pendingMessage{
-		message: message,
-		client:  this,
-		attempt: 1,
-		sentAt:  time.Now(),
-	}
-
-	select {
-	case this.send <- message:
-		socketLog("发送消息(带ACK): %s, msgId: %s", this.info.ID, msgId)
-		go this.waitForAck(msgId)
-	default:
-		socketLog("发送队列满: %s", this.info.ID)
-		delete(this.hub.pendingMessages, msgId)
-	}
-}
-
-func (this *client) waitForAck(msgId string) {
-	ticker := time.NewTicker(this.hub.ackTimeout)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if pm, ok := this.hub.pendingMessages[msgId]; ok {
-			if pm.attempt >= this.hub.maxRetries {
-				socketLog("消息重试次数耗尽: %s, msgId: %s", this.info.ID, msgId)
-				delete(this.hub.pendingMessages, msgId)
-				return
-			}
-
-			pm.attempt++
-			pm.sentAt = time.Now()
-			socketLog("重传消息: %s, msgId: %s, 尝试次数: %d", this.info.ID, msgId, pm.attempt)
-
-			select {
-			case this.send <- pm.message:
-			default:
-				socketLog("重传队列满: %s", this.info.ID)
-			}
-		} else {
-			return
-		}
-	}
-}
-
+// write - 唯一的写协程
+//
+// 所有出站帧（消息 / ping / pong / close）都在这里写，读协程只负责入站，
+// 满足 gorilla/websocket「同一时刻只能有一个写者」的约束。
 func (this *client) write() {
 	socketLog("开始写入消息: %s", this.info.ID)
 
@@ -368,30 +348,47 @@ func (this *client) write() {
 
 	for {
 		select {
-		case msg, ok := <-this.send:
+		case <-this.done:
+			// 连接已被 hub 摘除：尽力发一个关闭帧，然后退出
 			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				this.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
+			_ = this.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+
+		case msg := <-this.send:
+			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			next, err := this.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				socketLog("创建消息写入器失败: %s, 错误: %v", this.info.ID, err)
 				return
 			}
-			next.Write(msg)
+			_, _ = next.Write(msg)
 
-			len := len(this.send)
-			for i := 0; i < len; i++ {
-				next.Write(line)
-				next.Write(<-this.send)
+			// 顺手把队列里已经在等的消息拼进同一个帧，减少系统调用；
+			// 用 select+default 而不是 len(chan)，避免和投递方抢同一个队列时卡死
+		drain:
+			for {
+				select {
+				case extra := <-this.send:
+					_, _ = next.Write(line)
+					_, _ = next.Write(extra)
+				default:
+					break drain
+				}
 			}
 
 			if err := next.Close(); err != nil {
 				socketLog("关闭消息写入器失败: %s, 错误: %v", this.info.ID, err)
 				return
 			}
+
+		case <-this.pongCh:
+			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := this.conn.WriteMessage(websocket.PongMessage, []byte{}); err != nil {
+				socketLog("发送Pong失败: %s, 错误: %v", this.info.ID, err)
+				return
+			}
+
 		case <-ticker.C:
 			this.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := this.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -408,6 +405,8 @@ func (hub *hub) run() {
 		case client := <-hub.connect:
 			socketLog("客户端连接: %s", client.info.ID)
 			hub.clients[client.info.ID] = client
+			// 多端在线：同一个 uid 的所有连接都进集合，私聊按集合扇出
+			hub.trackUser(client)
 			if client.isAdmin {
 				hub.adminOnline.Add(1)
 			}
@@ -425,36 +424,12 @@ func (hub *hub) run() {
 			}
 
 			hub.recordConnection()
-			client.send <- []byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`)
+			client.push([]byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`))
 			hub.broadcastStatus()
 			socketLog("当前在线人数: %d", len(hub.clients))
 		case client := <-hub.close:
 			socketLog("客户端断开连接: %s", client.info.ID)
-			if _, ok := hub.clients[client.info.ID]; ok {
-				delete(hub.clients, client.info.ID)
-				if client.isAdmin {
-					hub.adminOnline.Add(-1)
-				}
-				close(client.send)
-				hub.broadcastStatus()
-				socketLog("当前在线人数: %d", len(hub.clients))
-
-				hub.recordDisconnection()
-
-				if state, ok := hub.clientStates[client.info.ID]; ok {
-					state.lastSeen = time.Now()
-					go hub.cleanupClientStateAfterTimeout(client.info.ID)
-				}
-
-				for ip, conn := range hub.ipConnections {
-					for _, cid := range conn.clientIds {
-						if cid == client.info.ID {
-							hub.removeIPConnection(ip, client.info.ID)
-							break
-						}
-					}
-				}
-			}
+			hub.dropClient(client)
 		case message := <-hub.notice:
 			// 本实例产生的消息：本地分发 + 转发给其它实例
 			hub.dispatch(message, true)
@@ -484,6 +459,12 @@ func (hub *hub) run() {
 			prevAdmin := up.client.isAdmin
 			up.client.username = up.username
 			up.client.isAdmin = up.isAdmin
+			// 认领身份：之后这条连接就可以收发私聊了（info.ID 仍是握手时的 guest_xxx）。
+			// 注意这里可能已经有一个「握手带 Cookie」时的 uid 记录，trackUser 是集合，重复加入无害。
+			if up.uid > 0 {
+				up.client.uid.Store(int64(up.uid))
+				hub.trackUser(up.client)
+			}
 			if prevAdmin != up.isAdmin {
 				if up.isAdmin {
 					hub.adminOnline.Add(1)
@@ -548,31 +529,148 @@ func maskIP(ip string) string {
 	return ip
 }
 
-// 广播消息
+// trackUser - 把连接登记到 uid 集合（多端在线）
+func (hub *hub) trackUser(client *client) {
+	if client == nil {
+		return
+	}
+	uid := int(client.uid.Load())
+	if uid <= 0 {
+		return
+	}
+	item, _ := hub.userClients.LoadOrStore(uid, newConnSet())
+	if set, ok := item.(*connSet); ok {
+		set.add(client)
+	}
+}
+
+// untrackUser - 从 uid 集合里摘掉连接；集合空了就删掉这个 key
+func (hub *hub) untrackUser(client *client) {
+	if client == nil {
+		return
+	}
+	uid := int(client.uid.Load())
+	if uid <= 0 {
+		return
+	}
+	item, ok := hub.userClients.Load(uid)
+	if !ok {
+		return
+	}
+	set, ok := item.(*connSet)
+	if !ok {
+		return
+	}
+	if set.remove(client) == 0 {
+		// CompareAndDelete：并发重连可能刚建了一个新的同 uid 集合，不能误删
+		hub.userClients.CompareAndDelete(uid, set)
+	}
+}
+
+// dropClient - 从 hub 摘除一条连接（幂等）
+//
+// 顺序很重要：先 CAS 标记 + 关闭 done，再清索引。
+// 关闭 done 之后，所有 push 都会立刻返回 false，不会再有消息被写进这条连接的队列。
+func (hub *hub) dropClient(client *client) {
+	if client == nil {
+		return
+	}
+	if !client.closed.CompareAndSwap(false, true) {
+		return
+	}
+	close(client.done)
+
+	_, registered := hub.clients[client.info.ID]
+	if registered {
+		delete(hub.clients, client.info.ID)
+	}
+
+	hub.untrackUser(client)
+	if client.isAdmin {
+		hub.adminOnline.Add(-1)
+	}
+
+	if !registered {
+		return
+	}
+
+	hub.broadcastStatus()
+	hub.recordDisconnection()
+
+	if state, ok := hub.clientStates[client.info.ID]; ok {
+		state.lastSeen = time.Now()
+		go hub.cleanupClientStateAfterTimeout(client.info.ID)
+	}
+
+	for ip, conn := range hub.ipConnections {
+		for _, cid := range conn.clientIds {
+			if cid == client.info.ID {
+				hub.removeIPConnection(ip, client.info.ID)
+				break
+			}
+		}
+	}
+
+	socketLog("当前在线人数: %d", len(hub.clients))
+}
+
+// broadcast 广播消息
 func (hub *hub) broadcast(message []byte) {
-	for _, client := range hub.clients {
-		select {
-		case client.send <- message:
-		default:
-			close(client.send)
-			delete(hub.clients, client.info.ID)
+	for _, client := range hub.snapshotClients() {
+		if !client.push(message) {
+			hub.dropClient(client)
 		}
 	}
 }
 
 // broadcastToAdmin 仅广播给管理员客户端（完整版状态数据）
 func (hub *hub) broadcastToAdmin(message []byte) {
-	for _, client := range hub.clients {
+	for _, client := range hub.snapshotClients() {
 		if !client.isAdmin {
 			continue
 		}
-		select {
-		case client.send <- message:
-		default:
-			close(client.send)
-			delete(hub.clients, client.info.ID)
+		if !client.push(message) {
+			hub.dropClient(client)
 		}
 	}
+}
+
+// snapshotClients - 正在遍历时可能会摘除连接，先拷一份避免边遍历边删
+func (hub *hub) snapshotClients() []*client {
+	list := make([]*client, 0, len(hub.clients))
+	for _, client := range hub.clients {
+		list = append(list, client)
+	}
+	return list
+}
+
+// deliverUser - 把消息推给某个 uid 的所有在线连接（多端），返回成功投递的连接数
+//
+// 队列满的连接直接摘除：宁可让一台慢设备重连后补拉，也不要让它拖慢其余设备。
+func (hub *hub) deliverUser(uid int, message []byte) int {
+	if uid <= 0 {
+		return 0
+	}
+
+	item, ok := hub.userClients.Load(uid)
+	if !ok {
+		return 0
+	}
+	set, ok := item.(*connSet)
+	if !ok {
+		return 0
+	}
+
+	delivered := 0
+	for _, client := range set.snapshot() {
+		if client.push(message) {
+			delivered++
+			continue
+		}
+		hub.dropClient(client)
+	}
+
+	return delivered
 }
 
 // handleKick 处理管理员踢下线请求（仅管理员可发起）
@@ -628,9 +726,7 @@ func (hub *hub) trySend(client *client, message string) {
 	if client == nil {
 		return
 	}
-	select {
-	case client.send <- []byte(message):
-	default:
+	if !client.push([]byte(message)) {
 		socketLog("发送队列满，丢弃消息: %s", client.info.ID)
 	}
 }
@@ -708,13 +804,14 @@ func (hub *hub) singlecast(message []byte, allowOffline bool) {
 
 	targetId := cast.ToString(to)
 	if client, ok := hub.clients[targetId]; ok {
-		select {
-		case client.send <- message:
+		if client.push(message) {
 			socketLog("消息发送成功: %s -> %s", content["id"], to)
-		default:
-			socketLog("发送队列满，断开连接: %s", client.info.ID)
-			close(client.send)
-			delete(hub.clients, client.info.ID)
+		} else {
+			socketLog("发送队列满或连接已关闭，摘除连接: %s", client.info.ID)
+			hub.dropClient(client)
+			if allowOffline {
+				hub.storeOfflineMessage(targetId, message)
+			}
 		}
 	} else if allowOffline {
 		socketLog("目标客户端离线，缓存消息: %s", targetId)
@@ -728,8 +825,11 @@ func (hub *hub) sendOfflineMessages(client *client, state *clientState) {
 
 	for _, msg := range state.offlineMsgs {
 		if now.Sub(msg.sentAt) < hub.offlineMsgTTL {
-			validMsgs = append(validMsgs, msg)
-			client.send <- msg.message
+			// 队列满就留在列表里等下次重连，别丢
+			if !client.push(msg.message) {
+				validMsgs = append(validMsgs, msg)
+				continue
+			}
 			socketLog("发送离线消息: %s", client.info.ID)
 		}
 	}
@@ -779,35 +879,73 @@ func (hub *hub) privatecast(message []byte, allowOffline bool) {
 
 	hub.GetOrCreateChatSession(from, to)
 
-	if client, ok := hub.clients[to]; ok {
-		msgId := cast.ToString(content["msg_id"])
-		if msgId == "" {
-			msgId = guid()
-			content["msg_id"] = msgId
-			message, _ = json.Marshal(content)
+	msgId := cast.ToString(content["msg_id"])
+	if msgId == "" {
+		msgId = guid()
+		content["msg_id"] = msgId
+		message, _ = json.Marshal(content)
+	}
+
+	// 旧版逐条已读回执用的状态表（新链路已改走 HTTP chat_read，这里保留统计用途）
+	hub.messageStatuses[msgId] = &messageStatus{
+		msgId:     msgId,
+		readBy:    map[string]bool{from: false, to: false},
+		delivered: map[string]bool{from: true, to: false},
+		sentAt:    time.Now(),
+	}
+
+	targetUid := chatTargetUid(to)
+	if targetUid > 0 {
+		// 多端在线：推给接收者的每一台设备
+		delivered := hub.deliverUser(targetUid, message)
+		if delivered > 0 {
+			hub.messageStatuses[msgId].delivered[to] = true
 		}
 
-		hub.messageStatuses[msgId] = &messageStatus{
-			msgId:     msgId,
-			readBy:    map[string]bool{from: false, to: false},
-			delivered: map[string]bool{from: true, to: false},
-			sentAt:    time.Now(),
+		// 发送者的其它设备：多端同步。发送端当前设备已经用接口返回值上屏，
+		// 前端按消息 id 去重，这里重复推一次不会出现两条气泡。
+		if fromUid := chatFromUid(content, from); fromUid > 0 && fromUid != targetUid {
+			hub.deliverUser(fromUid, message)
 		}
 
-		select {
-		case client.send <- message:
+		if delivered == 0 && allowOffline {
+			// 内存离线缓存只是「重连即刻补发」的加速层，真正的兜底是 DB + after_seq 补拉。
+			// 跨实例转发来的消息（allowOffline=false）不缓存，避免多实例各存一份。
+			socketLog("目标用户全部离线，缓存私聊消息: %s", to)
+			hub.storeOfflineMessage(to, message)
+		}
+		return
+	}
+
+	// 非 uid 形态（老客户端直接发 guest_xxx）：按客户端 ID 单播
+	if client := hub.resolveClient(to); client != nil {
+		if client.push(message) {
 			hub.messageStatuses[msgId].delivered[to] = true
 			socketLog("私聊消息发送成功: %s -> %s", from, to)
-		default:
-			socketLog("私聊发送队列满: %s", to)
+		} else {
+			hub.dropClient(client)
 			if allowOffline {
 				hub.storeOfflineMessage(to, message)
 			}
 		}
-	} else if allowOffline {
-		// 跨实例转发来的消息不在本实例缓存：目标可能连在别的实例上，
-		// 每台都存一份会导致重连后收到 N 条重复消息
+		return
+	}
+
+	if allowOffline {
 		socketLog("目标客户端离线，缓存私聊消息: %s", to)
 		hub.storeOfflineMessage(to, message)
 	}
+}
+
+// chatFromUid - 解析私聊消息的发送者 uid
+//
+// 优先取落库后写入的 data.from_uid（HTTP 与 socket 发送都会补上），
+// 兜底解析 id 字段的 user_<uid> 形式。
+func chatFromUid(content map[string]any, from string) int {
+	if data, ok := content["data"].(map[string]any); ok {
+		if uid := cast.ToInt(data["from_uid"]); uid > 0 {
+			return uid
+		}
+	}
+	return chatTargetUid(from)
 }

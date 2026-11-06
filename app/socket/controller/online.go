@@ -50,6 +50,6 @@ func (this Online) PushOnlineStatus(clientId string) {
 	})
 
 	if client, ok := Hub.clients[clientId]; ok {
-		client.send <- statusMsg
+		client.push(statusMsg)
 	}
 }

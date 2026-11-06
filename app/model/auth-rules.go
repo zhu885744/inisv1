@@ -720,6 +720,28 @@ func createAuthRules() (result []AuthRules) {
 		"feed": {
 			"GET": {"path=all&type=login&name=聚合流"},
 		},
+		// 私聊（私信）：会话 / 历史 / 补拉 / 发送 / 送达确认 / 已读全部只要求登录 ——
+		// 用户之间的基础社交能力，不设权限点；拉黑拦截在控制器里统一走 model.UserBlocks.CanInteract。
+		// 实时送达走 WebSocket（/socket），本身不经过 HTTP 权限，所以不需要登记规则；
+		// 但重连补拉与送达确认走 HTTP（/chat/sync、/chat/ack），必须在这里登记，否则会被中间件拦掉。
+		"chat": {
+			"GET": {
+				"path=conversations&type=login&name=私信会话列表",
+				"path=messages&type=login&name=私信记录",
+				"path=sync&type=login&name=私信增量补拉",
+				"path=unread&type=login&name=私信未读数",
+				"path=status&type=login&name=私信可发送状态",
+			},
+			"POST": {
+				"path=send&type=login&name=发送私信",
+				"path=revoke&type=login&name=撤回私信",
+				"path=pat&type=login&name=拍一拍",
+			},
+			"PUT": {
+				"path=ack&type=login&name=私信送达确认",
+				"path=read&type=login&name=私信标记已读",
+			},
+		},
 		// 拉黑（黑名单）：拉黑 / 解除 / 状态查询都要登录；
 		// 拉黑是**双向**生效的（见 model/user-blocks.go），不需要额外的权限点
 		"user-blocks": {
@@ -1141,6 +1163,7 @@ func createAuthRules() (result []AuthRules) {
 		"attachment":         "【附件 API】",
 		"unlock":             "【内容解锁 API】",
 		"notification":       "【消息通知 API】",
+		"chat":               "【用户私聊 API】",
 		"report":             "【举报 API】",
 		"cert-type":          "【认证类型 API】",
 		"user-certification": "【用户认证 API】",
