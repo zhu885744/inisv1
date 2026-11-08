@@ -1001,11 +1001,12 @@ DELETE /api/notification/remove-all?is_read=1
   管理员删除广播则是软删除共享记录（全体撤回）
 
 ### 7. 索引优化
-数据库自动创建以下索引以保证查询性能（`InitNotification` / `InitNotificationRead`）：
-- `idx_notifications_uid`：按用户ID快速查询
-- `idx_notifications_type`：按通知类型过滤
-- `idx_notifications_is_read`：按已读状态筛选
-- `idx_notifications_create_time`：按时间排序 / 过期清理
+数据库自动创建以下索引以保证查询性能（`InitNotification` / `InitNotificationRead`，由 `model.EnsureIndex` 幂等补建；
+MySQL 不支持 `CREATE INDEX IF NOT EXISTS`，不要改回那种写法）：
+- `idx_notifications_uid_create`（`uid, create_time`）：通知列表按用户分页 + 时间倒序（单列 `uid` 由最左前缀覆盖，不再单独建）
+- `idx_notifications_uid_is_read`（`uid, is_read`）：未读数统计
+- `idx_notifications_type_create`（`type, create_time`）：后台按类型筛选 / 按时间清理
+- `idx_notifications_aggregate`（`aggregate_key`）：同源未读通知的聚合查找
 - `idx_notification_reads_uid`：按用户查询广播的已读/隐藏状态
 - 唯一索引 `uk_notification_reads_nid_uid`（`notification_id + uid`）：保证同一用户对同一广播只有一条状态记录
 

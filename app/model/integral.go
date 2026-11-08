@@ -172,9 +172,18 @@ func InitIntegral() {
 		return
 	}
 	// 创建索引（流水查询以 uid + create_time 为主）
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_integral_uid ON inis_integral(uid)")
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_integral_type ON inis_integral(type)")
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_integral_create_time ON inis_integral(create_time)")
+	//
+	// uid 的单列索引由结构体 tag 声明，AutoMigrate 会建；这里补三个它表达不了的：
+	//   - (uid, create_time)：我的积分流水按时间倒序分页，避免回表后再排序
+	//   - type：后台按类型统计 / 筛选
+	//   - create_time：全局按时间清理与统计
+	// 注意不要写成 CREATE INDEX IF NOT EXISTS —— MySQL 不支持，会静默失败（见 index.go）
+	EnsureIndex("inis_integral", "idx_integral_uid_create",
+		"CREATE INDEX idx_integral_uid_create ON inis_integral(uid, create_time)")
+	EnsureIndex("inis_integral", "idx_integral_type",
+		"CREATE INDEX idx_integral_type ON inis_integral(type)")
+	EnsureIndex("inis_integral", "idx_integral_create_time",
+		"CREATE INDEX idx_integral_create_time ON inis_integral(create_time)")
 }
 
 // AfterFind - 查询Hook

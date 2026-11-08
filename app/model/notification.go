@@ -75,12 +75,21 @@ func InitNotification() {
 		return
 	}
 	// 创建索引
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_uid ON inis_notification(uid)")
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_type ON inis_notification(type)")
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON inis_notification(is_read)")
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_create_time ON inis_notification(create_time)")
-	// 聚合查询用：按 aggregate_key + is_read 找同源的未读通知（见 CreateAggregateNotification）
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notifications_aggregate ON inis_notification(aggregate_key)")
+	//
+	// 通知的两个高频查询分别是「按 uid 分页、按时间倒序」和「按 uid 统计未读数」，
+	// 所以建成复合索引，单列 uid 由最左前缀覆盖，不必再单独建一个单列索引：
+	//   - 列表：WHERE uid = ? ORDER BY create_time DESC
+	//   - 未读：WHERE uid = ? AND is_read = 0
+	// 后台按类型筛选也是「类型 + 时间」的组合，同理做成复合。
+	//
+	// aggregate_key 的单列索引由结构体 tag 声明，AutoMigrate 会建；
+	// 其余用 EnsureIndex（MySQL 不支持 CREATE INDEX IF NOT EXISTS，见 index.go）
+	EnsureIndex("inis_notification", "idx_notifications_uid_create",
+		"CREATE INDEX idx_notifications_uid_create ON inis_notification(uid, create_time)")
+	EnsureIndex("inis_notification", "idx_notifications_uid_is_read",
+		"CREATE INDEX idx_notifications_uid_is_read ON inis_notification(uid, is_read)")
+	EnsureIndex("inis_notification", "idx_notifications_type_create",
+		"CREATE INDEX idx_notifications_type_create ON inis_notification(type, create_time)")
 }
 
 // NotificationRead 广播通知的用户状态表
@@ -102,8 +111,11 @@ func InitNotificationRead() {
 		facade.Log.Error(map[string]any{"error": err}, "NotificationRead表迁移失败")
 		return
 	}
-	// 同一用户对同一条广播通知仅保留一条状态记录（唯一索引在 AutoMigrate 中创建）
-	facade.DB.Drive().Exec("CREATE INDEX IF NOT EXISTS idx_notification_reads_uid ON inis_notification_read(uid)")
+	// 同一用户对同一条广播通知仅保留一条状态记录（唯一索引在 AutoMigrate 中创建）。
+	// 唯一定位键是 (notification_id, uid)，最左列是通知 ID；而「这个用户还有没有
+	// 未读广播」是按 uid 反查的，吃不到该唯一索引，需要单独补一个 uid 索引。
+	EnsureIndex("inis_notification_read", "idx_notification_reads_uid",
+		"CREATE INDEX idx_notification_reads_uid ON inis_notification_read(uid)")
 }
 
 func (this *Notification) AfterFind(tx *gorm.DB) (err error) {
