@@ -244,6 +244,8 @@ func (this *Toml) saveTomlConfig(ctx *gin.Context, content string, path string, 
 		facade.ReloadStorageToml()
 	case "config/sms.toml":
 		facade.ReloadSMSToml()
+	case "config/audit.toml":
+		facade.ReloadAuditToml()
 	}
 
 	this.json(ctx, nil, facade.Lang(ctx, successMsg), 200)
@@ -265,6 +267,7 @@ func (this *Toml) IGET(ctx *gin.Context) {
 		"notification":    this.getNotification,
 		"sensitive":       this.getSensitive,
 		"sensitive-stats": this.sensitiveStats,
+		"audit":           this.getAudit,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -291,6 +294,7 @@ func (this *Toml) IPOST(ctx *gin.Context) {
 		"test-cos":                      this.testCOS,
 		"sensitive-test":                this.testSensitive,
 		"sensitive-rollback":            this.rollbackSensitive,
+		"audit-test":                    this.testAudit,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -328,6 +332,7 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"notification":             this.putNotification,
 		// 源码原文与可视化表单共用：按载荷（content / rules）自动分派
 		"sensitive": this.putSensitive,
+		"audit":     this.putAudit,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -1813,6 +1818,169 @@ func (this *Toml) putNotification(ctx *gin.Context) {
 	this.saveTomlConfig(ctx, content, appTomlPath, "修改成功！")
 }
 
+// getAudit - 读取云端内容审核配置
+//
+// 凭据原样返回：后台表单需要回填真实值，脱敏成 **** 会让管理员每次保存都被迫重填；
+// 该接口与其它 toml 配置一样受后台权限保护。
+func (this *Toml) getAudit(ctx *gin.Context) {
+	this.auditResult(ctx, facade.Lang(ctx, "数据请求成功！"))
+}
+
+// auditResult - 统一的云端审核配置响应
+func (this *Toml) auditResult(ctx *gin.Context, msg string) {
+
+	setting := facade.AuditBaiduSetting()
+
+	this.json(ctx, gin.H{
+		// enabled 是原始开关；active 才是「真正会生效」——开启但凭据不全时为 false
+		"enabled":  facade.AuditSwitch(),
+		"active":   facade.AuditEnabled(),
+		"provider": facade.AuditProvider(),
+		"baidu": gin.H{
+			"api_key":           setting.ApiKey,
+			"secret_key":        setting.SecretKey,
+			"text_strategy_id":  setting.TextStrategy,
+			"image_strategy_id": setting.ImageStrategy,
+			"timeout":           int(setting.Timeout.Seconds()),
+			"workers":           setting.Workers,
+			"queue_size":        setting.QueueSize,
+		},
+	}, msg, 200)
+}
+
+// putAudit - 保存云端内容审核配置
+func (this *Toml) putAudit(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	provider := strings.ToLower(strings.TrimSpace(cast.ToString(params["provider"])))
+	if provider == "" {
+		provider = facade.AuditProviderBaidu
+	}
+	if provider != facade.AuditProviderBaidu {
+		this.json(ctx, nil, facade.Lang(ctx, "暂不支持该审核服务商：%s", provider), 400)
+		return
+	}
+
+	enabled := cast.ToBool(params["enabled"])
+	apiKey := strings.TrimSpace(cast.ToString(params["api_key"]))
+	secretKey := strings.TrimSpace(cast.ToString(params["secret_key"]))
+
+	// 开启但凭据不全：直接拒绝，避免「以为开了机审其实根本没生效」
+	if enabled && (apiKey == "" || secretKey == "") {
+		this.json(ctx, nil, facade.Lang(ctx, "开启云端审核前请先填写 API Key 与 Secret Key！"), 400)
+		return
+	}
+
+	timeout := cast.ToInt(params["timeout"])
+	if timeout <= 0 || timeout > 60 {
+		timeout = 2
+	}
+	workers := cast.ToInt(params["workers"])
+	if workers <= 0 || workers > 32 {
+		workers = 3
+	}
+	queueSize := cast.ToInt(params["queue_size"])
+	if queueSize <= 0 || queueSize > 8192 {
+		queueSize = 256
+	}
+
+	content := renderAuditToml(auditTomlForm{
+		Enabled:       enabled,
+		Provider:      provider,
+		ApiKey:        apiKey,
+		SecretKey:     secretKey,
+		TextStrategy:  strings.TrimSpace(cast.ToString(params["text_strategy_id"])),
+		ImageStrategy: strings.TrimSpace(cast.ToString(params["image_strategy_id"])),
+		Timeout:       timeout,
+		Workers:       workers,
+		QueueSize:     queueSize,
+	})
+
+	this.saveTomlConfig(ctx, content, "config/audit.toml", "修改成功！")
+}
+
+// testAudit - 用一段文本试跑云端审核（真实调用，会消耗配额）
+func (this *Toml) testAudit(ctx *gin.Context) {
+
+	params := this.params(ctx)
+	text := strings.TrimSpace(cast.ToString(params["text"]))
+
+	if text == "" {
+		this.json(ctx, nil, facade.Lang(ctx, "请输入要测试的文本！"), 400)
+		return
+	}
+	if !facade.AuditEnabled() {
+		this.json(ctx, nil, facade.Lang(ctx, "云端审核未启用或凭据未配置完整！"), 400)
+		return
+	}
+
+	result, err := facade.BaiduTextAudit(text)
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "测试失败：%v", err.Error()), 400)
+		return
+	}
+
+	this.json(ctx, gin.H{
+		"conclusion": result.Conclusion,
+		// messages 是百度给的判定说明（「存在xxx不合规」），页面标注原因用的就是它
+		"messages": result.Messages,
+		"words":    result.Words,
+	}, facade.Lang(ctx, "测试完成！"), 200)
+}
+
+// auditTomlForm - 写入 audit.toml 的字段（与 facade.TempAudit 的键一致）
+type auditTomlForm struct {
+	Enabled       bool
+	Provider      string
+	ApiKey        string
+	SecretKey     string
+	TextStrategy  string
+	ImageStrategy string
+	Timeout       int
+	Workers       int
+	QueueSize     int
+}
+
+// auditTomlString - TOML 字符串转义（凭据里可能出现引号 / 反斜杠）
+func auditTomlString(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return "\"" + value + "\""
+}
+
+// renderAuditToml - 生成配置文件（表单保存会重写整份文件，手写注释不保留）
+func renderAuditToml(form auditTomlForm) string {
+	return fmt.Sprintf(`# ======== 云端内容审核 ========
+# 由后台「内容机审」保存生成；与本地敏感词库（sensitive.toml）互补。
+# 关闭后只有本地词库生效，其它功能不受影响。
+
+enabled = %t
+
+provider = %s
+
+[baidu]
+api_key = %s
+secret_key = %s
+text_strategy_id = %s
+image_strategy_id = %s
+
+timeout = %d
+workers = %d
+queue_size = %d
+`,
+		form.Enabled,
+		auditTomlString(form.Provider),
+		auditTomlString(form.ApiKey),
+		auditTomlString(form.SecretKey),
+		auditTomlString(form.TextStrategy),
+		auditTomlString(form.ImageStrategy),
+		form.Timeout,
+		form.Workers,
+		form.QueueSize,
+	)
+}
+
 // getSensitive - 读取敏感词库（解析结果 + 文件原文）
 //
 // 后台用原文编辑：规则带 action / scenes / level / match，结构化表单会很快失控，
@@ -2245,10 +2413,31 @@ func (this *Toml) testSensitive(ctx *gin.Context) {
 	}, facade.Lang(ctx, "测试完成！"), 200)
 }
 
-// sensitiveStats - 最近 7 天命中统计（按场景 + 动作）
+// sensitiveStats - 最近 N 天命中统计（按场景 + 动作，可按机审维度筛选）
+//
+// 参数：
+//   - days：统计天数（默认 7，上限 365）
+//   - type：机审维度（百度的 type，0 = 全部）
+//
+// 返回 dimensions 是「按维度聚合」的命中数，options 给前端的筛选项。
 func (this *Toml) sensitiveStats(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	days := cast.ToInt(params["days"])
+	if days <= 0 || days > 365 {
+		days = 7
+	}
+	auditType := cast.ToInt(params["type"])
+	if auditType < 0 {
+		auditType = 0
+	}
+
 	this.json(ctx, gin.H{
-		"days":  7,
-		"items": model.SensitiveHitStats(7),
+		"days":       days,
+		"type":       auditType,
+		"items":      model.SensitiveHitStats(days, auditType),
+		"dimensions": model.SensitiveHitDimensions(days),
+		"options":    model.AuditTypeOptions(),
 	}, facade.Lang(ctx, "数据请求成功！"), 200)
 }

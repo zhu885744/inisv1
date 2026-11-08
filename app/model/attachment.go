@@ -25,7 +25,16 @@ type Attachment struct {
 	TargetType    string                `gorm:"size:32; index; comment:关联业务类型;" json:"target_type"`
 	TargetId      uint                  `gorm:"type:int(32); index; comment:关联业务ID;" json:"target_id"`
 	FileHash      string                `gorm:"size:64; index; comment:文件SHA256值;" json:"file_hash"`
-	CreateTime    int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	// 云端图像审核状态：0 待人工复核 / 1 通过 / 2 驳回（文件已删除）
+	//
+	// 默认 1（通过）：未开启机审、非图片、或审核服务不可用时都不该把用户上传卡在「待审」。
+	// 驳回时除了置 2，还会删除存储里的文件并软删记录，避免违规图继续可访问。
+	Audit int `gorm:"type:int(2); default:1; index:idx_attachment_audit; comment:云端审核状态;" json:"audit"`
+	// AuditResult 审核结论摘要（命中词 / 失败原因），排障与人工复核用
+	AuditResult string `gorm:"size:255; default:''; comment:审核结果摘要;" json:"audit_result"`
+	// AuditTime 审核完成时间
+	AuditTime  int64                 `gorm:"comment:审核时间; default:0;" json:"audit_time"`
+	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 	UpdateTime    int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime    soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }

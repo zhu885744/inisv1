@@ -465,6 +465,16 @@ func (this *Article) create(ctx *gin.Context) {
 		return
 	}
 
+	// 云端文本审核（百度）：异步兜底，命中 block 会把 audit 改成 2（前台立即不可见）。
+	// 本地词库已在上面同步拦过一遍，机审失败 / 熔断都不影响本次发布。
+	//
+	// 只在「本地审核关闭」时兜底：开启审核时内容本来就会进人工队列（audit=0），
+	// 再调一次机审纯属浪费配额和费用；草稿也不送审（不对外展示）
+	if status == 1 && !auditSwitch {
+		model.SubmitCloudAudit(model.SceneArticle, uid, "article", table.Id,
+			table.Title+"\n"+table.Abstract+"\n"+table.Content)
+	}
+
 	// 待审核：通知管理员去审核（邮件受「系统设置 → 邮件通知」的 article.pending 控制，站内信始终发）
 	// audit：0 待审核 / 1 通过 / 2 未通过
 	if table.Audit == 0 {
@@ -665,6 +675,20 @@ func (this *Article) update(ctx *gin.Context) {
 			mentionTargets, mentionOwnerUid, "文章", "article",
 			cast.ToInt(params["id"]), cast.ToString(payload["content"]), filter,
 		)
+	}
+
+	// 云端审核：编辑后重新送审。
+	// 回查库里**完整内容**而不是只送 payload：编辑器通常只提交改动过的字段，
+	// 只审片段会把未改动部分里的违规内容漏掉，也会因为缺字段被误判。
+	// 只在正文 / 标题 / 摘要真的变了才送：改标签、改审核状态不必消耗配额。
+	if _, ok := payload["content"]; ok || payload["title"] != nil || payload["abstract"] != nil {
+		if row, _ := facade.DB.Model(&model.Article{}).Find(cast.ToInt(params["id"])); !utils.Is.Empty(row) {
+			// 本地审核关闭 + 已发布，才需要机审兜底
+			if cast.ToInt(row["status"]) == 1 && !auditSwitch {
+				model.SubmitCloudAudit(model.SceneArticle, cast.ToInt(row["uid"]), "article", cast.ToInt(row["id"]),
+					cast.ToString(row["title"])+"\n"+cast.ToString(row["abstract"])+"\n"+cast.ToString(row["content"]))
+			}
+		}
 	}
 
 	msg := facade.Lang(ctx, "更新成功！")

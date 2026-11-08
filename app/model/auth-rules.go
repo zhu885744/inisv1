@@ -583,6 +583,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=notification&name=获取通知配置",
 				"path=sensitive&name=获取全站敏感词库",
 				"path=sensitive-stats&name=获取敏感词命中统计",
+				"path=audit&name=获取云端审核配置",
 			},
 			"PUT": {
 				"path=sms&name=修改SMS服务配置",
@@ -603,6 +604,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=storage-attachment&name=修改附件配置",
 				"path=notification&name=修改通知配置",
 				"path=sensitive&name=修改全站敏感词库",
+				"path=audit&name=修改云端审核配置",
 			},
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",
@@ -613,6 +615,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=test-cos&name=测试COS连接",
 				"path=sensitive-test&name=测试敏感词规则",
 				"path=sensitive-rollback&name=回滚敏感词库",
+				"path=audit-test&name=测试云端审核",
 			},
 		},
 		"tags": standardModule(),

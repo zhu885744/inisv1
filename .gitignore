@@ -10,3 +10,5 @@
 *.conf
 /SimpleBlog
 /inis-cms
+# 运行时生成的配置：数据库密码、短信密钥、云端审核 AK/SK 都在这里，不进仓库
+/app/config/*.toml

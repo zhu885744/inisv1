@@ -357,6 +357,40 @@ level = "low"
 match = "contains"
 `
 
+// TempAudit - 云端内容审核模板（独立 config/audit.toml）
+//
+// 与 sensitive.toml 的分工：本地词库同步快筛（免费、即时），云端机审异步兜底
+// （覆盖变体词、长文尾部、后续的图片审核）。AK/SK 属于凭据，只放本文件。
+const TempAudit = `# ======== 云端内容审核 ========
+# 与 config/sensitive.toml（本地敏感词库）互补：
+#   本地词库同步判定，免费、即时；云端机审异步兜底，覆盖变体词与长文尾部。
+# 关闭后只有本地词库生效，其它功能不受影响。
+
+enabled = false
+
+# 服务商：目前支持 baidu（百度智能云 · 内容安全）
+provider = "baidu"
+
+[baidu]
+# 百度智能云控制台 → 内容安全 → 应用列表里的 API Key / Secret Key
+# 属于凭据：不要提交到代码仓库，也不要下发给前端
+api_key = ""
+secret_key = ""
+
+# 审核策略 ID（留空使用账号默认策略）
+text_strategy_id = ""
+# 图像审核策略 ID（预留，当前版本只接入文本审核）
+image_strategy_id = ""
+
+# 单次请求超时（秒，支持 "2 * 1" 这类算式）
+# 官方说「绝大部分请求 2 秒内返回」，留出网络余量建议 3；图片按此值 ×3（下限 10 秒）
+timeout = 3
+# 并发审核协程数（建议 2~8，与账号 QPS 配额匹配）
+workers = 3
+# 待审队列长度；队列满时丢弃本次并记日志，绝不阻塞用户发布
+queue_size = 256
+`
+
 const TempCrypt = `# ======== 加密配置 ========
 
 # 登录会话配置（服务端会话，数据存缓存：session:{sid}）

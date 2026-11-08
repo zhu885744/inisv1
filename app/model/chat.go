@@ -588,6 +588,12 @@ func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, client
 		NoteChatModeration(SceneDM, sendUid, receiveUid, content, sensitiveHit, message.Id)
 	}
 
+	// 云端审核（异步）：本地词库已同步拦过 block，机审覆盖变体词；
+	// 命中 block 会撤回本条并留证，review 只留证。图片地址没有语义，不送审
+	if msgType != "image" {
+		SubmitCloudChatAudit(SceneDM, sendUid, receiveUid, message.Id, content)
+	}
+
 	return chatMessageMap(&message), nil
 }
 

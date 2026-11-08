@@ -74,6 +74,8 @@ func ensureBootstrap() {
 	ensureConfigFile(ConfigNameStorage, storageTomlContent())
 	// 敏感词库独立成文件（见 facade/sensitive.go），与 app.toml 解耦
 	ensureConfigFile(ConfigNameSensitive, sensitiveTomlContent())
+	// 云端审核凭据独立成文件（见 facade/audit.go），按权限与词库分开管理
+	ensureConfigFile(ConfigNameAudit, auditTomlContent())
 }
 
 // ensureDir - 目录不存在就创建

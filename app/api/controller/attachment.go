@@ -1223,6 +1223,11 @@ func (this *Attachment) uploadSingleFile(ctx *gin.Context, fileHeader *multipart
 		result.MotionVideo = this.saveMotionVideo(fileName, suffix, motionVideo, userId, params)
 	}
 
+	// 云端图像审核（异步）：内部按扩展名过滤，只审图片。
+	// 命中 block 时会删除文件并软删记录，所以这里不阻塞上传、也不改返回值；
+	// 未开启机审时该调用直接返回
+	model.SubmitCloudImageAudit(attachment.Id, fullUrl, item.Path)
+
 	result.Attachment = &attachment
 	result.IsSuccess = true
 	return result

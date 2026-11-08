@@ -32,7 +32,12 @@ type SensitiveHits struct {
 	Version     string `gorm:"size:32; comment:词库版本;" json:"version"`
 	ContentHash string `gorm:"size:64; comment:内容哈希（不存全文）;" json:"content_hash"`
 	Excerpt     string `gorm:"size:255; comment:内容摘要（私信/聊天室不存）;" json:"excerpt"`
-	CreateTime  int64  `gorm:"autoCreateTime; index:idx_sensitive_hits_time; comment:创建时间;" json:"create_time"`
+	// 机审维度：本地词库命中为 0 / 空，云端审核记为百度的 type / subType
+	// （30 涉政、33 涉黄、36 广告…），后台据此按维度统计与筛选
+	AuditType    int    `gorm:"type:int(12); default:0; index:idx_sensitive_hits_audit; comment:机审主维度;" json:"audit_type"`
+	AuditSubType int    `gorm:"type:int(32); default:0; comment:机审子维度;" json:"audit_sub_type"`
+	AuditMsg     string `gorm:"size:255; default:''; comment:机审判定说明;" json:"audit_msg"`
+	CreateTime   int64  `gorm:"autoCreateTime; index:idx_sensitive_hits_time; comment:创建时间;" json:"create_time"`
 }
 
 func InitSensitiveHits() {
@@ -59,15 +64,18 @@ func recordSensitiveHit(scene string, uid int, text string, decision SensitiveDe
 	sum := sha256.Sum256([]byte(sensitiveCompact(sensitivePlainText(text))))
 
 	hit := SensitiveHits{
-		Uid:         uid,
-		Scene:       scene,
-		Action:      decision.Action,
-		Word:        decision.Word,
-		Level:       decision.Level,
-		Match:       decision.Match,
-		Version:     decision.Version,
-		ContentHash: hex.EncodeToString(sum[:]),
-		Excerpt:     excerpt,
+		Uid:          uid,
+		Scene:        scene,
+		Action:       decision.Action,
+		Word:         decision.Word,
+		Level:        decision.Level,
+		Match:        decision.Match,
+		Version:      decision.Version,
+		ContentHash:  hex.EncodeToString(sum[:]),
+		Excerpt:      excerpt,
+		AuditType:    decision.AuditType,
+		AuditSubType: decision.AuditSubType,
+		AuditMsg:     truncateRunes(strings.TrimSpace(decision.AuditMsg), 240),
 	}
 
 	go func(item SensitiveHits) {
@@ -83,7 +91,9 @@ func recordSensitiveHit(scene string, uid int, text string, decision SensitiveDe
 }
 
 // SensitiveHitStats - 最近 N 天的命中统计（按场景 + 动作聚合）
-func SensitiveHitStats(days int) []map[string]any {
+//
+// auditType > 0 时只统计该机审维度（百度的 type），0 表示全部。
+func SensitiveHitStats(days int, auditType int) []map[string]any {
 
 	result := make([]map[string]any, 0)
 
@@ -102,12 +112,14 @@ func SensitiveHitStats(days int) []map[string]any {
 		Total  int64
 	}
 
-	err := facade.DB.Drive().Model(&SensitiveHits{}).
+	query := facade.DB.Drive().Model(&SensitiveHits{}).
 		Select("scene, action, COUNT(*) AS total").
-		Where("create_time >= ?", since).
-		Group("scene, action").
-		Order("scene asc").
-		Scan(&rows).Error
+		Where("create_time >= ?", since)
+	if auditType > 0 {
+		query = query.Where("audit_type = ?", auditType)
+	}
+
+	err := query.Group("scene, action").Order("scene asc").Scan(&rows).Error
 	if err != nil {
 		facade.Log.Error(map[string]any{"error": err}, "查询敏感词命中统计失败")
 		return result
@@ -118,6 +130,49 @@ func SensitiveHitStats(days int) []map[string]any {
 			"scene":  row.Scene,
 			"action": row.Action,
 			"total":  row.Total,
+		})
+	}
+
+	return result
+}
+
+// SensitiveHitDimensions - 最近 N 天按机审维度的命中统计（降序）
+//
+// 只统计 audit_type > 0 的记录（即云端审核命中的），本地词库命中没有维度概念。
+func SensitiveHitDimensions(days int) []map[string]any {
+
+	result := make([]map[string]any, 0)
+
+	if facade.DB == nil {
+		return result
+	}
+	if days <= 0 {
+		days = 7
+	}
+
+	since := time.Now().AddDate(0, 0, -days).Unix()
+
+	var rows []struct {
+		AuditType int
+		Total     int64
+	}
+
+	err := facade.DB.Drive().Model(&SensitiveHits{}).
+		Select("audit_type, COUNT(*) AS total").
+		Where("create_time >= ? AND audit_type > 0", since).
+		Group("audit_type").
+		Order("total desc").
+		Scan(&rows).Error
+	if err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "查询机审维度统计失败")
+		return result
+	}
+
+	for _, row := range rows {
+		result = append(result, map[string]any{
+			"type":  row.AuditType,
+			"label": AuditTypeLabel(row.AuditType),
+			"total": row.Total,
 		})
 	}
 

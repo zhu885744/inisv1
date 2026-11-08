@@ -539,6 +539,12 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 		NoteChatModeration(SceneChat, uid, 0, content, sensitiveHit, row.Id)
 	}
 
+	// 云端审核（异步）：命中 block 撤回本条并留证，review 只留证；
+	// 图片地址没有语义，不送审
+	if msgType != "image" {
+		SubmitCloudChatAudit(SceneChat, uid, 0, row.Id, content)
+	}
+
 	return ChatRoomMessageItem(&row), nil
 }
 

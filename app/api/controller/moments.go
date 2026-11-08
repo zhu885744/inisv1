@@ -426,6 +426,14 @@ func (this *Moments) create(ctx *gin.Context) {
 		return
 	}
 
+	// 云端文本审核（百度）：异步兜底，命中 block / review 分别回写 audit = 2 / 0。
+	//
+	// 只在「本地审核关闭」时兜底：开启审核时动态本来就会进人工队列（audit=0），
+	// 再调一次机审纯属浪费配额；草稿也不送审（不对外展示）
+	if status == 1 && !auditSwitch {
+		model.SubmitCloudAudit(model.SceneMoment, uid, "moment", table.Id, table.Content)
+	}
+
 	// 待审核：通知管理员去审核（邮件受「系统设置 → 邮件通知」的 moments.pending 控制，站内信始终发）
 	// audit：0 待审核 / 1 通过 / 2 未通过；草稿（status=0）audit 恒为 1，不会误发
 	if cast.ToInt(table.Audit) == 0 {
@@ -604,6 +612,18 @@ func (this *Moments) update(ctx *gin.Context) {
 			mentionTargets, mentionOwnerUid, "动态", "moments",
 			table.Id, cast.ToString(payload["content"]), cast.ToString(prev["content"]),
 		)
+	}
+
+	// 云端审核：编辑后重新送审（回查完整内容，避免只审本次提交的片段）。
+	// 只在正文真的变了才送，改标签 / 审核状态不必消耗配额
+	if _, ok := payload["content"]; ok {
+		if row, _ := facade.DB.Model(&model.Moments{}).Find(table.Id); len(row) > 0 {
+			// 本地审核关闭 + 已发布，才需要机审兜底
+			if cast.ToInt(row["status"]) == 1 && !auditSwitch {
+				model.SubmitCloudAudit(model.SceneMoment, cast.ToInt(row["uid"]), "moment", cast.ToInt(row["id"]),
+					cast.ToString(row["content"]))
+			}
+		}
 	}
 
 	msg := facade.Lang(ctx, "更新成功！")

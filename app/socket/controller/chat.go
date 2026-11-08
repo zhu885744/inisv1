@@ -25,6 +25,12 @@ import (
  * 完成 {type:'auth'} 之后才认领 uid —— 此时 clients["user_<uid>"] 是查不到的。
  */
 
+func init() {
+	// 机审撤回消息后要就地推给双方。model 不能反过来 import 本包（会循环依赖），
+	// 所以由这里把推送能力注入进去；未注入时撤回只改库，刷新后也能看到
+	model.PushChatRevoke = PushPrivate
+}
+
 // PushPrivate - 把一条私聊消息推给指定用户（供 API 控制器调用）
 //
 // 走到 hub.notice 只是为了复用「本地分发 + 跨实例转发」的既有链路；

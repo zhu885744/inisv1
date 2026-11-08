@@ -897,7 +897,9 @@ func (this *Comment) create(ctx *gin.Context) {
 	// 管理员自己发的评论直接通过（不必审核自己）；管理员在 payload 里显式指定 audit 时，
 	// 下面遍历参数时会覆盖这里的判定（allow 里 audit 只对 root 开放）。
 	// ⚠ 必须直接赋值：Struct.Set 按小写 tag（json:"audit"）匹配，传 "Audit" 会静默失效
-	table.Audit = auditForCreate(contentAuditSwitch("COMMENT") && !this.meta.root(ctx), false)
+	// 是否开启本地审核：只查一次库，后面「要不要再调云端机审」也用它
+	commentAuditSwitch := contentAuditSwitch("COMMENT")
+	table.Audit = auditForCreate(commentAuditSwitch && !this.meta.root(ctx), false)
 
 	for key, val := range params {
 		if utils.In.Array(key, commentAllowFieldsSlice) {
@@ -953,6 +955,12 @@ func (this *Comment) create(ctx *gin.Context) {
 	if err != nil {
 		this.json(ctx, nil, err.Error(), 400)
 		return
+	}
+
+	// 云端文本审核（百度）：评论高频，走异步队列消费，结果命中 block / review 时回写 audit。
+	// 只有「本地审核关闭」时才需要机审兜底：开启审核时评论本来就会进人工队列
+	if !commentAuditSwitch {
+		model.SubmitCloudAudit(model.SceneComment, user.Id, "comment", table.Id, table.Content)
 	}
 
 	// 审核通知：评论进入待审核时提醒管理员（与文章 / 动态同一套规则）

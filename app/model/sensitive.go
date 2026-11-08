@@ -71,6 +71,13 @@ type SensitiveDecision struct {
 	Match   string `json:"match"`
 	Scene   string `json:"scene"`
 	Version string `json:"version"`
+	// 机审维度（本地词库命中时保持 0 / 空）
+	//
+	// AuditType / AuditSubType 来自百度的 type / subType（如 33 涉黄、430201 女上露点），
+	// 写进 sensitive_hits 后即可按「涉政 / 涉黄 / 广告…」做统计与筛选
+	AuditType    int    `json:"audit_type"`
+	AuditSubType int    `json:"audit_sub_type"`
+	AuditMsg     string `json:"audit_msg"`
 }
 
 // Blocked - 是否需要拒绝本次内容
