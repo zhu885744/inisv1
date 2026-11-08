@@ -423,6 +423,14 @@ func ChatPermission(uid, targetUid int) error {
 	if uid == targetUid {
 		return errors.New("不能给自己发私信！")
 	}
+	// 私信禁言优先于关系判断：被后台禁言的人，跟谁的关系再好也不能发
+	// （与聊天室禁言同一张表，room_id = ChatMuteDM 表示私信作用域）
+	if muted, until := (&ChatRoomMutes{}).Active(ChatMuteDM, uid); muted {
+		if until > 0 {
+			return fmt.Errorf("你的私信功能已被禁言，%s 后自动解除！", time.Unix(until, 0).Format("01-02 15:04"))
+		}
+		return errors.New("你的私信功能已被禁言！")
+	}
 	if !(&UserBlocks{}).CanInteract(uid, targetUid) {
 		return errors.New("你们之间存在拉黑关系，无法私聊！")
 	}
@@ -482,12 +490,13 @@ func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, client
 	}
 
 	// 敏感词：文本消息与拍一拍后缀都要过全站词库（图片地址不检查）。
-	// 私信场景只按 block / limit 拦截；review / warn / log 放行并记审计 ——
-	// 私信隐私敏感，不适合把每条消息都塞进人工审核队列。
+	// 私信场景只按 block / limit 拦截；review / warn / log 放行 —— 放行的消息
+	// 在入库后留一条「命中片段」作为证据（见 NoteChatModeration），后台据此人工判断违规。
+	sensitiveHit := SensitiveDecision{}
 	if msgType != "image" {
-		decision := (&Sensitive{}).Decide(SceneDM, sendUid, content)
-		if decision.Blocked() {
-			return nil, errors.New(decision.UserMessage())
+		sensitiveHit = (&Sensitive{}).Decide(SceneDM, sendUid, content)
+		if sensitiveHit.Blocked() {
+			return nil, errors.New(sensitiveHit.UserMessage())
 		}
 	}
 
@@ -572,6 +581,11 @@ func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, client
 
 	if err := tx.Commit().Error; err != nil {
 		return nil, errors.New("发送失败，请稍后重试！")
+	}
+
+	// 命中词库留证：只存命中片段，不存整条消息（后台「聊天审核」据此判断违规）
+	if sensitiveHit.Action != "" && sensitiveHit.Action != ActionAllow {
+		NoteChatModeration(SceneDM, sendUid, receiveUid, content, sensitiveHit, message.Id)
 	}
 
 	return chatMessageMap(&message), nil

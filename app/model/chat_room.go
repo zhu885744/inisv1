@@ -37,6 +37,17 @@ const (
 
 	// ChatRoomMuteForever - 禁言到期的特殊值：0 表示永久
 	ChatRoomMuteForever = 0
+
+	// ChatMuteScopeRoom / ChatMuteScopeDM - 禁言作用域（后台名单展示用）
+	ChatMuteScopeRoom = "room"
+	ChatMuteScopeDM   = "dm"
+
+	// ChatMuteDM - 「私信禁言」复用同一张禁言表：room_id = 0 表示私信作用域
+	//
+	// 为什么不另建一张「封禁表」：禁言本来就有到期时间 / 原因 / 操作人这套字段，
+	// 私信只是换了个作用域。单独造一张表会出现两套解除口径、两个后台名单，
+	// 处置时要分别记两笔。这里只把作用域折进 room_id（聊天室 = 1，私信 = 0）。
+	ChatMuteDM = 0
 )
 
 // ChatRooms - 聊天室
@@ -234,9 +245,11 @@ func (this *ChatRooms) Update(params map[string]any) (map[string]any, error) {
 }
 
 // Active - 该用户当前是否被禁言，以及解禁时间（0 = 永久）
+//
+// roomId 传 PublicRoomId 查聊天室禁言，传 ChatMuteDM（0）查私信禁言。
 func (this *ChatRoomMutes) Active(roomId, uid int) (muted bool, until int64) {
 
-	if roomId <= 0 || uid <= 0 {
+	if roomId < 0 || uid <= 0 {
 		return false, 0
 	}
 
@@ -261,7 +274,7 @@ func (this *ChatRoomMutes) Active(roomId, uid int) (muted bool, until int64) {
 // 免得多条记录叠在一起，解禁时还要猜该删哪一条。
 func (this *ChatRoomMutes) Mute(roomId, uid int, until int64, reason string, operatorUid int) error {
 
-	if roomId <= 0 || uid <= 0 {
+	if roomId < 0 || uid <= 0 {
 		return errors.New("参数错误！")
 	}
 	if uid == operatorUid {
@@ -292,7 +305,7 @@ func (this *ChatRoomMutes) Mute(roomId, uid int, until int64, reason string, ope
 // Unmute - 解除禁言
 func (this *ChatRoomMutes) Unmute(roomId, uid int) error {
 
-	if roomId <= 0 || uid <= 0 {
+	if roomId < 0 || uid <= 0 {
 		return errors.New("参数错误！")
 	}
 
@@ -338,6 +351,54 @@ func (this *ChatRoomMutes) List(roomId int) []map[string]any {
 	}
 
 	return result
+}
+
+// ListAll - 生效中的禁言（不区分作用域，后台「禁言名单」用）
+//
+// 每行带上 scope：room_id = ChatMuteDM(0) 的是私信禁言，其余是聊天室禁言。
+func (this *ChatRoomMutes) ListAll() []map[string]any {
+
+	result := make([]map[string]any, 0)
+
+	var rows []ChatRoomMutes
+	if err := facade.DB.Drive().
+		Order("id desc").Limit(200).Find(&rows).Error; err != nil {
+		return result
+	}
+
+	now := time.Now().Unix()
+
+	for _, row := range rows {
+		if row.Until > 0 && row.Until <= now {
+			continue
+		}
+
+		scope := ChatMuteScopeRoom
+		if row.RoomId == ChatMuteDM {
+			scope = ChatMuteScopeDM
+		}
+
+		result = append(result, map[string]any{
+			"id":           row.Id,
+			"uid":          row.Uid,
+			"room_id":      row.RoomId,
+			"scope":        scope,
+			"until":        row.Until,
+			"reason":       row.Reason,
+			"operator_uid": row.OperatorUid,
+			"create_time":  row.CreateTime,
+		})
+	}
+
+	return result
+}
+
+// ChatMuteScopeName - 禁言作用域的中文名（后台名单展示用）
+func ChatMuteScopeName(scope string) string {
+	if scope == ChatMuteScopeDM {
+		return "私信"
+	}
+	return "聊天室"
 }
 
 // ChatRoomMessageItem - 消息对外结构
@@ -422,11 +483,13 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 	}
 
 	// 敏感词：聊天室实时性高、扩散快，按 block / limit 拦截；
-	// review / warn / log 放行并记审计（配合同步的撤回 / 禁言能力处置）。
+	// review / warn / log 放行 —— 放行的消息在入库后留一条「命中片段」作为证据，
+	// 后台「聊天审核」据此判断违规，并可配合撤回 / 禁言处置。
+	sensitiveHit := SensitiveDecision{}
 	if msgType != "image" {
-		decision := (&Sensitive{}).Decide(SceneChat, uid, content)
-		if decision.Blocked() {
-			return nil, errors.New(decision.UserMessage())
+		sensitiveHit = (&Sensitive{}).Decide(SceneChat, uid, content)
+		if sensitiveHit.Blocked() {
+			return nil, errors.New(sensitiveHit.UserMessage())
 		}
 	}
 
@@ -469,6 +532,11 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 
 	if err := db.Create(&row).Error; err != nil {
 		return nil, errors.New("发送失败，请稍后重试！")
+	}
+
+	// 命中词库留证：只存命中片段，不存整条消息（后台「聊天审核」据此判断违规）
+	if sensitiveHit.Action != "" && sensitiveHit.Action != ActionAllow {
+		NoteChatModeration(SceneChat, uid, 0, content, sensitiveHit, row.Id)
 	}
 
 	return ChatRoomMessageItem(&row), nil

@@ -24,6 +24,7 @@ import (
  *
  * 接口：
  *   GET  chat/conversations  我的会话列表（对方信息 + 最后一条摘要 + 未读数）
+ *   GET  chat/friends        互关好友列表（会话列表之外，还没聊过的人也能直接开聊）
  *   GET  chat/messages       与某人的历史消息（游标分页，顺带标记已读）
  *   GET  chat/sync           断线重连补拉（after_seq 之后的消息 + 双方同步水位）
  *   GET  chat/unread         我的私信未读总数
@@ -50,6 +51,9 @@ const (
 	chatMaxLimit = 50
 	// chatMaxLength - 单条消息最大字符数（与表字段 2000 对齐）
 	chatMaxLength = 2000
+	// chatFriendLimit - 互关好友列表一次最多返回的人数
+	// （消息页只是用来补「还没聊过」的入口，200 条足够，超出的仍可从对方主页发起）
+	chatFriendLimit = 200
 )
 
 func (this *Chat) IGET(ctx *gin.Context) {
@@ -64,6 +68,7 @@ func (this *Chat) IGET(ctx *gin.Context) {
 
 	allow := map[string]any{
 		"conversations": this.conversations,
+		"friends":       this.friends,
 		"messages":      this.messages,
 		"sync":          this.sync,
 		"unread":        this.unread,
@@ -142,6 +147,53 @@ func (this *Chat) conversations(ctx *gin.Context) {
 		other := cast.ToInt(item["other_uid"])
 		item["user"] = users[other]
 		item["online"] = socketctrl.IsChatOnline(other)
+	}
+
+	this.json(ctx, gin.H{"data": list}, facade.Lang(ctx, "查询成功！"), 200)
+}
+
+// friends - 互关好友列表（可直接发起私聊）
+//
+// 私信只对互关好友开放（model.ChatPermission），但会话列表里只有「聊过的人」，
+// 想找某个还没聊过的互关好友只能搜到对方主页再点「私信」。这里把互关好友直接列出来，
+// 前端与会话列表合并：聊过的显示摘要 / 未读，没聊过的显示「点一下就能开聊」。
+func (this *Chat) friends(ctx *gin.Context) {
+
+	uid := this.user(ctx).Id
+	if uid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	limit := cast.ToInt(this.param(ctx, "limit", chatFriendLimit))
+	if limit <= 0 || limit > chatFriendLimit {
+		limit = chatFriendLimit
+	}
+
+	uids := (&model.UserFollows{}).MutualUids(uid)
+	if len(uids) > limit {
+		uids = uids[:limit]
+	}
+
+	// 没有互关好友：返回空数组而不是 204，前端合并列表时少一个分支
+	if len(uids) == 0 {
+		this.json(ctx, gin.H{"data": []any{}}, facade.Lang(ctx, "无数据！"), 200)
+		return
+	}
+
+	users := this.userBriefs(uids)
+
+	list := make([]map[string]any, 0, len(uids))
+	for _, id := range uids {
+		user := users[id]
+		if utils.Is.Empty(user) {
+			continue
+		}
+		list = append(list, map[string]any{
+			"uid":    id,
+			"user":   user,
+			"online": socketctrl.IsChatOnline(id),
+		})
 	}
 
 	this.json(ctx, gin.H{"data": list}, facade.Lang(ctx, "查询成功！"), 200)

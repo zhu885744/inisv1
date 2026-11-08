@@ -265,6 +265,41 @@ func (this *UserFollows) FollowerUids(uid int) []int {
 	return cast.ToIntSlice(column)
 }
 
+// MutualUids - 互关好友的 uid 列表（我关注 + 关注我，status = 1）
+//
+// 为什么单独抽一个方法：私信默认只对互关好友开放（见 ChatPermission），
+// 而会话列表只包含「聊过的人」，消息页想直接列出所有互关好友就得单独查。
+// 两次查询：先按关注时间倒序取我关注的人，再一次 IN 查出其中也关注我的人（取交集）。
+func (this *UserFollows) MutualUids(uid int) []int {
+	if uid <= 0 {
+		return []int{}
+	}
+
+	column, err := facade.DB.Model(&[]UserFollows{}).Where([]any{
+		[]any{"uid", "=", uid},
+		[]any{"status", "=", 1},
+	}).Order("create_time desc").Column("follow_uid")
+	if err != nil {
+		return []int{}
+	}
+
+	following := cast.ToIntSlice(column)
+	if len(following) == 0 {
+		return []int{}
+	}
+
+	// 回关集合：关注我的人里，落在我关注列表中的那些
+	followBack := this.FilterFollowerUids(uid, following)
+
+	result := make([]int, 0, len(following))
+	for _, id := range following {
+		if followBack[id] {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // FilterFollowingUids - 从 uids 里筛出「我关注的人」（批量，用于列表的互关标识）
 //
 // 一次 IN 查询算完，不做逐条 Exist。传入的 uids 应为「某一页」的用户，天然有上限。

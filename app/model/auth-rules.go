@@ -732,6 +732,7 @@ func createAuthRules() (result []AuthRules) {
 		"chat": {
 			"GET": {
 				"path=conversations&type=login&name=私信会话列表",
+				"path=friends&type=login&name=私信互关好友",
 				"path=messages&type=login&name=私信记录",
 				"path=sync&type=login&name=私信增量补拉",
 				"path=unread&type=login&name=私信未读数",
@@ -746,6 +747,21 @@ func createAuthRules() (result []AuthRules) {
 			"PUT": {
 				"path=ack&type=login&name=私信送达确认",
 				"path=read&type=login&name=私信标记已读",
+			},
+		},
+		// 私信管理（后台）：会话列表 / 消息内容 / 撤回。
+		// 与前台 chat 分开：这几个接口会读到用户的私密内容，必须是独立权限点，
+		// 不能只要求登录；没有勾选权限点的账号调用会被中间件拦掉。
+		"chat-admin": {
+			"GET": {
+				"path=conversations&type=default&name=私信会话列表",
+				"path=messages&type=default&name=私信消息内容",
+				"path=mutes&type=default&name=聊天禁言名单",
+			},
+			"POST": {
+				"path=revoke&type=default&name=撤回聊天消息",
+				"path=mute&type=default&name=禁言聊天用户",
+				"path=unmute&type=default&name=解除聊天禁言",
 			},
 		},
 		// 公共聊天室（id=1）：全部要求登录 —— 游客只能看，不能发言，也就没必要给只读入口。
@@ -1017,6 +1033,20 @@ func createAuthRules() (result []AuthRules) {
 			},
 		},
 		"qps-warn": permModule(),
+		// 聊天审核：私信 / 聊天室命中词库的留证记录。
+		// 只提供列表 / 数量 / 标记处理 / 删除 —— 禁言、封禁、撤回各有专门接口，这里不重复实现。
+		"chat-moderation": {
+			"GET": {
+				"path=all&type=default&name=聊天审核列表",
+				"path=count&type=default&name=聊天审核数量",
+			},
+			"PUT": {
+				"path=handle&type=default&name=处理聊天违规记录",
+			},
+			"DELETE": {
+				"path=remove&type=default&name=删除聊天审核记录",
+			},
+		},
 		"ip-black": permModule(),
 		"ip-white": permModule(),
 		"search": {
@@ -1193,6 +1223,7 @@ func createAuthRules() (result []AuthRules) {
 		"unlock":             "【内容解锁 API】",
 		"notification":       "【消息通知 API】",
 		"chat":               "【用户私聊 API】",
+		"chat-admin":         "【聊天管理 API】",
 		"report":             "【举报 API】",
 		"cert-type":          "【认证类型 API】",
 		"user-certification": "【用户认证 API】",

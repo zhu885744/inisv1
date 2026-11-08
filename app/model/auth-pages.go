@@ -70,6 +70,8 @@ var defaultAuthPages = []AuthPages{
 	// 商城管理：商品 / 积分 / 装扮 / 签到
 	{Name: "商城管理", Icon: "bi bi-bag", Path: "/admin/goods", Size: "14px"},
 	{Name: "消息通知", Icon: "bi bi-bell", Path: "/admin/message", Size: "14px"},
+	// 聊天管理：私信 / 公共聊天室的命中留证审核 + 聊天室消息、禁言名单、房间设置
+	{Name: "聊天管理", Icon: "bi bi-chat-square-dots", Path: "/admin/chat", Size: "14px"},
 	{Name: "举报管理", Icon: "bi bi-flag", Path: "/admin/reports", Size: "14px"},
 	// 友链管理：友链列表 / 友链分组
 	{Name: "友链管理", Icon: "bi bi-link-45deg", Path: "/admin/links", Size: "14px"},
