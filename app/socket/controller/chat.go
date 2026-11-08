@@ -47,6 +47,28 @@ func PushPrivate(targetUid int, payload map[string]any) {
 	}
 }
 
+// BroadcastRoom - 把聊天室消息 / 事件广播给所有在线连接
+//
+// 聊天室没有「接收人」：一条消息全员可见，所以走 notice → dispatch 的 broadcast 分支。
+// payload 的 type 必须是 dispatch 里登记过的 room* 类型，否则会被静默丢弃。
+func BroadcastRoom(payload map[string]any) {
+
+	if len(payload) == 0 {
+		return
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	select {
+	case Hub.notice <- data:
+	case <-time.After(500 * time.Millisecond):
+		socketLog("聊天室广播超时")
+	}
+}
+
 // IsChatOnline - 该用户当前是否有 WebSocket 连接（聊天页的在线状态点）
 //
 // 多端在线：该 uid 下只要还有任意一条连接就算在线。
@@ -195,5 +217,8 @@ func (this *client) persistPrivate(to string, item map[string]any) (map[string]a
 		return nil, errors.New("不支持的消息类型！")
 	}
 
-	return (&model.ChatMessages{}).Send(sendUid, targetUid, msgType, content, clientMsgId)
+	// 引用回复：客户端只传被引用消息的 id，内容快照由服务端回查后落库
+	quoteId := cast.ToInt(payload["quote_id"])
+
+	return (&model.ChatMessages{}).Send(sendUid, targetUid, msgType, content, clientMsgId, quoteId)
 }

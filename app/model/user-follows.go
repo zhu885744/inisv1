@@ -173,6 +173,17 @@ func (this *UserFollows) IsFollowing(uid, followUid int) bool {
 	return exist
 }
 
+// IsMutual - 是否互相关注（双向 status = 1）
+//
+// 私信默认只对互关好友开放（见 model.ChatPermission），这里不做缓存：
+// 私信是低频写，两次 Exist 换来的是「取关后立刻失效」的准确权限。
+func (this *UserFollows) IsMutual(uid, targetUid int) bool {
+	if uid <= 0 || targetUid <= 0 || uid == targetUid {
+		return false
+	}
+	return this.IsFollowing(uid, targetUid) && this.IsFollowing(targetUid, uid)
+}
+
 func (this *UserFollows) GetFollowingCount(uid int) int64 {
 	count, _ := facade.DB.Model(&UserFollows{}).Where([]any{
 		[]any{"uid", "=", uid},

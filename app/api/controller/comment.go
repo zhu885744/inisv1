@@ -882,18 +882,6 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}
 
-	if cast.ToInt(commentConfig["sensitive_filter"]) == 1 {
-		sensitiveWords := cast.ToStringSlice(commentConfig["sensitive_words"])
-		content := cast.ToString(params["content"])
-
-		for _, word := range sensitiveWords {
-			if strings.Contains(content, word) {
-				this.json(ctx, nil, facade.Lang(ctx, "评论内容包含敏感词，请修改后重试！"), 400)
-				return
-			}
-		}
-	}
-
 	agent := this.header(ctx, "User-Agent")
 	if len(agent) > 511 {
 		agent = agent[:511]
@@ -924,6 +912,19 @@ func (this *Comment) create(ctx *gin.Context) {
 				}
 			}
 			utils.Struct.Set(&table, key, this.processFieldValue(val))
+		}
+	}
+
+	// 敏感词：评论高频，按规则动作处理 —— block / limit 拒绝，review 进待审核，
+	// warn / log 放行（warn 的提示随成功消息返回，命中审计由 model 层统一记录）。
+	sensitive := (&model.Sensitive{}).Decide(model.SceneComment, user.Id, table.Content)
+	if sensitive.Action != model.ActionAllow {
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && !this.meta.root(ctx) {
+			table.Audit = AuditPending
 		}
 	}
 
@@ -1025,13 +1026,13 @@ func (this *Comment) create(ctx *gin.Context) {
 					}
 				}
 				bindLabel = "动态"
-						case "docs":
-							docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
-							if !utils.Is.Empty(docs) {
-								title = cast.ToString(cast.ToStringMap(docs)["title"])
-							}
-							bindLabel = "文档"
-						}
+			case "docs":
+				docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(docs) {
+					title = cast.ToString(cast.ToStringMap(docs)["title"])
+				}
+				bindLabel = "文档"
+			}
 
 			createdAt := time.Now().Format("2006-01-02 15:04:05")
 			facade.Log.Info(map[string]any{"local_time": createdAt}, "获取服务器本地时间")
@@ -1082,17 +1083,17 @@ func (this *Comment) create(ctx *gin.Context) {
 					facade.Log.Info(map[string]any{"moment_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取动态作者信息")
 				} else {
 					facade.Log.Warn(map[string]any{"moment_id": table.BindId}, "动态不存在，跳过发送给作者")
-								}
-							case "docs":
-								docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
-								if !utils.Is.Empty(docs) {
-									authorId := cast.ToInt(cast.ToStringMap(docs)["uid"])
-									author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
-									authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-									facade.Log.Info(map[string]any{"docs_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文档作者信息")
-								} else {
-									facade.Log.Warn(map[string]any{"docs_id": table.BindId}, "文档不存在，跳过发送给作者")
-								}
+				}
+			case "docs":
+				docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
+				if !utils.Is.Empty(docs) {
+					authorId := cast.ToInt(cast.ToStringMap(docs)["uid"])
+					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+					facade.Log.Info(map[string]any{"docs_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文档作者信息")
+				} else {
+					facade.Log.Warn(map[string]any{"docs_id": table.BindId}, "文档不存在，跳过发送给作者")
+				}
 			default:
 				facade.Log.Warn(map[string]any{"bind_type": table.BindType}, "未知绑定类型，跳过发送给作者")
 			}
@@ -1189,11 +1190,16 @@ func (this *Comment) create(ctx *gin.Context) {
 
 	// 返回本次写入的审核状态：前台据此决定提示语（开启审核时提示「审核通过后显示」）
 	// 并插入一条「待审核」占位 —— 待审核的评论不在列表接口的返回里（非管理员只查 audit=1）
+	msg := facade.Lang(ctx, "创建成功！")
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
 	this.json(ctx, gin.H{
 		"id":      table.Id,
 		"audit":   table.Audit,
 		"pending": table.Audit == AuditPending,
-	}, facade.Lang(ctx, "创建成功！"), 200)
+	}, msg, 200)
 }
 
 // commenterAccount 评论者账号（评论邮件模板里的 ${author_account}，空时用昵称 / 「—」兜底）
@@ -1270,10 +1276,22 @@ func (this *Comment) update(ctx *gin.Context) {
 
 	// @ 提及：编辑评论时同样规范化（匹配范围仍是评论作者已关注的人），
 	// 否则手动输入的 @昵称 永远变不成链接
+	// sensitive 在块外声明：warn 的提示要拼进成功消息
+	var sensitive model.SensitiveDecision
 	if _, ok := payload["content"]; ok {
 		payload["content"], _ = (&model.Mention{}).Normalize(cast.ToString(payload["content"]), cast.ToInt(itemData["uid"]))
 		// 话题：与新建一致，只做链接不做聚合（评论没有 tags 字段）
 		payload["content"], _ = (&model.Topic{}).Parse(cast.ToString(payload["content"]))
+
+		// 敏感词：编辑评论同样按场景判定；命中 review 的编辑重新进入待审核
+		sensitive = (&model.Sensitive{}).Decide(model.SceneComment, cast.ToInt(itemData["uid"]), cast.ToString(payload["content"]))
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && !root {
+			payload["audit"] = AuditPending
+		}
 	}
 
 	_, err = item.Scan(&table).Update(payload)
@@ -1307,7 +1325,12 @@ func (this *Comment) update(ctx *gin.Context) {
 		}
 	}
 
-	this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+	msg := facade.Lang(ctx, "更新成功！")
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
+	this.json(ctx, gin.H{"id": table.Id}, msg, 200)
 }
 
 func (this *Comment) count(ctx *gin.Context) {

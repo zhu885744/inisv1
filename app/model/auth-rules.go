@@ -581,6 +581,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=log&name=获取日志服务配置",
 				"path=storage&name=获取存储服务配置",
 				"path=notification&name=获取通知配置",
+				"path=sensitive&name=获取全站敏感词库",
+				"path=sensitive-stats&name=获取敏感词命中统计",
 			},
 			"PUT": {
 				"path=sms&name=修改SMS服务配置",
@@ -600,6 +602,7 @@ func createAuthRules() (result []AuthRules) {
 				"path=storage-cos&name=修改COS存储配置",
 				"path=storage-attachment&name=修改附件配置",
 				"path=notification&name=修改通知配置",
+				"path=sensitive&name=修改全站敏感词库",
 			},
 			"POST": {
 				"path=test-sms-email&name=发送测试邮件",
@@ -608,6 +611,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=test-sms-tencent&name=发送腾讯云测试短信",
 				"path=test-redis&name=测试Redis连接",
 				"path=test-cos&name=测试COS连接",
+				"path=sensitive-test&name=测试敏感词规则",
+				"path=sensitive-rollback&name=回滚敏感词库",
 			},
 		},
 		"tags": standardModule(),
@@ -735,11 +740,35 @@ func createAuthRules() (result []AuthRules) {
 			"POST": {
 				"path=send&type=login&name=发送私信",
 				"path=revoke&type=login&name=撤回私信",
+				"path=delete&type=login&name=删除私信消息",
 				"path=pat&type=login&name=拍一拍",
 			},
 			"PUT": {
 				"path=ack&type=login&name=私信送达确认",
 				"path=read&type=login&name=私信标记已读",
+			},
+		},
+		// 公共聊天室（id=1）：全部要求登录 —— 游客只能看，不能发言，也就没必要给只读入口。
+		// 发言 / 撤回是普通用户的日常操作（type=login）；
+		// 禁言 / 解禁 / 改资料额外要求「超级管理员」，那层判断在控制器里用
+		// model.IsRootAdmin 做（root 权限组 + all 规则），这里不再拆权限点。
+		"room": {
+			"GET": {
+				"path=info&type=login&name=聊天室信息",
+				"path=messages&type=login&name=聊天室消息",
+				"path=mutes&type=login&name=聊天室禁言名单",
+				"path=auto-clear&type=login&name=聊天室自动清空配置",
+			},
+			"POST": {
+				"path=send&type=login&name=聊天室发言",
+				"path=revoke&type=login&name=聊天室撤回",
+				"path=delete&type=login&name=删除聊天室消息",
+				"path=mute&type=login&name=聊天室禁言",
+				"path=unmute&type=login&name=聊天室解禁",
+			},
+			"PUT": {
+				"path=update&type=login&name=聊天室资料修改",
+				"path=auto-clear&type=login&name=保存聊天室自动清空配置",
 			},
 		},
 		// 拉黑（黑名单）：拉黑 / 解除 / 状态查询都要登录；

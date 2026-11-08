@@ -226,25 +226,31 @@ func (this meta) rules(ctx *gin.Context) (slice []any) {
 // 从上下文中解析权限信息
 func (this meta) root(ctx *gin.Context) (ok bool) {
 
-	var hash  []string
+	var hashes []string
 	var table []model.AuthGroup
 
 	user := this.user(ctx)
-	// 查询自己拥有的权限
-	facade.DB.Model(&table).Where("root", 1).Like("uids", "%|" + cast.ToString(user.Id) + "|%").Select()
+	// 查询自己拥有的权限（只认 root=1 的「越权分组」）
+	facade.DB.Model(&table).Where("root", 1).Like("uids", "%|"+cast.ToString(user.Id)+"|%").Select()
 
 	for _, item := range table {
-		// 逗号分隔的权限
-		hash = append(hash, strings.Split(cast.ToString(item.Rules), ",")...)
+		// 逗号分隔的权限；空串不入列 —— 否则「rules 为空的 root 组」会留下一个空 hash
+		for _, hash := range strings.Split(cast.ToString(item.Rules), ",") {
+			if hash = strings.TrimSpace(hash); hash != "" {
+				hashes = append(hashes, hash)
+			}
+		}
 	}
 
 	// 拥有全部权限 - 直接返回
-	if utils.InArray("all", hash) {
+	if utils.InArray("all", hashes) {
 		return true
 	}
 
-	// 拥有部分权限 - 判断当前路由是否在权限列表中
-	if utils.InArray(this.route(ctx).Hash, hash) {
+	// 拥有部分权限 - 判断当前路由是否在权限列表中。
+	// route 解析不到 hash 时（未登记的路由）不能参与匹配，
+	// 否则空串会与上面的空 hash 互相命中，把普通账号判成越权账号。
+	if routeHash := this.route(ctx).Hash; routeHash != "" && utils.InArray(routeHash, hashes) {
 		return true
 	}
 

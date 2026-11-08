@@ -120,6 +120,9 @@ func InitConfig() {
 		{Key: DecorationConfigKey, Json: utils.Json.Encode(defaultDecorationConfig()), Remark: "装扮商城配置"},
 		// 资源告警阈值（后台「数据统计」页设置；采样与告警判定见 model/stats.go）
 		{Key: StatsAlertConfigKey, Value: "0", Json: utils.Json.Encode(StatsAlertDefaultConfig()), Remark: "资源告警阈值（数据统计页）"},
+		// 公共聊天室自动清空（间隔天数 / 上次清空时间，见 model/chat_room.go 的 RoomAutoClearTick）
+		// 默认 3 天（72 小时）；管理员可在聊天室管理面板里改
+		{Key: RoomAutoClearConfigKey, Json: utils.Json.Encode(RoomAutoClearDefaultConfig()), Remark: "公共聊天室自动清空（间隔天数 / 上次清空时间）"},
 	}
 
 	for _, item := range configs {

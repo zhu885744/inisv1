@@ -128,7 +128,8 @@ func (this *AuthGroup) IPOST(ctx *gin.Context) {
 		return
 	}
 
-	go this.delCache()
+	// 同步清缓存：接口返回后前端可能立刻重拉用户信息 / 权限，异步清会读到旧值
+	this.delCache()
 }
 
 func (this *AuthGroup) IPUT(ctx *gin.Context) {
@@ -146,7 +147,8 @@ func (this *AuthGroup) IPUT(ctx *gin.Context) {
 		return
 	}
 
-	go this.delCache()
+	// 同步清缓存：接口返回后前端可能立刻重拉用户信息 / 权限，异步清会读到旧值
+	this.delCache()
 }
 
 func (this *AuthGroup) IDEL(ctx *gin.Context) {
@@ -164,7 +166,8 @@ func (this *AuthGroup) IDEL(ctx *gin.Context) {
 		return
 	}
 
-	go this.delCache()
+	// 同步清缓存：接口返回后前端可能立刻重拉用户信息 / 权限，异步清会读到旧值
+	this.delCache()
 }
 
 func (this *AuthGroup) INDEX(ctx *gin.Context) {
@@ -173,6 +176,13 @@ func (this *AuthGroup) INDEX(ctx *gin.Context) {
 
 func (this *AuthGroup) delCache() {
 	facade.Cache.DelTags([]any{"[GET]", "auth-group"})
+
+	// 分组改动直接决定用户权限，两个缓存都要失效：
+	//   - user[uid]   ：用户对象里的 result.auth（前端菜单用的 pages / root 都在这）；
+	//   - user[uid][rule-group]：Users.Rules 的接口权限点列表。
+	// 只清列表缓存的话，管理员关掉「越权能力」或撤销页面权限后，用户侧仍是旧值，
+	// 表现就是「改了不生效」。
+	facade.Cache.DelTags([]any{"user["})
 }
 
 func (this *AuthGroup) one(ctx *gin.Context) {

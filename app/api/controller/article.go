@@ -443,6 +443,21 @@ func (this *Article) create(ctx *gin.Context) {
 	table.Content, topicIds = (&model.Topic{}).Parse(table.Content)
 	table.Tags = (&model.Topic{}).MergeTagsField(table.Tags, topicIds)
 
+	// 敏感词：文章走 review 策略 —— 命中高风险词不直接拒绝，而是进待审核，
+	// 避免「正文里出现一个词就整篇发不出去」；block / limit 规则仍然直接拒绝。
+	// warn 的提示随成功消息返回。
+	sensitive := (&model.Sensitive{}).Decide(model.SceneArticle, uid,
+		table.Title+"\n"+table.Abstract+"\n"+table.Content)
+	if sensitive.Action != model.ActionAllow {
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && status == 1 && !root {
+			table.Audit = 0
+		}
+	}
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -489,11 +504,15 @@ func (this *Article) create(ctx *gin.Context) {
 	}
 
 	// 回传 audit / status：审核开关关闭时 audit=1（已通过），前端据此给正确提示
+	msg := facade.Lang(ctx, "创建成功！")
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "草稿保存成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "创建成功！"), 200)
+		msg = facade.Lang(ctx, "草稿保存成功！")
 	}
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
+	this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, msg, 200)
 }
 
 func (this *Article) update(ctx *gin.Context) {
@@ -595,6 +614,24 @@ func (this *Article) update(ctx *gin.Context) {
 		payload["tags"] = (&model.Topic{}).MergeTagsField(baseTags, topicIds)
 	}
 
+	// 敏感词：只校验本次提交的字段（未改正文的编辑不会被历史内容挡住）。
+	// review 动作只对「已发布」的提交生效：草稿不打扰审核队列；warn 提示随成功消息返回。
+	sensitive := (&model.Sensitive{}).Decide(model.SceneArticle, cast.ToInt(findResult["uid"]),
+		cast.ToString(payload["title"])+"\n"+
+			cast.ToString(payload["abstract"])+"\n"+
+			cast.ToString(payload["content"]),
+	)
+	if sensitive.Action != model.ActionAllow {
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && status == 1 && !root {
+			payload["audit"] = 0
+			payload["reason"] = ""
+		}
+	}
+
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -630,11 +667,15 @@ func (this *Article) update(ctx *gin.Context) {
 		)
 	}
 
+	msg := facade.Lang(ctx, "更新成功！")
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+		msg = facade.Lang(ctx, "草稿保存成功！")
 	}
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
+	this.json(ctx, gin.H{"id": table.Id}, msg, 200)
 }
 
 // isSelfQuery - 查询条件是否限定为「当前登录用户自己的文章」（与 moments / links 同名同义）

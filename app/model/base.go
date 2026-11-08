@@ -98,8 +98,18 @@ func InitTable() {
 		// 用户私聊：会话 / 消息（依赖 Users；未读数由消息表聚合，无冗余计数表）
 		{"ChatConversations", InitChatConversations},
 		{"ChatMessages", InitChatMessages},
+		// 敏感词命中审计（场景 / 动作 / 规则版本；私信与聊天室不存原文）
+		{"SensitiveHits", InitSensitiveHits},
+		// 消息的「按人删除」记录（只影响删除者自己的历史 / 未读数）
+		{"ChatMessageDeletes", InitChatMessageDeletes},
 		// 同步水位（每会话每用户一条：ACK / 已读的最大 seq）
 		{"ChatStates", InitChatStates},
+		// 公共聊天室：房间（初始化时确保 id=1 存在）/ 消息 / 禁言
+		{"ChatRooms", InitChatRooms},
+		{"ChatRoomMessages", InitChatRoomMessages},
+		// 聊天室消息的「按人删除」记录（只影响删除者自己的历史）
+		{"ChatRoomMessageDeletes", InitChatRoomMessageDeletes},
+		{"ChatRoomMutes", InitChatRoomMutes},
 		{"Notification", InitNotification},
 		{"NotificationRead", InitNotificationRead},
 		{"Integral", InitIntegral},

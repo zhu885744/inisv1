@@ -3,6 +3,7 @@ module inis
 go 1.26.3
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.4
 	github.com/alibabacloud-go/openapi-util v0.1.2
 	github.com/alibabacloud-go/tea v1.5.3
@@ -34,7 +35,6 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
 	github.com/aliyun/credentials-go v1.4.12 // indirect

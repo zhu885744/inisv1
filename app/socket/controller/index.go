@@ -756,6 +756,17 @@ func (hub *hub) dispatch(message []byte, allowOffline bool) {
 	case msgType == "private":
 		hub.recordMessage("single")
 		hub.privatecast(message, allowOffline)
+	case msgType == "room_delete" || msgType == "chat_delete":
+		// 「按人删除」：只同步给操作者自己（服务端发给 user_{uid}）。
+		// room_delete 不能落到下面的 room* 广播分支 —— 否则所有人都把这条消息删了；
+		// chat_delete 是私信侧的同类事件，同样只发给自己。
+		hub.recordMessage("single")
+		hub.singlecast(message, allowOffline)
+	case strings.HasPrefix(msgType, "room"):
+		// 公共聊天室：消息与各类事件（撤回 / 禁言 / 解禁 / 改资料）都是全员可见，
+		// 直接广播给所有在线连接；离线用户进房间时拉历史即可。
+		hub.recordMessage("broadcast")
+		hub.broadcast(message)
 	}
 }
 

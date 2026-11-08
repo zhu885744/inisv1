@@ -457,7 +457,7 @@ GET /api/comment/counts?bind_type=moments&bind_ids=12,13,14
 ```json
 {
     "code": 400,
-    "msg": "评论内容包含敏感词，请修改后重试！",
+    "msg": "内容包含敏感词「广告」，请修改后重试！",
     "data": null
 }
 ```
@@ -626,7 +626,9 @@ GET /api/comment/counts?bind_type=moments&bind_ids=12,13,14
 ### 3. 内容验证
 - 支持配置评论内容最大长度限制
 - 支持配置必须包含中文验证
-- 支持敏感词过滤
+- 敏感词按场景分级处置：词库是独立的 `config/sensitive.toml`（不在 COMMENT 配置里），
+  评论场景 `scene=comment`，按规则动作 block / limit 拒绝、review 进待审核、warn / log 放行并记审计，
+  见《配置管理 接口文档》特殊说明 6
 
 ### 4. XSS防护
 - 评论内容会检测XSS攻击

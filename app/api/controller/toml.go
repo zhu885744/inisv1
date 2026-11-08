@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"inis/app/facade"
+	"inis/app/model"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	toml "github.com/BurntSushi/toml"
 	AliYunClient "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	AliYunUtil "github.com/alibabacloud-go/openapi-util/service"
 	AliYunUtilV2 "github.com/alibabacloud-go/tea-utils/v2/service"
@@ -254,12 +257,14 @@ func (this *Toml) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"log":          this.getLog,
-		"sms":          this.getSMS,
-		"cache":        this.getCache,
-		"crypt":        this.getCrypt,
-		"storage":      this.getStorage,
-		"notification": this.getNotification,
+		"log":             this.getLog,
+		"sms":             this.getSMS,
+		"cache":           this.getCache,
+		"crypt":           this.getCrypt,
+		"storage":         this.getStorage,
+		"notification":    this.getNotification,
+		"sensitive":       this.getSensitive,
+		"sensitive-stats": this.sensitiveStats,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -284,6 +289,8 @@ func (this *Toml) IPOST(ctx *gin.Context) {
 		"test-sms-tencent":              this.testSMSTencent,
 		"test-redis":                    this.testRedis,
 		"test-cos":                      this.testCOS,
+		"sensitive-test":                this.testSensitive,
+		"sensitive-rollback":            this.rollbackSensitive,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -319,6 +326,8 @@ func (this *Toml) IPUT(ctx *gin.Context) {
 		"storage-cos":              this.putStorageCOS,
 		"storage-attachment":       this.putStorageAttachment,
 		"notification":             this.putNotification,
+		// 源码原文与可视化表单共用：按载荷（content / rules）自动分派
+		"sensitive": this.putSensitive,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -1802,4 +1811,444 @@ func (this *Toml) putNotification(ctx *gin.Context) {
 	}
 
 	this.saveTomlConfig(ctx, content, appTomlPath, "修改成功！")
+}
+
+// getSensitive - 读取敏感词库（解析结果 + 文件原文）
+//
+// 后台用原文编辑：规则带 action / scenes / level / match，结构化表单会很快失控，
+// 直接编辑 TOML 反而更透明；解析结果同时返回，便于前端展示概览。
+func (this *Toml) getSensitive(ctx *gin.Context) {
+	this.sensitiveResult(ctx, facade.Lang(ctx, "数据请求成功！"))
+}
+
+// putSensitive - 保存敏感词库（同一接口，两种提交方式）
+//
+//   - { content }：TOML 原文，保留手写注释（后台「TOML 源码」模式）；
+//   - { enabled, default_action, rules, whitelist }：结构化数据，
+//     服务端按模板生成规范 TOML（后台「可视化配置」模式）。
+//
+// 两条路径共用同一套字段校验、备份、版本自增与热更新，权限点也只需要一个。
+func (this *Toml) putSensitive(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	if content := strings.TrimRight(cast.ToString(params["content"]), "\r\n"); strings.TrimSpace(content) != "" {
+		this.putSensitiveSource(ctx, content)
+		return
+	}
+
+	// 表单模式至少要带一个结构化字段：空载荷不能当成「清空词库」执行
+	_, hasRules := params["rules"]
+	_, hasWhitelist := params["whitelist"]
+	_, hasEnabled := params["enabled"]
+	_, hasAction := params["default_action"]
+	if !hasRules && !hasWhitelist && !hasEnabled && !hasAction {
+		this.json(ctx, nil, facade.Lang(ctx, "配置内容不能为空！"), 400)
+		return
+	}
+
+	this.putSensitiveForm(ctx, params)
+}
+
+// putSensitiveSource - 保存 TOML 原文（源码模式）
+//
+// 保存前用 TOML 解析器校验语法，避免写入后服务启动失败；
+// 旧文件先备份为 sensitive.toml.bak，保存后同步重载（不依赖文件监听时序）。
+func (this *Toml) putSensitiveSource(ctx *gin.Context, content string) {
+
+	var parsed map[string]any
+	if _, err := toml.Decode(content, &parsed); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "TOML 语法错误：%v", err.Error()), 400)
+		return
+	}
+	if err := validateSensitiveRules(parsed); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "%v", err.Error()), 400)
+		return
+	}
+
+	if !this.saveSensitiveContent(ctx, content) {
+		return
+	}
+
+	this.sensitiveResult(ctx, facade.Lang(ctx, "保存成功！"))
+}
+
+// sensitiveResult - 统一的敏感词库响应（解析结果 + 文件原文）
+func (this *Toml) sensitiveResult(ctx *gin.Context, msg string) {
+	data := (&model.Sensitive{}).Config()
+	data["content"] = facade.SensitiveFileContent()
+	this.json(ctx, data, msg, 200)
+}
+
+// saveSensitiveContent - 备份旧文件 → 版本自增 → 写盘 → 重载
+//
+// 源码保存与可视化表单保存共用，保证两条路径的回滚与版本行为一致。
+func (this *Toml) saveSensitiveContent(ctx *gin.Context, content string) bool {
+
+	// 版本号自增：命中审计记录 version，才能回溯「某次误伤是哪一版规则判的」
+	content = bumpSensitiveVersion(content)
+
+	// 备份旧文件：单步回滚足够覆盖「保存后发现大面积误伤」的场景
+	if err := facade.BackupSensitiveToml(); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "备份失败，已取消保存！"), 400)
+		return false
+	}
+
+	if err := facade.SaveSensitiveToml(content); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "保存失败！"), 400)
+		return false
+	}
+
+	return true
+}
+
+// sensitiveRuleForm - 可视化表单里的一条规则（与 TOML 的 [[rules]] 同构）
+type sensitiveRuleForm struct {
+	Word   string
+	Action string
+	Scenes []string
+	Level  string
+	Match  string
+}
+
+// putSensitiveForm - 可视化表单保存词库
+//
+// 表单模式按模板重新生成 TOML（源码里的手写注释不会保留），
+// 需要保留注释请用「TOML 源码」模式；校验 / 备份 / 版本自增 / 热更新与源码保存一致。
+func (this *Toml) putSensitiveForm(ctx *gin.Context, params map[string]any) {
+
+	defaultAction := strings.ToLower(strings.TrimSpace(cast.ToString(params["default_action"])))
+	if defaultAction == "" {
+		defaultAction = model.ActionReview
+	}
+	switch defaultAction {
+	case model.ActionBlock, model.ActionLimit, model.ActionReview, model.ActionWarn, model.ActionLog:
+	default:
+		this.json(ctx, nil, facade.Lang(ctx, "缺省动作不支持：%s", defaultAction), 400)
+		return
+	}
+
+	rules := parseSensitiveFormRows(params["rules"])
+	whitelist := parseSensitiveFormRows(params["whitelist"])
+
+	// 复用源码保存的字段校验：表单同样不允许写错的 action / level / scene / 超长词条
+	if err := validateSensitiveRules(map[string]any{
+		"rules":     sensitiveFormRows(rules),
+		"whitelist": sensitiveFormRows(whitelist),
+	}); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "%v", err.Error()), 400)
+		return
+	}
+
+	// 版本号沿用当前文件（随后统一自增），避免版本链断开
+	version := "1"
+	if current, ok := sensitiveVersionNumber(facade.SensitiveFileContent()); ok {
+		version = strconv.Itoa(current)
+	}
+
+	content := renderSensitiveToml(cast.ToBool(params["enabled"]), defaultAction, version, rules, whitelist)
+
+	if !this.saveSensitiveContent(ctx, content) {
+		return
+	}
+
+	this.sensitiveResult(ctx, facade.Lang(ctx, "保存成功！"))
+}
+
+// parseSensitiveFormRows - 把表单提交的数组转成内部结构
+func parseSensitiveFormRows(value any) []sensitiveRuleForm {
+
+	rows := cast.ToSlice(value)
+	if len(rows) == 0 {
+		return nil
+	}
+
+	result := make([]sensitiveRuleForm, 0, len(rows))
+	for _, item := range rows {
+		row := cast.ToStringMap(item)
+
+		scenes := make([]string, 0, 5)
+		for _, scene := range cast.ToStringSlice(row["scenes"]) {
+			scene = strings.ToLower(strings.TrimSpace(scene))
+			if scene != "" {
+				scenes = append(scenes, scene)
+			}
+		}
+
+		result = append(result, sensitiveRuleForm{
+			Word:   strings.TrimSpace(cast.ToString(row["word"])),
+			Action: strings.ToLower(strings.TrimSpace(cast.ToString(row["action"]))),
+			Scenes: scenes,
+			Level:  strings.ToLower(strings.TrimSpace(cast.ToString(row["level"]))),
+			Match:  strings.ToLower(strings.TrimSpace(cast.ToString(row["match"]))),
+		})
+	}
+
+	return result
+}
+
+// sensitiveFormRows - 转成 validateSensitiveRules 认识的 []map[string]any
+func sensitiveFormRows(rules []sensitiveRuleForm) []map[string]any {
+
+	rows := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		rows = append(rows, map[string]any{
+			"word":   rule.Word,
+			"action": rule.Action,
+			"scenes": rule.Scenes,
+			"level":  rule.Level,
+			"match":  rule.Match,
+		})
+	}
+
+	return rows
+}
+
+// renderSensitiveToml - 把表单结构渲染成带注释的 TOML 原文
+//
+// match = contains 与 level = medium 是默认值，省略后解析结果等价，文件也更短。
+func renderSensitiveToml(enabled bool, defaultAction, version string, rules, whitelist []sensitiveRuleForm) string {
+
+	var builder strings.Builder
+
+	builder.WriteString("# ======== 全站敏感词库 ========\n")
+	builder.WriteString("# 由后台「敏感词库 → 可视化配置」生成；需要手写注释请切到「TOML 源码」模式。\n")
+	builder.WriteString("# 规则字段：word 词条 / action 处置 / scenes 场景 / level 等级 / match 匹配方式\n\n")
+
+	builder.WriteString("# 总开关\n")
+	builder.WriteString(fmt.Sprintf("enabled = %t\n\n", enabled))
+
+	builder.WriteString("# 规则缺省动作（规则未写 action 时使用）\n")
+	builder.WriteString(fmt.Sprintf("default_action = %s\n\n", strconv.Quote(defaultAction)))
+
+	builder.WriteString("# 规则版本（每次保存自动 +1，命中审计据此回溯误伤）\n")
+	builder.WriteString(fmt.Sprintf("version = %s\n", strconv.Quote(version)))
+
+	if len(whitelist) > 0 {
+		builder.WriteString("\n# ======== 白名单（命中即放行） ========\n")
+		for _, rule := range whitelist {
+			builder.WriteString("\n[[whitelist]]\n")
+			builder.WriteString(fmt.Sprintf("word = %s\n", strconv.Quote(rule.Word)))
+			if len(rule.Scenes) > 0 {
+				builder.WriteString(fmt.Sprintf("scenes = %s\n", quoteTomlArray(rule.Scenes)))
+			}
+			if rule.Match != "" && rule.Match != "contains" {
+				builder.WriteString(fmt.Sprintf("match = %s\n", strconv.Quote(rule.Match)))
+			}
+		}
+	}
+
+	if len(rules) > 0 {
+		builder.WriteString("\n# ======== 词条规则 ========\n")
+		for _, rule := range rules {
+			builder.WriteString("\n[[rules]]\n")
+			builder.WriteString(fmt.Sprintf("word = %s\n", strconv.Quote(rule.Word)))
+			if rule.Action != "" {
+				builder.WriteString(fmt.Sprintf("action = %s\n", strconv.Quote(rule.Action)))
+			}
+			if len(rule.Scenes) > 0 {
+				builder.WriteString(fmt.Sprintf("scenes = %s\n", quoteTomlArray(rule.Scenes)))
+			}
+			if rule.Level != "" && rule.Level != "medium" {
+				builder.WriteString(fmt.Sprintf("level = %s\n", strconv.Quote(rule.Level)))
+			}
+			if rule.Match != "" && rule.Match != "contains" {
+				builder.WriteString(fmt.Sprintf("match = %s\n", strconv.Quote(rule.Match)))
+			}
+		}
+	}
+
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+// quoteTomlArray - 字符串数组字面量
+func quoteTomlArray(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// sensitiveVersionPattern - 顶层 version = "1" 配置行
+var sensitiveVersionPattern = regexp.MustCompile(`(?m)^version\s*=\s*"?(?P<number>\d+)"?\s*$`)
+
+// sensitiveVersionNumber - 解析数字版本号；缺失或非数字返回 false
+//
+// 版本号允许管理员手工维护成日期 / v1 之类，这类值不参与自动递增。
+func sensitiveVersionNumber(content string) (int, bool) {
+
+	matches := sensitiveVersionPattern.FindStringSubmatch(content)
+	if len(matches) != 2 {
+		return 0, false
+	}
+
+	version, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, false
+	}
+
+	return version, true
+}
+
+// setSensitiveVersion - 把配置里的版本号改写成指定值
+func setSensitiveVersion(content string, version int) string {
+	return sensitiveVersionPattern.ReplaceAllString(content, fmt.Sprintf(`version = "%d"`, version))
+}
+
+// bumpSensitiveVersion - 保存时版本号自增；非数字版本保持原样（由管理员手工维护）
+func bumpSensitiveVersion(content string) string {
+
+	version, ok := sensitiveVersionNumber(content)
+	if !ok {
+		return content
+	}
+
+	return setSensitiveVersion(content, version+1)
+}
+
+// rollbackVersion - 回滚时的版本号
+//
+// 回滚不能让版本号倒退：v1 保存成 v2 后回滚到 v1，若原样写回 v1，
+// 下次保存又会自增成 v2，审计里同一个 v2 就对应了两份不同内容，误伤回溯会指错版本。
+// 取 max(备份版本, 回滚前版本) + 1，保证版本号单调递增。
+func rollbackVersion(backup string, current string) string {
+
+	version, ok := sensitiveVersionNumber(backup)
+	if !ok {
+		return backup
+	}
+
+	if currentVersion, ok := sensitiveVersionNumber(current); ok && currentVersion > version {
+		version = currentVersion
+	}
+
+	return setSensitiveVersion(backup, version+1)
+}
+
+// validateSensitiveRules - 保存前检查规则字段
+//
+// 只做「明显写错」的拦截：缺 word、action / match / scenes 拼错。
+// 拼错的 action 如果直接放进去，运行时会静默回落到 default_action，
+// 管理员会以为规则生效了 —— 这类静默失败比 400 更危险。
+func validateSensitiveRules(parsed map[string]any) error {
+
+	allowedActions := map[string]bool{
+		model.ActionBlock: true, model.ActionLimit: true, model.ActionReview: true,
+		model.ActionWarn: true, model.ActionLog: true,
+		// 白名单的结构与规则同构，常被顺手写成 action = "allow"；
+		// 运行时 normalizeAction 本来就接受它，校验口径不能更严
+		model.ActionAllow: true,
+	}
+	allowedMatch := map[string]bool{"contains": true, "exact": true}
+	allowedScenes := map[string]bool{
+		model.SceneComment: true, model.SceneArticle: true, model.SceneMoment: true,
+		model.SceneDM: true, model.SceneChat: true,
+	}
+	allowedLevels := map[string]bool{
+		model.LevelHigh: true, model.LevelMedium: true, model.LevelLow: true,
+	}
+
+	for _, key := range []string{"rules", "whitelist"} {
+		raw, ok := parsed[key]
+		if !ok || raw == nil {
+			continue
+		}
+
+		rows, ok := raw.([]map[string]any)
+		if !ok {
+			return fmt.Errorf("%s 必须是数组（[[%s]]）", key, key)
+		}
+
+		for index, row := range rows {
+			position := fmt.Sprintf("%s[%d]", key, index+1)
+
+			word := strings.TrimSpace(cast.ToString(row["word"]))
+			if word == "" {
+				return fmt.Errorf("%s 缺少 word", position)
+			}
+			if len([]rune(word)) > model.SensitiveWordMaxRunes {
+				return fmt.Errorf("%s 的 word 超过 %d 个字符，超长规则运行时会忽略", position, model.SensitiveWordMaxRunes)
+			}
+			if action := strings.ToLower(strings.TrimSpace(cast.ToString(row["action"]))); action != "" && !allowedActions[action] {
+				return fmt.Errorf("%s 的 action 不支持：%s", position, action)
+			}
+			if match := strings.ToLower(strings.TrimSpace(cast.ToString(row["match"]))); match != "" && !allowedMatch[match] {
+				return fmt.Errorf("%s 的 match 不支持：%s", position, match)
+			}
+			if level := strings.ToLower(strings.TrimSpace(cast.ToString(row["level"]))); level != "" && !allowedLevels[level] {
+				return fmt.Errorf("%s 的 level 不支持：%s", position, level)
+			}
+			for _, scene := range cast.ToStringSlice(row["scenes"]) {
+				scene = strings.ToLower(strings.TrimSpace(scene))
+				if scene != "" && !allowedScenes[scene] {
+					return fmt.Errorf("%s 的 scene 不支持：%s", position, scene)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// rollbackSensitive - 回滚到上一次保存前的词库
+//
+// 备份同样会被加载进内存：先校验、再推进版本号，最后写回并重载，
+// 避免「回滚后整份词库失效」和「同一个版本号对应两份内容」两种静默故障。
+func (this *Toml) rollbackSensitive(ctx *gin.Context) {
+
+	backup, ok := facade.SensitiveBackupContent()
+	if !ok {
+		this.json(ctx, nil, facade.Lang(ctx, "没有可回滚的备份！"), 400)
+		return
+	}
+
+	var parsed map[string]any
+	if _, err := toml.Decode(backup, &parsed); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "备份文件语法错误，无法回滚：%v", err.Error()), 400)
+		return
+	}
+	if err := validateSensitiveRules(parsed); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "备份文件规则不合法，无法回滚：%v", err.Error()), 400)
+		return
+	}
+
+	content := rollbackVersion(backup, facade.SensitiveFileContent())
+	if err := facade.SaveSensitiveToml(content); err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "回滚失败！"), 400)
+		return
+	}
+
+	this.sensitiveResult(ctx, facade.Lang(ctx, "已回滚到上一次保存前的版本！"))
+}
+
+// testSensitive - 用当前词库试跑一条文本（不写命中审计）
+func (this *Toml) testSensitive(ctx *gin.Context) {
+
+	params := this.params(ctx)
+
+	scene := strings.ToLower(strings.TrimSpace(cast.ToString(params["scene"])))
+	switch scene {
+	case model.SceneComment, model.SceneArticle, model.SceneMoment, model.SceneDM, model.SceneChat:
+	default:
+		this.json(ctx, nil, facade.Lang(ctx, "不支持的场景！"), 400)
+		return
+	}
+
+	text := cast.ToString(params["text"])
+	decision := (&model.Sensitive{}).Decide(scene, 0, text)
+
+	this.json(ctx, gin.H{
+		"scene":       scene,
+		"text_length": len([]rune(text)),
+		"decision":    decision,
+	}, facade.Lang(ctx, "测试完成！"), 200)
+}
+
+// sensitiveStats - 最近 7 天命中统计（按场景 + 动作）
+func (this *Toml) sensitiveStats(ctx *gin.Context) {
+	this.json(ctx, gin.H{
+		"days":  7,
+		"items": model.SensitiveHitStats(7),
+	}, facade.Lang(ctx, "数据请求成功！"), 200)
 }

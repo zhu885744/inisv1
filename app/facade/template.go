@@ -56,6 +56,7 @@ ip_ban_duration = 300           # IP临时封禁时长(秒)
 # 通知保留天数（已读通知与广播通知超过该天数后自动清理）
 retention_days = 30
 
+
 # CORS配置
 [system.cors]
 # 是否启用CORS
@@ -298,6 +299,62 @@ allow_extensions = "${attachment.allow_extensions}"
 max_file_size = ${attachment.max_file_size}
 # 并发上传限制（同时上传的最大文件数）
 concurrent_limit = ${attachment.concurrent_limit}
+`
+
+// TempSensitive - 敏感词库模板（独立 config/sensitive.toml）
+//
+// 规则字段：
+//   - word    词条（match = exact 时按归一化后的整段相等判断）
+//   - action  block / limit / review / warn / log
+//   - scenes  comment / article / moment / dm / chat，留空表示全部场景
+//   - level   high / medium / low（用于排序与审计）
+//   - match   contains（默认，走 AC 自动机）/ exact（精确匹配）
+//
+// 白名单 [[whitelist]] 与规则同构，命中即放行：官方公告、认证机构、业务模板等。
+const TempSensitive = `# ======== 全站敏感词库 ========
+# 独立文件：不写入数据库，也不混在 app.toml 里；保存后热更新，无需重启。
+# 后台「互动配置 → 敏感词库」可直接编辑本文件，并支持测试与回滚。
+
+# 总开关
+enabled = true
+
+# 规则缺省动作（规则未写 action 时使用）
+# block 拒绝 / limit 限流拒绝 / review 进审核 / warn 提示后放行 / log 仅记录
+default_action = "review"
+
+# 规则版本（写入命中审计，便于回溯是哪一版词库做的判定）
+version = "1"
+
+# ======== 白名单（命中即放行） ========
+# [[whitelist]]
+# word = "开户指引"
+# scenes = ["article"]
+# match = "contains"
+
+# ======== 词条规则 ========
+# 色情：任何场景都不适合直接展示，直接拒绝
+[[rules]]
+word = "色情"
+action = "block"
+scenes = ["comment", "article", "moment", "dm", "chat"]
+level = "high"
+match = "contains"
+
+# 广告：可能是正常讨论，先进审核（私信 / 聊天室实时场景由业务侧按动作降级处理）
+[[rules]]
+word = "广告"
+action = "review"
+scenes = ["comment", "moment", "chat"]
+level = "medium"
+match = "contains"
+
+# 开户：金融 / 银行 / 证券内容里很常见，只对文章 / 动态进复核，避免误伤
+[[rules]]
+word = "开户"
+action = "review"
+scenes = ["article", "moment"]
+level = "low"
+match = "contains"
 `
 
 const TempCrypt = `# ======== 加密配置 ========

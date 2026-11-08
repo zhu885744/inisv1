@@ -60,6 +60,8 @@ var controllers = map[string]controller.ApiInterface{
 	"feed":               &controller.Feed{},
 	"user-blocks":        &controller.UserBlocks{},
 	"chat":               &controller.Chat{},
+	// 公共聊天室（id=1）：发言 / 撤回 / 禁言 / 改资料
+	"room": &controller.Room{},
 	"report":             &controller.Report{},
 	"cert-type":          &controller.CertType{},
 	"user-certification": &controller.UserCertification{},

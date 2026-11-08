@@ -72,6 +72,8 @@ func ensureBootstrap() {
 	ensureConfigFile(ConfigNameLog, logTomlContent())
 	ensureConfigFile(ConfigNameSMS, smsTomlContent())
 	ensureConfigFile(ConfigNameStorage, storageTomlContent())
+	// 敏感词库独立成文件（见 facade/sensitive.go），与 app.toml 解耦
+	ensureConfigFile(ConfigNameSensitive, sensitiveTomlContent())
 }
 
 // ensureDir - 目录不存在就创建
@@ -109,6 +111,11 @@ func ensureConfigFile(name string, content string) {
 // appTomlContent - app.toml 内容
 func appTomlContent() string {
 	return utils.Replace(TempApp, nil)
+}
+
+// sensitiveTomlContent - sensitive.toml 内容
+func sensitiveTomlContent() string {
+	return utils.Replace(TempSensitive, nil)
 }
 
 // cacheTomlContent - cache.toml 内容

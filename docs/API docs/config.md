@@ -173,8 +173,8 @@
 | `rate_limit.time_window` | int | `60` | 时间窗口（秒） |
 | `max_length` | int | `500` | 评论最大长度（字符） |
 | `require_chinese` | int | `1` | 是否要求包含中文（0=不要求，1=要求） |
-| `sensitive_filter` | int | `1` | 是否开启敏感词过滤（0=关闭，1=开启） |
-| `sensitive_words` | array | `["色情", "广告", "开户"]` | 敏感词列表 |
+| `sensitive_filter` | int | `1` | **已废弃**：敏感词过滤统一走 `config/sensitive.toml`，本字段不再生效 |
+| `sensitive_words` | array | - | **已废弃**：规则改由 `config/sensitive.toml` 的 `[[rules]]` / `[[whitelist]]` 维护，见《配置管理 接口文档》特殊说明 6 |
 
 > 说明：评论 / 回复的邮件通知开关已并入 `SYSTEM_MAIL_NOTIFY`（场景 `comment.notify` / `comment.reply`），
 > 本记录不再包含 `email_notify`；老库若残留该字段会被忽略（保存评论配置后即被清理）。

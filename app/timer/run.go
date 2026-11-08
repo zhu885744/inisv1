@@ -95,6 +95,7 @@ func start() {
 	Badge.Run()
 	Stats.Run()
 	QpsWarnClean.Run()
+	Room.Run()
 
 	go func() {
 		<-Timer.Start()

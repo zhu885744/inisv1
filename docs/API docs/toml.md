@@ -8,9 +8,9 @@
 
 | 接口类型 | 说明 |
 | :--- | :--- |
-| **GET 接口** | log、sms、cache、crypt、storage - 获取配置信息 |
-| **POST 接口** | 测试各类服务连接 |
-| **PUT 接口** | 更新各类配置，新增统一存储配置接口 `storage` |
+| **GET 接口** | log、sms、cache、crypt、storage、notification、sensitive、sensitive-stats - 获取配置信息 |
+| **POST 接口** | 测试各类服务连接；敏感词库测试与回滚 |
+| **PUT 接口** | 更新各类配置，新增统一存储配置接口 `storage`、敏感词库 `sensitive` |
 | **DELETE 接口** | 暂不支持 |
 
 ### 新增接口说明
@@ -20,6 +20,10 @@
 | `/api/toml/storage` | PUT | 统一更新存储配置，支持同时修改 default、local、cos、attachment 配置 |
 | `/api/toml/storage-attachment` | PUT | 更新附件管理配置 |
 | `/api/toml/sms-email-queue` | PUT | 更新邮件发件队列（分批 + 重试）参数，写入 `config/sms.toml` 的 `[email]` 段 |
+| `/api/toml/sensitive` | GET / PUT | 读取 / 保存敏感词库（独立 `config/sensitive.toml`）：PUT 支持 TOML 原文与可视化表单两种载荷 |
+| `/api/toml/sensitive-test` | POST | 用当前词库试跑一条文本，不写命中审计 |
+| `/api/toml/sensitive-rollback` | POST | 回滚到上一次保存前的词库（单步） |
+| `/api/toml/sensitive-stats` | GET | 最近 7 天命中统计（按场景 + 动作聚合） |
 
 ---
 
@@ -941,7 +945,198 @@
 
 ---
 
-### 30. INDEX 接口
+### 30. 获取敏感词库 [sensitive]
+
+- **请求方式**: `GET`
+- **请求地址**: `/api/toml/sensitive`
+- **说明**: 读取敏感词库（`config/sensitive.toml`）：解析结果 + 文件原文，后台用原文直接编辑
+
+**成功响应** (200):
+
+```json
+{
+    "code": 200,
+    "msg": "数据请求成功！",
+    "data": {
+        "enabled": 1,
+        "default_action": "review",
+        "version": "3",
+        "rules": [
+            { "word": "广告", "action": "review", "scenes": ["comment"], "level": "medium", "match": "contains" }
+        ],
+        "whitelist": [],
+        "scenes": ["comment", "article", "moment", "dm", "chat"],
+        "actions": ["block", "limit", "review", "warn", "log"],
+        "content": "# ======== 全站敏感词库 ========\nenabled = true\n..."
+    }
+}
+```
+
+> `enabled` 为 0/1；`content` 是文件原文（含注释），编辑后通过 31 原样提交。
+
+### 31. 保存敏感词库 [sensitive]
+
+- **请求方式**: `PUT`
+- **请求地址**: `/api/toml/sensitive`
+- **说明**: 覆盖保存词库原文，校验通过后写盘并立即热更新（不依赖文件监听时序）
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `content` | string | 源码模式必填 | 完整 TOML 原文（含注释，末尾换行会被规整）；可视化模式改传下文的表单字段 |
+
+**保存流程**（任一步失败均不落盘）:
+
+1. 内容非空；
+2. TOML 语法可解析；
+3. 规则字段合法（见「特殊说明 → 6」）；
+4. 顶层 `version` 为纯数字时自增（写入命中审计，用于回溯「某次误伤是哪一版规则判的」）；
+5. 旧文件备份为 `config/sensitive.toml.bak`（只保留一份，供单步回滚）；
+6. 写盘 + `ReloadSensitiveToml()`，返回最新解析结果（同 30）。
+
+**成功响应** (200): 结构同 30，`msg` 为「保存成功！」。
+
+**失败响应** (400):
+
+```json
+{
+    "code": 400,
+    "msg": "TOML 语法错误：toml: line 12: expected '.' or '=', but got '：' instead",
+    "data": null
+}
+```
+
+```json
+{
+    "code": 400,
+    "msg": "rules[2] 的 action 不支持：blockx",
+    "data": null
+}
+```
+
+**可视化表单提交**（同一接口 `PUT /api/toml/sensitive` 的另一种载荷）:
+
+后台「可视化配置」模式提交结构化数据（**不带 `content`**），服务端按模板生成规范 TOML 后，
+走与上面完全相同的校验 / 备份 / 版本自增 / 热更新流程，响应结构也一致。
+分派规则：带非空 `content` 走源码模式；否则只要出现 `rules` / `whitelist` / `enabled` /
+`default_action` 任一字段就走表单模式；两者都没有返回 `400 配置内容不能为空！`（避免空载荷把词库清空）。
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | 否 | 总开关 |
+| `default_action` | string | 否 | 规则缺省动作，缺省 `review` |
+| `rules` | array | 否 | 规则数组，字段同 `[[rules]]` |
+| `whitelist` | array | 否 | 白名单数组，字段同 `[[whitelist]]`（`action` 固定为放行，不需要传） |
+
+**请求示例**:
+
+```json
+{
+    "enabled": true,
+    "default_action": "review",
+    "rules": [
+        { "word": "广告", "action": "review", "scenes": ["comment", "moment"], "level": "medium", "match": "contains" },
+        { "word": "开户", "action": "review", "scenes": ["article"], "level": "low", "match": "exact" }
+    ],
+    "whitelist": [
+        { "word": "官方公告", "scenes": ["article"], "match": "contains" }
+    ]
+}
+```
+
+**行为说明**:
+
+- 表单保存会**按模板重写整个文件**：头部注释固定生成，源码里的手写注释不保留；
+  需要保留注释请改用源码方式（`PUT /api/toml/sensitive` 提交 `content`）；
+- `level = medium` 与 `match = contains` 是默认值，生成时省略，解析结果等价；
+- `version` 不由前端提交：服务端沿用当前文件的版本号，保存时统一 +1；
+- 校验与源码保存共用同一套规则（缺 `word`、`action` / `match` / `level` / `scenes` 拼错、
+  词条超过 64 字符都会返回 400），失败的提交不会落盘、也不会覆盖备份。
+
+### 32. 测试敏感词 [sensitive-test]
+
+- **请求方式**: `POST`
+- **请求地址**: `/api/toml/sensitive-test`
+- **说明**: 用当前内存词库试跑一条文本；`uid=0`，**不写命中审计**（避免测试流量污染统计）
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `scene` | string | **是** | comment、article、moment、dm、chat |
+| `text` | string | 否 | 待测文本，留空返回 `allow` |
+
+**成功响应** (200):
+
+```json
+{
+    "code": 200,
+    "msg": "测试完成！",
+    "data": {
+        "scene": "comment",
+        "text_length": 12,
+        "decision": {
+            "action": "block",
+            "word": "广告发票",
+            "level": "high",
+            "match": "contains",
+            "scene": "comment",
+            "version": "3"
+        }
+    }
+}
+```
+
+> 未命中 / 命中白名单时 `decision.action` 为 `allow`，其余字段为空串。测试文本同样经过归一化与 HTML 剥标签，`广<b>告</b>` 会被判定命中。
+
+### 33. 回滚敏感词库 [sensitive-rollback]
+
+- **请求方式**: `POST`
+- **请求地址**: `/api/toml/sensitive-rollback`
+- **说明**: 回滚到上一次保存前的词库（单步），覆盖「保存后发现大面积误伤」的场景
+
+**请求参数**: 无。
+
+**行为说明**:
+
+- 备份 `config/sensitive.toml.bak` 不存在或为空 → `400 没有可回滚的备份！`；
+- 备份内容先过 TOML 语法与规则字段校验，损坏的备份直接拒绝（避免回滚后整份词库静默失效）；
+- 版本号不倒退：取 `max(备份版本, 回滚前版本) + 1`，否则同一个 `version` 会对应两份内容，审计回溯会指错版本；
+- 写盘后立即重载，返回最新解析结果（同 30）。
+
+**成功响应** (200): 结构同 30，`msg` 为「已回滚到上一次保存前的版本！」。
+
+### 34. 命中统计 [sensitive-stats]
+
+- **请求方式**: `GET`
+- **请求地址**: `/api/toml/sensitive-stats`
+- **说明**: 最近 7 天命中统计，按「场景 + 处置动作」聚合（数据来自 `inis_sensitive_hits`）
+
+**成功响应** (200):
+
+```json
+{
+    "code": 200,
+    "msg": "数据请求成功！",
+    "data": {
+        "days": 7,
+        "items": [
+            { "scene": "comment", "action": "block", "total": 12 },
+            { "scene": "comment", "action": "review", "total": 5 },
+            { "scene": "dm", "action": "log", "total": 3 }
+        ]
+    }
+}
+```
+
+> 没有命中记录时 `items` 为空数组；统计只聚合，不返回命中的词条与内容摘要在内。
+
+---
+
+### 35. INDEX 接口
 
 - **接口类型**: INDEX 接口
 - **请求方式**: `GET`
@@ -1036,3 +1231,67 @@
     "data": null
 }
 ```
+
+### 6. 敏感词库（config/sensitive.toml）
+
+词库**不在 config 表里**，独立成文件（与 `app.toml` 解耦），便于备份 / 回滚 / diff，也方便运维直接看规则；
+保存后只重载这一份配置，不影响数据库、通知等其它配置。实现见 `app/model/sensitive.go`、`app/facade/sensitive.go`。
+
+**文件结构**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | 否 | 总开关，缺省 `true`；关闭后所有场景直接放行 |
+| `default_action` | string | 否 | 规则未写 `action` 时的兜底动作，缺省 `review` |
+| `version` | string | 否 | 词库版本，写入命中审计；纯数字时每次保存自增（`v1` / 日期这类保持原样） |
+| `[[rules]]` | array | 否 | 词条规则，字段见下 |
+| `[[whitelist]]` | array | 否 | 与 `rules` 同构，命中即放行（官方公告、认证机构、业务模板） |
+
+**规则字段**:
+
+| 字段 | 类型 | 必填 | 取值 / 说明 |
+| :--- | :--- | :--- | :--- |
+| `word` | string | **是** | 词条，最长 64 个字符（超长在保存时直接 400） |
+| `action` | string | 否 | `block` 拒绝 / `limit` 限流拒绝 / `review` 进审核 / `warn` 提示后放行 / `log` 仅记录；白名单里写 `allow` 也合法 |
+| `scenes` | array | 否 | `comment` / `article` / `moment` / `dm` / `chat`；留空 = 全部场景 |
+| `level` | string | 否 | `high` / `medium` / `low`，缺省 `medium`，用于同动作下择优 |
+| `match` | string | 否 | `contains`（默认，走 AC 自动机）/ `exact`（整段相等） |
+
+**匹配行为**:
+
+- 判定前统一归一化：全角转半角、大小写折叠、去零宽字符、常见繁简映射、剥 HTML 标签，再移除空白 / 标点 / 符号，
+  因此 `广 告`、`廣-告`、`广<b>告</b>` 都能命中「广告」；
+- **白名单优先**：命中白名单直接放行，不再看规则；
+- 命中多条时择优：动作权重（block > limit > review > warn > log）→ 风险等级 → 词条更长者；
+- `contains` 规则编译成 AC 自动机，规则量大时不会退化成逐条 `Contains`；`exact` 走哈希表整段比对；
+- 配置变更推进「配置代次」，model 层按代次重建匹配器，无需重启。
+
+**各业务场景的处置**:
+
+| 场景 | 入口 | 处置 |
+| :--- | :--- | :--- |
+| 评论 / 回复 | `comment.create` / `comment.update` | block、limit 拒绝；review 进待审核（编辑命中 review 重新进审核） |
+| 文章 | `article.create` / `article.update` | 判定「标题 + 摘要 + 正文」；block、limit 拒绝；review 进待审核 |
+| 动态 | `moments.create` / `moments.update` | 同上，判定正文 |
+| 私信 | `model.ChatMessages.Send` | 文本与拍一拍后缀判定；block、limit 拒绝；review / warn / log 放行并记审计 |
+| 聊天室 | 聊天室发送接口 | 同上（私信 / 聊天室隐私敏感，不塞人工审核队列） |
+
+> 命中 `warn` 时，评论 / 文章 / 动态的成功响应 `msg` 会追加提示文案，例如
+> `创建成功！（内容包含敏感词「广告」，已放行，请注意用词！）`，前端展示 `msg` 即可，无需额外解析字段。
+> 私信 / 聊天室只记审计，处置依靠撤回与禁言能力。
+
+**命中审计（inis_sensitive_hits）**:
+
+| 字段 | 说明 |
+| :--- | :--- |
+| `uid` / `scene` / `action` / `word` / `level` / `match` | 命中上下文 |
+| `version` | 判定时的词库版本，用于回溯「这次误伤是哪一版规则判的」 |
+| `content_hash` | 归一化后内容的 SHA-256，用于同内容聚合，不存全文 |
+| `excerpt` | 内容摘要，最多 120 字；**私信 / 聊天室不落摘要**，仅 block / review 且非私密场景才存 |
+
+审计异步落库（独立 goroutine），失败只记日志，不影响业务主流程。
+
+**备份与版本**:
+
+- 每次保存前把旧文件备份为 `config/sensitive.toml.bak`（只保留一份，单步回滚）；
+- 备份文件不会被版本库收录（`config/.gitignore` 的 `*.toml` / `*.toml.bak`）。

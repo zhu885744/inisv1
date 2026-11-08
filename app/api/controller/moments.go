@@ -406,6 +406,19 @@ func (this *Moments) create(ctx *gin.Context) {
 	table.Content, topicIds = (&model.Topic{}).Parse(table.Content)
 	table.Tags = (&model.Topic{}).BuildTagsField(topicIds)
 
+	// 敏感词：动态与文章同策略 —— review 进待审核，不因一个词直接拒绝整条内容；
+	// warn 的提示随成功消息返回
+	sensitive := (&model.Sensitive{}).Decide(model.SceneMoment, uid, table.Content)
+	if sensitive.Action != model.ActionAllow {
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && status == 1 && !root {
+			table.Audit = 0
+		}
+	}
+
 	_, err = facade.DB.Model(&table).Create(&table)
 
 	if err != nil {
@@ -427,10 +440,16 @@ func (this *Moments) create(ctx *gin.Context) {
 	// 回传 audit / status：审核开关关闭时 audit=1（已通过），
 	// 前端据此决定提示「发布成功」还是「发布成功，等待审核」——
 	// 否则关掉审核也照样弹「请耐心等待审核」，用户会以为仍然进了待审核
+	msg := facade.Lang(ctx, "创建成功！")
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "草稿保存成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, facade.Lang(ctx, "创建成功！"), 200)
+		msg = facade.Lang(ctx, "草稿保存成功！")
+	}
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
+	this.json(ctx, gin.H{"id": table.Id, "audit": table.Audit, "status": table.Status}, msg, 200)
+	if status != 0 {
 		go (&model.EXP{}).Add(model.EXP{
 			Type:        "moments",
 			Uid:         uid,
@@ -537,6 +556,22 @@ func (this *Moments) update(ctx *gin.Context) {
 		payload["tags"] = (&model.Topic{}).BuildTagsField(topicIds)
 	}
 
+	// 敏感词：只校验本次提交的正文（只改审核状态等操作不受影响）；
+	// 命中 review 时重新进入待审核，避免「改一下字就绕过审核」；warn 提示随成功消息返回。
+	sensitive := (&model.Sensitive{}).Decide(model.SceneMoment, cast.ToInt(prev["uid"]),
+		cast.ToString(payload["content"]),
+	)
+	if sensitive.Action != model.ActionAllow {
+		if sensitive.Blocked() {
+			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
+			return
+		}
+		if sensitive.Action == model.ActionReview && status == 1 && !root {
+			payload["audit"] = 0
+			payload["reason"] = ""
+		}
+	}
+
 	_, err = item.Scan(&table).Update(payload)
 
 	if err != nil {
@@ -571,11 +606,15 @@ func (this *Moments) update(ctx *gin.Context) {
 		)
 	}
 
+	msg := facade.Lang(ctx, "更新成功！")
 	if status == 0 {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "草稿保存成功！"), 200)
-	} else {
-		this.json(ctx, gin.H{"id": table.Id}, facade.Lang(ctx, "更新成功！"), 200)
+		msg = facade.Lang(ctx, "草稿保存成功！")
 	}
+	if notice := sensitive.NoticeMessage(); notice != "" {
+		msg += "（" + notice + "）"
+	}
+
+	this.json(ctx, gin.H{"id": table.Id}, msg, 200)
 }
 
 // momentsSummary 动态正文摘要（通知文案用）

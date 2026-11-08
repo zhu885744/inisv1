@@ -68,6 +68,14 @@ type ChatMessages struct {
 	RevokeTime int64 `gorm:"comment:撤回时间;" json:"revoke_time"`
 	// ClientMsgId - 客户端生成的幂等键：socket 重发 / 用户连点 / 网络重试都靠它去重
 	ClientMsgId string `gorm:"size:64; default:''; comment:客户端消息ID（幂等）;" json:"client_msg_id"`
+	// 引用回复：只存被引用消息的快照（id / 发送者 / 类型 / 摘要）。
+	//
+	// 为什么快照而不只存 quote_id：被引用的消息随时可能撤回（内容会被清空），
+	// 只存 id 的话，引用气泡会在对方撤回后变成空白；快照让「引用」在历史里始终可读。
+	QuoteId   int    `gorm:"type:int(32); default:0; comment:引用的消息ID;" json:"quote_id"`
+	QuoteUid  int    `gorm:"type:int(32); default:0; comment:被引用消息的发送者;" json:"quote_uid"`
+	QuoteType string `gorm:"size:16; default:''; comment:被引用消息的类型;" json:"quote_type"`
+	QuoteText string `gorm:"size:300; default:''; comment:被引用消息的摘要（快照）;" json:"quote_text"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -75,6 +83,19 @@ type ChatMessages struct {
 	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+}
+
+// ChatMessageDeletes - 「按人删除」的私信消息
+//
+// 私信是双方共同的记录，删除只对操作者生效：这里记一条 (uid, msg_id)，
+// 历史记录 / 增量补拉 / 未读数都把它过滤掉，对方与其它设备不受影响。
+// 用独立表而不是在 messages 上加字段：一条消息可能被两个人各删一次，
+// 也可以被删除后又因为重新进入会话而「恢复」（删掉这行即可）。
+type ChatMessageDeletes struct {
+	Id         int   `gorm:"type:int(32); comment:主键;" json:"id"`
+	Uid        int   `gorm:"type:int(32); uniqueIndex:uk_chat_message_deletes,priority:1; comment:删除者;" json:"uid"`
+	MsgId      int   `gorm:"type:int(32); uniqueIndex:uk_chat_message_deletes,priority:2; comment:消息ID;" json:"msg_id"`
+	CreateTime int64 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 }
 
 // ChatStates - 每个用户在每个会话里的同步水位
@@ -124,6 +145,21 @@ func InitChatStates() {
 	if err := facade.DB.Drive().AutoMigrate(&ChatStates{}); err != nil {
 		facade.Log.Error(map[string]any{"error": err}, "ChatStates表迁移失败")
 	}
+}
+
+func InitChatMessageDeletes() {
+	if err := facade.DB.Drive().AutoMigrate(&ChatMessageDeletes{}); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "ChatMessageDeletes表迁移失败")
+	}
+}
+
+// chatHiddenQuery - 我删除过的消息 id 子查询
+//
+// 删除只对自己生效，所以所有「我的消息视图」都必须带上这个条件：
+// 历史 / 增量补拉 / 未读总数 / 会话未读数。漏掉任何一处，删掉的消息都会
+// 在刷新或未读数里重新冒出来。
+func chatHiddenQuery(uid int) *gorm.DB {
+	return facade.DB.Drive().Model(&ChatMessageDeletes{}).Select("msg_id").Where("uid = ?", uid)
 }
 
 // chatConversationId - 按「双方 UID」取会话 ID
@@ -289,8 +325,41 @@ func chatMessageMap(item *ChatMessages) map[string]any {
 		"is_revoked":      item.IsRevoked,
 		"revoke_time":     item.RevokeTime,
 		"client_msg_id":   item.ClientMsgId,
+		"quote":           chatQuoteMap(item),
 		"create_time":     item.CreateTime,
 	}
+}
+
+// chatQuoteMap - 引用消息的输出结构（没有引用时返回 nil，前端据此不渲染引用块）
+func chatQuoteMap(item *ChatMessages) any {
+	if item.QuoteId <= 0 {
+		return nil
+	}
+	return map[string]any{
+		"id":       item.QuoteId,
+		"uid":      item.QuoteUid,
+		"msg_type": utils.Default(item.QuoteType, "text"),
+		"content":  item.QuoteText,
+	}
+}
+
+// chatQuoteText - 被引用消息的摘要快照
+//
+// 与 ChatPreview 的区别：这里保留 [emoji:url] 标记（前端能直接渲染成表情），
+// 所以不能直接把预览文案当快照。图片 / 拍一拍本来就只适合显示类型标签。
+func chatQuoteText(msgType, content string) string {
+	if msgType == "image" {
+		return "[图片]"
+	}
+	if msgType == "pat" {
+		return "[拍一拍]"
+	}
+
+	runes := []rune(strings.TrimSpace(content))
+	if len(runes) > 80 {
+		return string(runes[:80]) + "…"
+	}
+	return string(runes)
 }
 
 // GetOrCreate - 取（或建）两人之间的会话
@@ -338,21 +407,51 @@ const (
 	chatPatSuffixMax = 20
 )
 
+// ChatPermission - 私信发送权限（唯一的判定入口）
+//
+// 私信默认只对「互相关注」的好友开放：
+//   - 自己 → 拒绝；
+//   - 任一方向拉黑 → 拒绝（拉黑优先于互关，提示也更具体）；
+//   - 未互关 → 拒绝。
+//
+// 放在 model 层而不是 HTTP 控制器：socket 私聊同样走 Send，
+// 只在 HTTP 里拦等于给 socket 留了一条绕过通道。
+func ChatPermission(uid, targetUid int) error {
+	if uid <= 0 || targetUid <= 0 {
+		return errors.New("参数不完整！")
+	}
+	if uid == targetUid {
+		return errors.New("不能给自己发私信！")
+	}
+	if !(&UserBlocks{}).CanInteract(uid, targetUid) {
+		return errors.New("你们之间存在拉黑关系，无法私聊！")
+	}
+	if !(&UserFollows{}).IsMutual(uid, targetUid) {
+		return errors.New("仅互相关注的好友可以私信！")
+	}
+	return nil
+}
+
 // Send - 写入一条私聊消息，并同步会话的最后一条摘要
 //
 // 参数：
 //   - msgType：text（默认）/ image（内容为图片地址）/ pat（拍一拍，内容为后缀）
 //   - clientMsgId：客户端幂等键，重复提交直接返回已有消息，不重复入库
+//   - quoteId：引用的消息 ID（0 = 不引用）；服务端回查原消息并落快照，
+//     不信任客户端传来的引用内容
 //
 // 注意：pat 只应由 Pat() 调用（那里有频率限制）；HTTP 与 socket 发送入口都会把
 // msg_type 限制为 text/image，避免有人用 /send 绕过拍一拍的节流。
-func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, clientMsgId string) (map[string]any, error) {
+func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, clientMsgId string, quoteId int) (map[string]any, error) {
 
 	if sendUid <= 0 || receiveUid <= 0 {
 		return nil, errors.New("参数不完整！")
 	}
 	if sendUid == receiveUid {
 		return nil, errors.New("不能给自己发私信！")
+	}
+	if err := ChatPermission(sendUid, receiveUid); err != nil {
+		return nil, err
 	}
 
 	msgType = strings.TrimSpace(msgType)
@@ -382,12 +481,41 @@ func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, client
 		return nil, errors.New("图片地址不合法！")
 	}
 
+	// 敏感词：文本消息与拍一拍后缀都要过全站词库（图片地址不检查）。
+	// 私信场景只按 block / limit 拦截；review / warn / log 放行并记审计 ——
+	// 私信隐私敏感，不适合把每条消息都塞进人工审核队列。
+	if msgType != "image" {
+		decision := (&Sensitive{}).Decide(SceneDM, sendUid, content)
+		if decision.Blocked() {
+			return nil, errors.New(decision.UserMessage())
+		}
+	}
+
 	// 幂等：同一发送者 + 同一 client_msg_id 只入库一次
 	clientMsgId = strings.TrimSpace(clientMsgId)
 	if clientMsgId != "" {
 		var exist ChatMessages
 		if err := facade.DB.Drive().Where("send_uid = ? AND client_msg_id = ?", sendUid, clientMsgId).First(&exist).Error; err == nil && exist.Id > 0 {
 			return chatMessageMap(&exist), nil
+		}
+	}
+
+	// 引用回复：服务端回查原消息并落快照，客户端只传 quote_id。
+	//
+	// 校验三件事：存在、未撤回、属于同一段会话 —— 否则就能跨会话引用，
+	// 甚至引用一条自己根本看不到的消息。
+	var quote ChatMessages
+	if quoteId > 0 {
+		if err := facade.DB.Drive().Where("id = ?", quoteId).First(&quote).Error; err != nil || quote.Id <= 0 {
+			return nil, errors.New("引用的消息不存在！")
+		}
+		if quote.IsRevoked == 1 {
+			return nil, errors.New("引用的消息已撤回！")
+		}
+		samePair := (quote.SendUid == sendUid && quote.ReceiveUid == receiveUid) ||
+			(quote.SendUid == receiveUid && quote.ReceiveUid == sendUid)
+		if !samePair {
+			return nil, errors.New("只能引用当前会话里的消息！")
 		}
 	}
 
@@ -405,6 +533,13 @@ func (this *ChatMessages) Send(sendUid, receiveUid int, msgType, content, client
 		Content:        content,
 		IsRead:         0,
 		ClientMsgId:    clientMsgId,
+	}
+
+	if quote.Id > 0 {
+		message.QuoteId = quote.Id
+		message.QuoteUid = quote.SendUid
+		message.QuoteType = utils.Default(quote.MsgType, "text")
+		message.QuoteText = chatQuoteText(quote.MsgType, quote.Content)
 	}
 
 	db := facade.DB.Drive()
@@ -459,7 +594,9 @@ func (this *ChatMessages) History(uid, targetUid, beforeId, limit int) (list []m
 
 	query := facade.DB.Drive().Model(&ChatMessages{}).
 		Where("(send_uid = ? AND receive_uid = ?) OR (send_uid = ? AND receive_uid = ?)",
-			uid, targetUid, targetUid, uid)
+			uid, targetUid, targetUid, uid).
+		// 我删除过的消息不再出现在我的历史里（删除只对自己生效）
+		Where("id NOT IN (?)", chatHiddenQuery(uid))
 
 	if beforeId > 0 {
 		query = query.Where("id < ?", beforeId)
@@ -513,6 +650,7 @@ func (this *ChatMessages) Sync(uid, targetUid int, afterSeq int64, limit int) (l
 	err := facade.DB.Drive().Model(&ChatMessages{}).
 		Where("(send_uid = ? AND receive_uid = ?) OR (send_uid = ? AND receive_uid = ?)",
 			uid, targetUid, targetUid, uid).
+		Where("id NOT IN (?)", chatHiddenQuery(uid)).
 		Where("id > ?", afterSeq).
 		Order("id asc").Limit(limit + 1).Find(&rows).Error
 	if err != nil {
@@ -622,8 +760,37 @@ func (this *ChatMessages) Revoke(uid, msgId int) (map[string]any, error) {
 	return chatMessageMap(&message), nil
 }
 
-// Pat - 拍一拍：往会话里写一条系统消息（msg_type = pat）
+// Delete - 删除一条消息（只对自己生效）
 //
+// 与 Revoke 的区别：
+//   - 撤回：清空内容并广播给对方，双方都看到「撤回了一条消息」；
+//   - 删除：只把这条消息从「我的」历史里藏起来，对方的记录完全不动。
+//
+// 因此这里不删消息行、也不改内容，只写一条 (uid, msg_id) 记录；
+// 历史 / 补拉 / 未读数都会带上过滤条件（见 chatHiddenQuery）。
+func (this *ChatMessages) Delete(uid, msgId int) error {
+
+	if uid <= 0 || msgId <= 0 {
+		return errors.New("参数不完整！")
+	}
+
+	var message ChatMessages
+	if err := facade.DB.Drive().Where("id = ?", msgId).First(&message).Error; err != nil || message.Id <= 0 {
+		return errors.New("消息不存在！")
+	}
+	if message.SendUid != uid && message.ReceiveUid != uid {
+		return errors.New("无权删除该消息！")
+	}
+
+	row := ChatMessageDeletes{Uid: uid, MsgId: msgId}
+	if err := facade.DB.Drive().Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+		facade.Log.Error(map[string]any{"error": err, "uid": uid, "msg_id": msgId}, "删除私信消息失败")
+		return errors.New("删除失败，请稍后重试！")
+	}
+
+	return nil
+}
+
 // 不做真实推送弹窗，只作为聊天记录里的一行灰色提示，
 // 这样「谁拍了谁、拍了什么」双方都能在历史里回看。
 func (this *ChatMessages) Pat(fromUid, toUid int, suffix string) (map[string]any, error) {
@@ -649,7 +816,7 @@ func (this *ChatMessages) Pat(fromUid, toUid int, suffix string) (map[string]any
 		return nil, errors.New("拍得太快啦，歇一下再拍！")
 	}
 
-	return this.Send(fromUid, toUid, "pat", suffix, "")
+	return this.Send(fromUid, toUid, "pat", suffix, "", 0)
 }
 
 // refreshConversationSummary - 重新计算会话的最后一条消息摘要
@@ -693,6 +860,7 @@ func (this *ChatMessages) UnreadTotal(uid int) int64 {
 	}
 	count, _ := facade.DB.Model(&ChatMessages{}).
 		Where("receive_uid = ? AND is_read = 0", uid).
+		Where("id NOT IN (?)", chatHiddenQuery(uid)).
 		Count()
 	return count
 }
@@ -713,6 +881,7 @@ func (this *ChatMessages) unreadByConversation(uid int, ids []int) map[int]int64
 	err := facade.DB.Drive().Model(&ChatMessages{}).
 		Select("conversation_id, COUNT(*) AS total").
 		Where("receive_uid = ? AND is_read = 0 AND conversation_id IN ?", uid, ids).
+		Where("id NOT IN (?)", chatHiddenQuery(uid)).
 		Group("conversation_id").
 		Scan(&rows).Error
 	if err != nil {
@@ -752,19 +921,60 @@ func (this *ChatConversations) ListMine(uid, limit int) []map[string]any {
 
 	unread := (&ChatMessages{}).unreadByConversation(uid, ids)
 
+	// 批量取「各会话最后一条是否被我删除」：一次 IN 查询，避免会话列表 N+1
+	hiddenLast := make(map[int]bool)
+	lastIds := make([]int, 0, len(rows))
+	for _, item := range rows {
+		if item.LastMsgId > 0 {
+			lastIds = append(lastIds, item.LastMsgId)
+		}
+	}
+	if len(lastIds) > 0 {
+		var hidden []struct{ MsgId int }
+		_ = facade.DB.Drive().Model(&ChatMessageDeletes{}).
+			Select("msg_id").
+			Where("uid = ? AND msg_id IN ?", uid, lastIds).
+			Scan(&hidden).Error
+		for _, item := range hidden {
+			hiddenLast[item.MsgId] = true
+		}
+	}
+
 	list := make([]map[string]any, 0, len(rows))
 	for _, item := range rows {
 		other := item.TargetUid
 		if item.Uid != uid {
 			other = item.Uid
 		}
+
+		lastMsgId, lastText := item.LastMsgId, item.LastText
+		lastUid, lastTime := item.LastUid, item.LastTime
+
+		// 会话摘要存在会话表里、是双方共用的：如果最后一条正好被我删了，
+		// 我这一侧的列表不能继续显示那条内容（否则删了还在），
+		// 但又不能改表（会把对方的摘要一起改掉），所以只在本人的列表里回退到
+		// 「我还能看到的上一条」。对方看到的摘要不受影响。
+		if lastMsgId > 0 && hiddenLast[lastMsgId] {
+			lastMsgId, lastText, lastUid, lastTime = 0, "", 0, 0
+			var last ChatMessages
+			if err := facade.DB.Drive().
+				Where("conversation_id = ?", item.Id).
+				Where("id NOT IN (?)", chatHiddenQuery(uid)).
+				Order("id desc").First(&last).Error; err == nil && last.Id > 0 {
+				lastMsgId = last.Id
+				lastText = ChatPreview(last.MsgType, last.Content)
+				lastUid = last.SendUid
+				lastTime = last.CreateTime
+			}
+		}
+
 		list = append(list, map[string]any{
 			"id":          item.Id,
 			"other_uid":   other,
-			"last_msg_id": item.LastMsgId,
-			"last_text":   item.LastText,
-			"last_uid":    item.LastUid,
-			"last_time":   item.LastTime,
+			"last_msg_id": lastMsgId,
+			"last_text":   lastText,
+			"last_uid":    lastUid,
+			"last_time":   lastTime,
 			"unread":      unread[item.Id],
 		})
 	}
@@ -779,6 +989,7 @@ func (this *ChatMessages) ConversationUnread(uid, targetUid int) int64 {
 	}
 	count, _ := facade.DB.Model(&ChatMessages{}).
 		Where("receive_uid = ? AND send_uid = ? AND is_read = 0", uid, targetUid).
+		Where("id NOT IN (?)", chatHiddenQuery(uid)).
 		Count()
 	return count
 }
