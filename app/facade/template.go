@@ -11,6 +11,9 @@ port        = 8642
 debug       = false
 # 登录token名称（别乱改，别作死）
 token_name  = "INIS_LOGIN_TOKEN"
+# 后台管理会话的 cookie 名：与前台 token 分开存，
+# 即使前台登录态泄露也换不到后台入口（进入后台需重新输密码）
+admin_token_name = "INIS_ADMIN_TOKEN"
 # 主题路由回退（history 模式 SPA）时忽略的路径前缀，多个用英文逗号分隔
 # /assets 为后端静态资源（表情、随机头像等），/static 为主题构建产物的静态目录
 theme_ignore_prefix = "/api,/dev,/socket,/assets,/static"
@@ -398,4 +401,7 @@ const TempCrypt = `# ======== 加密配置 ========
 # 会话有效期(秒) - 支持算式，如 "15 * 24 * 60 * 60" 表示 15 天
 # 滑动续期：最后活跃时间 + 有效期
 expire   = "${session.expire}"
+# 后台管理会话有效期(秒) - 与前台会话完全独立，默认 2 小时
+# 后台会话能调管理接口，有效期刻意更短；过期后需在后台重新输入一次密码
+admin_expire = "2 * 60 * 60"
 `

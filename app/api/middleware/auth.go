@@ -22,10 +22,26 @@ const (
 	// Rule() 依据接口类型决定是否因此拒绝请求：
 	// 公共接口（type=common）不受无效凭证影响，需登录的接口才会 401。
 	authErrorKey = "auth_error"
+	// userScopeKey 当前身份的来源作用域（user / admin），供日志与排查使用
+	userScopeKey = "auth_scope"
+	// 后台管理界面标记：前端在 /admin 路径下给所有请求附加。
+	// 带这个标记的请求只认「后台管理会话」，前台 token 一律不参与鉴权。
+	adminPanelHeader = "X-Requested-With"
+	adminPanelFlag   = "inis-admin"
 )
 
 var getTokenName = func() string {
 	return cast.ToString(facade.AppToml.Get(tokenNameKey, defaultTokenName))
+}
+
+// getAdminTokenName 后台管理会话的 cookie 名（与前台 token 分开）
+var getAdminTokenName = func() string {
+	return facade.AdminTokenName()
+}
+
+// isAdminRequest 是否为后台管理界面发起的请求
+func isAdminRequest(ctx *gin.Context) bool {
+	return ctx.GetHeader(adminPanelHeader) == adminPanelFlag
 }
 
 // getTokenFromHeaderOrCookie 从请求头或 Cookie 中获取登录凭证（服务端会话 id）
@@ -55,6 +71,9 @@ func tokenFingerprint(token string) map[string]any {
 func authErrorMessage(ctx *gin.Context, err error) string {
 	if err == nil {
 		return facade.Lang(ctx, "禁止非法操作！")
+	}
+	if errors.Is(err, facade.ErrAdminSessionRequired) {
+		return facade.Lang(ctx, "进入后台需要重新验证密码！")
 	}
 	if errors.Is(err, facade.ErrSessionInvalid) {
 		return facade.Lang(ctx, "登录已过期，请重新登录！")
@@ -161,12 +180,12 @@ func abortWithError(ctx *gin.Context, tokenName string, code int, msg string) {
 	ctx.Abort()
 }
 
-// authenticateToken - 校验登录凭证并取回用户
+// authenticateToken - 校验指定作用域的登录凭证并取回用户
 //
 // 凭证是服务端会话 id（缓存里的 session:{sid}）。取到会话后统一做：
 // 密码哈希校验（改密 / 重置密码后旧会话立即失效）与状态校验（冻结 / 封禁）。
-func authenticateToken(token string) (map[string]any, error) {
-	identity, err := facade.AuthenticateToken(token)
+func authenticateToken(token, scope string) (map[string]any, error) {
+	identity, err := facade.AuthenticateSession(token, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +218,17 @@ func authenticateToken(token string) (map[string]any, error) {
 //
 // 注意：项目已完全移除 JWT，凭证是 Redis 里的服务端会话 id（见 facade/session.go），
 // 旧 JWT token 不再被接受，升级后所有用户需要重新登录一次。
+//
+// 后台管理界面（/admin，请求带 X-Requested-With: inis-admin）走另一条判定：
+// 只认后台管理会话（独立 cookie + scope=admin），**完全不看前台 token**。
+// 这样即使前台登录态被 XSS / 共享电脑 / 代理日志拿到，也进不了后台。
 func Auth() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+		if isAdminRequest(ctx) {
+			authAdmin(ctx)
+			return
+		}
+
 		token := getTokenFromHeaderOrCookie(ctx, getTokenName())
 
 		if utils.Is.Empty(token) {
@@ -208,7 +236,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		user, err := authenticateToken(token)
+		user, err := authenticateToken(token, facade.SessionScopeUser)
 		if err != nil {
 			// 会话过期 / 被踢属于正常现象，不刷 warn 日志；其它异常保留排查上下文
 			if !errors.Is(err, facade.ErrSessionInvalid) {
@@ -220,6 +248,36 @@ func Auth() gin.HandlerFunc {
 		}
 
 		ctx.Set("user", user)
+		ctx.Set(userScopeKey, facade.SessionScopeUser)
 		ctx.Next()
 	}
+}
+
+// authAdmin - 后台管理界面的身份识别（只读后台管理会话）
+//
+// 读不到 / 校验不通过时把错误暂存 ctx[authErrorKey] 交给 Rule()：
+// 后台请求的失败一律回 auth:"admin"（见 rule.go），前端据此弹「重新验证密码」，
+// 而不是把用户整体登出。
+func authAdmin(ctx *gin.Context) {
+	token, _ := ctx.Cookie(getAdminTokenName())
+	if utils.Is.Empty(token) {
+		ctx.Set(authErrorKey, facade.ErrAdminSessionRequired)
+		ctx.Next()
+		return
+	}
+
+	user, err := authenticateToken(token, facade.SessionScopeAdmin)
+	if err != nil {
+		// 会话过期 / 被踢属于正常现象，不刷 warn 日志；其它异常保留排查上下文
+		if !errors.Is(err, facade.ErrSessionInvalid) {
+			logAuthFailure(ctx, token, err)
+		}
+		ctx.Set(authErrorKey, err)
+		ctx.Next()
+		return
+	}
+
+	ctx.Set("user", user)
+	ctx.Set(userScopeKey, facade.SessionScopeAdmin)
+	ctx.Next()
 }

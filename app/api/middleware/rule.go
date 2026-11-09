@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -63,14 +64,20 @@ func isCommonRoute(ruleType string) bool {
 // 带着旧 token 的用户永远登不进来（表现为登录接口返回 401、点「登录」毫无反应）。
 // 这里对公开接口兜一层，保证鉴权链路本身可用；权限收敛仍以 auth_rules 为准。
 var publicRoutes = map[string]bool{
-	"POST /api/comm/login":            true,
-	"POST /api/comm/sign-code":        true, // 验证码登录（邮箱/手机号 + 验证码）
-	"POST /api/comm/register":         true,
-	"POST /api/comm/check-token":      true,
-	"POST /api/comm/reset-password":   true,
-	"POST /api/comm/logout":           true,
-	"DELETE /api/comm/logout":         true,
-	"GET /api/comm/captcha":           true, // 滑块验证题（发送验证码防刷用）
+	"POST /api/comm/login":          true,
+	"POST /api/comm/sign-code":      true, // 验证码登录（邮箱/手机号 + 验证码）
+	"POST /api/comm/register":       true,
+	"POST /api/comm/check-token":    true,
+	"POST /api/comm/reset-password": true,
+	"POST /api/comm/logout":         true,
+	"DELETE /api/comm/logout":       true,
+	"GET /api/comm/captcha":         true, // 滑块验证题（发送验证码防刷用）
+	// 后台管理会话：签发 / 校验 / 退出都靠 cookie 自身证明身份，
+	// 且必须在「还没拿到后台会话」时就可用，因此免登录（真正的门槛是密码 + 后台页面权限）
+	"POST /api/comm/admin-login":    true,
+	"POST /api/comm/admin-check":    true,
+	"POST /api/comm/admin-logout":   true,
+	"DELETE /api/comm/admin-logout": true,
 	// 第三方登录（QQ / GitHub / Gitee）：
 	// 换身份 + 发 token 都在这里完成，本身即身份证明，必须免登录；
 	// 与「已登录用户」相关的绑定 / 解绑 / 我的绑定不在白名单里（走 type=login 规则）
@@ -126,6 +133,23 @@ func Rule() gin.HandlerFunc {
 		if isCommonRoute(ruleType) || isPublicRoute(ctx) {
 			ctx.Next()
 			return
+		}
+
+		// 后台管理界面（scope=admin）：鉴权失败一律回 auth:"admin"，
+		// 前端据此弹「重新验证密码」并重放请求，而不是把用户整体登出。
+		// 同时清掉失效的后台 cookie，避免后续每个请求都带着它重复失败。
+		if isAdminRequest(ctx) {
+			if authErr, ok := ctx.Get(authErrorKey); ok {
+				err, _ := authErr.(error)
+				msg := authErrorMessage(ctx, err)
+				if errors.Is(err, facade.ErrSessionInvalid) || errors.Is(err, facade.ErrAdminSessionRequired) {
+					msg = facade.Lang(ctx, "进入后台需要重新验证密码！")
+				}
+				ctx.SetCookie(getAdminTokenName(), "", -1, "/", "", false, false)
+				ctx.JSON(200, gin.H{"code": 401, "msg": msg, "data": nil, "auth": "admin"})
+				ctx.Abort()
+				return
+			}
 		}
 
 		// 以下分支均要求有效登录身份：

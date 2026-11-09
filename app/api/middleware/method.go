@@ -39,7 +39,7 @@ func Method() gin.HandlerFunc {
 			return
 		}
 
-		user, err := authenticateToken(token)
+		user, err := authenticateToken(token, facade.SessionScopeUser)
 		if err != nil {
 			if !errors.Is(err, facade.ErrSessionInvalid) {
 				logAuthFailure(ctx, token, err)

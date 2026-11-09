@@ -544,8 +544,18 @@ func createAuthRules() (result []AuthRules) {
 				"path=check-token&name=校验登录&type=common",
 				"path=reset-password&name=重置密码&type=common",
 				"path=logout&name=退出登录&type=common",
+				// 后台管理会话：独立 cookie + scope=admin，需「有后台页面权限」的账号
+				// 重新输入密码才能签发（见 controller/comm.go 的 adminLogin）。
+				// 之所以标 common：签发时用户手里还没有后台会话，必须免登录才调得到，
+				// 真正的门槛是「密码 + 后台页面权限」，不是登录态。
+				"path=admin-login&name=签发后台管理会话&type=common",
+				"path=admin-check&name=校验后台管理会话&type=common",
+				"path=admin-logout&name=退出后台管理会话&type=common",
 			},
-			"DELETE": {"path=logout&name=退出登录&type=common"},
+			"DELETE": {
+				"path=logout&name=退出登录&type=common",
+				"path=admin-logout&name=退出后台管理会话&type=common",
+			},
 		},
 		"oauth": {
 			// 第三方登录（QQ / GitHub / Gitee）：

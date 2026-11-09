@@ -5,7 +5,9 @@ package facade
  *
  * 项目已彻底移除 JWT，登录态完全由这里的服务端会话承担：
  *   - 令牌 = 32 字节随机数的 base64url（sid），不含 uid / 密码哈希，泄露也解析不出任何信息；
- *   - 会话数据存缓存（生产必须是 Redis）：session:{sid} → {uid, hash, ver, ip, agent, created_at, last_seen, expire_at}；
+ *   - 会话数据存缓存（生产必须是 Redis）：session:{sid} → {uid, scope, hash, ver, ip, agent, created_at, last_seen, expire_at}；
+ *   - 会话分作用域（scope）：user = 前台登录态，admin = 后台管理会话。
+ *     两者 cookie 不同、有效期不同、互不通用，后台会话必须重新输密码才能签发；
  *   - 退出登录 / 改密 / 封禁 / 管理员强制下线 = 删除 session 或把用户会话版本号 +1，立即生效；
  *   - 滑动续期：请求间隔超过 1 小时才回写一次，避免每个请求都写 Redis。
  *
@@ -37,10 +39,28 @@ const (
 	SessionVerPrefix = "session:ver:"
 	// DefaultSessionExpire 默认会话有效期：15 天（与旧 JWT 保持一致）
 	DefaultSessionExpire = "15 * 24 * 60 * 60"
+	// DefaultAdminSessionExpire 默认后台管理会话有效期：2 小时
+	// （后台会话可动配置与用户数据，有效期刻意远短于前台，过期需重新输密码）
+	DefaultAdminSessionExpire = "2 * 60 * 60"
+	// DefaultAdminTokenName 后台管理会话的默认 cookie 名（与前台 token 分开）
+	DefaultAdminTokenName = "INIS_ADMIN_TOKEN"
 	// sessionTouchInterval 滑动续期的最小间隔（秒）
 	sessionTouchInterval = int64(3600)
 	// sessionVerTTL 版本号保留时长：足够长，避免版本号过期后「旧会话复活」
 	sessionVerTTL = 10 * 365 * 24 * time.Hour
+)
+
+// 会话作用域：前台会话与后台管理会话完全独立
+//
+// 为什么要分：前台登录态（INIS_LOGIN_TOKEN）是长期挂在浏览器上的，
+// 一旦被 XSS / 共享电脑 / 代理日志拿到，就等于拿到了后台入口。
+// 后台另建一条会话（独立 cookie + scope=admin），
+// 只有「有后台页面权限」的账号重新输入密码才能签发，并且可以单独撤销 / 单独过期。
+const (
+	// SessionScopeUser 前台会话
+	SessionScopeUser = "user"
+	// SessionScopeAdmin 后台管理会话
+	SessionScopeAdmin = "admin"
 )
 
 // ErrSessionInvalid 会话不存在 / 已过期 / 已被踢下线
@@ -49,9 +69,16 @@ var ErrSessionInvalid = errors.New("会话已失效，请重新登录")
 // ErrSessionStore 会话存储不可用（缓存写入失败）
 var ErrSessionStore = errors.New("会话存储不可用")
 
+// ErrAdminSessionRequired 后台管理会话缺失 / 已失效，需要重新验证密码
+//
+// 与 ErrSessionInvalid 分开：前台会话过期只需重新登录，
+// 后台会话过期要再输一次密码（见 controller/comm.go 的 adminLogin）。
+var ErrAdminSessionRequired = errors.New("进入后台需要重新验证密码")
+
 // Session 一条服务端会话
 type Session struct {
 	Uid       int    `json:"uid"`        // 用户 id
+	Scope     string `json:"scope"`      // 会话作用域：user 前台 / admin 后台
 	Hash      string `json:"hash"`       // 登录时的密码哈希（改密后旧会话立即失效）
 	Ver       int    `json:"ver"`        // 创建时的用户会话版本号（强制下线时 +1）
 	Ip        string `json:"ip"`         // 登录 IP（仅记录，不强制校验）
@@ -69,6 +96,7 @@ type Session struct {
 func (this Session) toMap() map[string]any {
 	return map[string]any{
 		"uid":        this.Uid,
+		"scope":      this.Scope,
 		"hash":       this.Hash,
 		"ver":        this.Ver,
 		"ip":         this.Ip,
@@ -82,12 +110,53 @@ func (this Session) toMap() map[string]any {
 // AuthIdentity 会话校验结果
 type AuthIdentity struct {
 	Uid   int    // 用户 id
+	Scope string // 会话作用域：user 前台 / admin 后台
 	Hash  string // 登录时的密码哈希（调用方应据此校验密码是否已变更）
 	Valid int64  // 剩余有效期（秒）
 	Sid   string // 会话 id
 }
 
 var sessionWarnOnce sync.Once
+
+// normalizeScope 归一化会话作用域
+//
+// 空值按前台处理：升级前已落缓存的会话没有 scope 字段，
+// 不归一化会全部因为「作用域不匹配」被判失效，导致所有在线用户被踢下线。
+func normalizeScope(scope string) string {
+	if strings.TrimSpace(scope) == SessionScopeAdmin {
+		return SessionScopeAdmin
+	}
+	return SessionScopeUser
+}
+
+// AdminTokenName 后台管理会话的 cookie 名
+func AdminTokenName() string {
+	name := strings.TrimSpace(cast.ToString(AppToml.Get("app.admin_token_name", "")))
+	if utils.Is.Empty(name) {
+		name = DefaultAdminTokenName
+	}
+	return name
+}
+
+// SessionExpireFor 指定作用域的会话有效期（秒）
+//
+// 后台读取 crypt.toml 的 session.admin_expire（默认 2 小时），未配置时回落到前台有效期。
+func SessionExpireFor(scope string) int64 {
+	if normalizeScope(scope) != SessionScopeAdmin {
+		return SessionExpire()
+	}
+
+	raw := cast.ToString(CryptToml.Get("session.admin_expire", ""))
+	if utils.Is.Empty(raw) {
+		raw = DefaultAdminSessionExpire
+	}
+
+	expire := cast.ToInt64(utils.Calc(raw))
+	if expire <= 0 {
+		expire = cast.ToInt64(utils.Calc(DefaultAdminSessionExpire))
+	}
+	return expire
+}
 
 // SessionExpire 会话有效期（秒）
 //
@@ -141,10 +210,20 @@ func SessionVersion(uid int) int {
 	return cast.ToInt(Cache.Get(sessionVerKey(uid)))
 }
 
-// SessionLogin 登录成功后创建会话，返回 (sid, 有效期秒数, error)
+// SessionLogin 登录成功后创建「前台会话」，返回 (sid, 有效期秒数, error)
 //
 // hash 传 utils.Hash.Sum32(数据库里的密码哈希)：改密后该值变化，旧会话在下次校验时失效。
 func SessionLogin(uid int, hash, ip, agent string) (string, int64, error) {
+	return SessionLoginScope(SessionScopeUser, uid, hash, ip, agent)
+}
+
+// SessionLoginScope 按作用域创建会话，返回 (sid, 有效期秒数, error)
+//
+// scope=admin 的会话是后台专用的另一条登录态（独立 cookie + 独立有效期），
+// 只能通过「有后台页面权限的账号重新输入密码」签发（见 controller/comm.go 的 adminLogin）。
+func SessionLoginScope(scope string, uid int, hash, ip, agent string) (string, int64, error) {
+	scope = normalizeScope(scope)
+
 	if uid <= 0 {
 		return "", 0, ErrSessionInvalid
 	}
@@ -168,10 +247,11 @@ func SessionLogin(uid int, hash, ip, agent string) (string, int64, error) {
 		return "", 0, ErrSessionStore
 	}
 
-	expire := SessionExpire()
+	expire := SessionExpireFor(scope)
 	now := time.Now().Unix()
 	session := Session{
 		Uid:       uid,
+		Scope:     scope,
 		Hash:      hash,
 		Ver:       SessionVersion(uid),
 		Ip:        ip,
@@ -204,6 +284,7 @@ func SessionGet(sid string) (Session, bool) {
 	data := cast.ToStringMap(item)
 	session := Session{
 		Uid:       cast.ToInt(data["uid"]),
+		Scope:     normalizeScope(cast.ToString(data["scope"])),
 		Hash:      cast.ToString(data["hash"]),
 		Ver:       cast.ToInt(data["ver"]),
 		Ip:        cast.ToString(data["ip"]),
@@ -226,7 +307,9 @@ func SessionTouch(sid string, session Session) {
 		return
 	}
 
-	expire := SessionExpire()
+	// 按会话自身的作用域续期：后台会话必须继续用「短有效期」，
+	// 用前台有效期续期会让后台会话悄悄变成 15 天
+	expire := SessionExpireFor(session.Scope)
 	session.LastSeen = now
 	session.ExpireAt = now + expire
 
@@ -264,10 +347,22 @@ func SessionDestroyUser(uid int) bool {
 	return true
 }
 
-// AuthenticateToken 校验登录凭证（只认服务端会话）
+// AuthenticateToken 校验「前台会话」凭证（只认服务端会话）
 //
 // 返回的身份信息只做「你是谁」，用户状态（冻结 / 封禁）与密码哈希校验由调用方完成。
 func AuthenticateToken(token string) (AuthIdentity, error) {
+	return AuthenticateSession(token, SessionScopeUser)
+}
+
+// AuthenticateSession 校验指定作用域的会话凭证
+//
+// 作用域必须严格匹配：前台会话（cookie 长期挂在浏览器上）不能当作后台会话使用，
+// 后台会话也不用于前台接口 —— 两条登录态的泄露面相互独立。
+// 作用域不匹配时**不销毁**该会话（它本身是合法的，只是用错了地方），
+// 否则前台随手带上后台 cookie 就会把后台会话烧掉。
+func AuthenticateSession(token, scope string) (AuthIdentity, error) {
+	scope = normalizeScope(scope)
+
 	token = strings.TrimSpace(token)
 	if utils.Is.Empty(token) {
 		return AuthIdentity{}, ErrSessionInvalid
@@ -275,6 +370,10 @@ func AuthenticateToken(token string) (AuthIdentity, error) {
 
 	session, ok := SessionGet(token)
 	if !ok {
+		return AuthIdentity{}, ErrSessionInvalid
+	}
+
+	if session.Scope != scope {
 		return AuthIdentity{}, ErrSessionInvalid
 	}
 
@@ -301,6 +400,7 @@ func AuthenticateToken(token string) (AuthIdentity, error) {
 
 	return AuthIdentity{
 		Uid:   session.Uid,
+		Scope: session.Scope,
 		Hash:  session.Hash,
 		Valid: valid,
 		Sid:   token,
@@ -309,7 +409,12 @@ func AuthenticateToken(token string) (AuthIdentity, error) {
 
 // SessionCookieExpire Cookie 的 Max-Age 取值（秒）
 func SessionCookieExpire() int {
-	expire := SessionExpire()
+	return SessionCookieExpireFor(SessionScopeUser)
+}
+
+// SessionCookieExpireFor 指定作用域的 Cookie Max-Age（秒）
+func SessionCookieExpireFor(scope string) int {
+	expire := SessionExpireFor(scope)
 	if expire <= 0 {
 		expire = cast.ToInt64(utils.Calc(DefaultSessionExpire))
 	}

@@ -376,6 +376,75 @@
 
 ---
 
+## 后台管理会话（scope=admin）
+
+后台登录态与前台登录态是**两条完全独立的会话**：
+
+| | 前台会话 | 后台管理会话 |
+| :--- | :--- | :--- |
+| cookie | `INIS_LOGIN_TOKEN`（`app.token_name`） | `INIS_ADMIN_TOKEN`（`app.admin_token_name`），HttpOnly |
+| 作用域 | `scope=user` | `scope=admin` |
+| 有效期 | `crypt.toml` 的 `session.expire`（默认 15 天） | `crypt.toml` 的 `session.admin_expire`（默认 2 小时） |
+| 签发条件 | 账号 + 密码 / 验证码 | **已登录 + 重新输入密码 + 有后台页面权限** |
+
+设计动因：前台登录态长期挂在浏览器上，一旦被 XSS / 共享电脑 / 代理日志拿到就等于拿到后台入口。
+后台另建一条会话后，拿到前台 token 的人并不知道密码，因此换不出后台会话；
+两条会话可单独撤销、单独过期（改密 / 封禁 / 踢下线通过会话版本号同时失效）。
+
+> 前端 `/admin` 下的所有请求会带 `X-Requested-With: inis-admin`，
+> 后端据此**只认后台会话**（前台 token 完全不参与鉴权，见 `app/api/middleware/auth.go`）。
+> 后台请求鉴权失败时统一返回 `{ code: 401, auth: "admin", msg: "..." }`，
+> 前端据此弹「重新验证密码」而不是把用户整体登出。
+
+### 9. 签发后台管理会话 [admin-login]
+
+- **请求方式**: `POST`
+- **请求地址**: `/api/comm/admin-login`
+- **权限**: `type=common`（真正的门槛是密码 + 后台页面权限）
+
+- **身份来源**: 前台会话（请求头 `Authorization` 或 cookie `INIS_LOGIN_TOKEN`）
+
+**请求参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `password` | string | 是 | 当前账号的登录密码（重新输入） |
+
+**成功响应**:
+
+```json
+{ "code": 200, "msg": "验证成功！", "data": { "valid_time": 7200 } }
+```
+
+响应会 `Set-Cookie` 写入 `INIS_ADMIN_TOKEN`（HttpOnly）。
+
+**失败响应**:
+
+| code | msg | 说明 |
+| :--- | :--- | :--- |
+| 401 | 登录已过期，请重新登录！ | 前台会话无效，需要先登录 |
+| 400 | 密码错误！ | 密码不正确 |
+| 403 | 当前账号没有后台管理权限！ | 账号不属于 root 分组，所在分组也没有后台页面权限 |
+| 403 | 账号已被冻结 / 被封禁… | 与前台登录同一套拦截口径 |
+
+### 10. 校验后台管理会话 [admin-check]
+
+- **请求方式**: `POST`
+- **请求地址**: `/api/comm/admin-check`
+
+成功返回 `{ "code": 200, "data": { "valid_time": 剩余秒数 } }`；
+会话缺失 / 失效 / 密码已变更 / 后台权限被回收时返回 `{ "code": 401, "auth": "admin" }`（权限回收为 403）。
+
+### 11. 退出后台管理会话 [admin-logout]
+
+- **请求方式**: `DELETE`（`POST` 亦可）
+- **请求地址**: `/api/comm/admin-logout`
+
+删除后台会话并清除 `INIS_ADMIN_TOKEN`，**不影响前台登录态**。
+`DELETE /api/comm/logout`（退出登录）会连带结束后台会话。
+
+---
+
 ## 特殊说明
 - 登录支持密码密文解密（通过X-Gorgon、X-Khronos、X-Argus请求头）
 - 注册需先发送验证码（不传code参数），再提交验证码完成注册

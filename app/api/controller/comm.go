@@ -5,6 +5,7 @@ import (
 	"inis/app/facade"
 	"inis/app/model"
 	"inis/app/validator"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -52,6 +53,10 @@ func (this *Comm) IPOST(ctx *gin.Context) {
 		"check-token":    this.checkToken,
 		"reset-password": this.resetPassword,
 		"logout":         this.logout,
+		// 后台管理会话（与前台会话完全独立）
+		"admin-login":  this.adminLogin,
+		"admin-check":  this.adminCheck,
+		"admin-logout": this.adminLogout,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -81,7 +86,8 @@ func (this *Comm) IDEL(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"logout": this.logout,
+		"logout":       this.logout,
+		"admin-logout": this.adminLogout,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -1157,12 +1163,197 @@ func (this *Comm) logout(ctx *gin.Context) {
 	}
 	facade.SessionDestroy(token)
 
+	// 后台管理会话一并结束：否则退出前台登录后后台登录态还在，等于没退出
+	adminToken, _ := ctx.Cookie(facade.AdminTokenName())
+	facade.SessionDestroy(adminToken)
+	clearAdminToken(ctx)
+
 	// 清除 cookie：domain 必须与登录时 setToken 的 domain 一致，否则无法清除
 	// 同时兼容带域名和空域名两种写法
 	ctx.SetCookie(tokenName, "", -1, "/", host, false, false)
 	ctx.SetCookie(tokenName, "", -1, "/", "", false, false)
 
 	this.json(ctx, nil, facade.Lang(ctx, "退出成功！"), 200)
+}
+
+// ============================== 后台管理会话 ==============================
+//
+// 前台登录态（INIS_LOGIN_TOKEN）长期挂在浏览器上，一旦被 XSS / 共享电脑 /
+// 代理日志拿到，就等于拿到了后台入口。后台因此另建一条会话：
+//   - 独立 cookie（INIS_ADMIN_TOKEN）+ scope=admin，与前台会话互不通用；
+//   - 有效期更短（crypt.toml 的 session.admin_expire，默认 2 小时）；
+//   - 必须由「有后台页面权限」的账号**重新输入一次密码**才能签发；
+//   - 退出登录 / 改密 / 封禁时与前台会话一起失效（SessionDestroyUser 走版本号）。
+
+// adminLogin - 签发后台管理会话
+//
+// 身份来自前台会话（Authorization 或 INIS_LOGIN_TOKEN），但必须重新提交密码：
+// 拿到前台 token 的人（例如 XSS）并不知道密码，因此无法自己换出后台会话。
+func (this *Comm) adminLogin(ctx *gin.Context) {
+
+	tokenName := cast.ToString(facade.AppToml.Get("app.token_name", "INIS_LOGIN_TOKEN"))
+	token := ctx.Request.Header.Get("Authorization")
+	if utils.Is.Empty(token) {
+		token, _ = ctx.Cookie(tokenName)
+	}
+
+	// 只认前台会话：后台会话不能用来续签自己
+	//
+	// 前台会话失效返回 400（不是 401）：前端在后台密码弹窗里再试一次即可，
+	// 回 401 会被全局拦截器当成「登录态异常」，把用户整体登出并弹「需要手动清除 cookie」。
+	identity, err := facade.AuthenticateToken(token)
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, "登录已过期，请重新登录！"), 400)
+		return
+	}
+
+	params := this.params(ctx)
+	password := cast.ToString(params["password"])
+	if utils.Is.Empty(password) {
+		this.json(ctx, nil, facade.Lang(ctx, "请输入登录密码！"), 400)
+		return
+	}
+
+	table := model.Users{}
+	item, _ := facade.DB.Model(&table).Where("id", identity.Uid).Find()
+	if utils.Is.Empty(item) || table.Id <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "用户不存在！"), 404)
+		return
+	}
+
+	if utils.Is.Empty(table.Password) {
+		this.json(ctx, nil, facade.Lang(ctx, "该帐号未设置密码，无法进入后台！"), 400)
+		return
+	}
+
+	// 重新验证密码：这是「后台入口」的唯一凭证，失败不做任何暗示性提示
+	if !utils.Password.Verify(table.Password, password) {
+		facade.Log.Warn(map[string]any{"uid": table.Id, "ip": ctx.ClientIP()}, "后台管理会话验证失败：密码错误")
+		this.json(ctx, nil, facade.Lang(ctx, "密码错误！"), 400)
+		return
+	}
+
+	// 只有「有后台页面权限」的账号才允许签发（root 分组 / 权限组配置了后台页面）
+	if !backendUser(table.Id) {
+		this.json(ctx, nil, facade.Lang(ctx, "当前账号没有后台管理权限！"), 403)
+		return
+	}
+
+	// 冻结 / 待审核 / 封禁限制登录：与前台登录同一套拦截口径
+	if !this.assertLoginAllowed(ctx, table) {
+		return
+	}
+
+	sid, expire, err := facade.SessionLoginScope(
+		facade.SessionScopeAdmin,
+		table.Id,
+		utils.Hash.Sum32(table.Password),
+		ctx.ClientIP(),
+		ctx.Request.UserAgent(),
+	)
+	if err != nil {
+		facade.Log.Error(map[string]any{"uid": table.Id, "error": err.Error()}, "创建后台管理会话失败")
+		this.json(ctx, nil, facade.Lang(ctx, "验证失败，请稍后重试！"), 500)
+		return
+	}
+
+	setAdminToken(ctx, sid)
+
+	facade.Log.Info(map[string]any{
+		"uid":   table.Id,
+		"ip":    ctx.ClientIP(),
+		"agent": ctx.Request.UserAgent(),
+	}, "已签发后台管理会话")
+
+	this.json(ctx, gin.H{
+		"valid_time": expire,
+	}, facade.Lang(ctx, "验证成功！"), 200)
+}
+
+// adminCheck - 校验后台管理会话是否有效（前端进入后台前调用）
+func (this *Comm) adminCheck(ctx *gin.Context) {
+
+	token, _ := ctx.Cookie(facade.AdminTokenName())
+	if utils.Is.Empty(token) {
+		jsonAdminAuthRequired(ctx, "进入后台需要重新验证密码！")
+		return
+	}
+
+	identity, err := facade.AuthenticateSession(token, facade.SessionScopeAdmin)
+	if err != nil {
+		clearAdminToken(ctx)
+		jsonAdminAuthRequired(ctx, "进入后台需要重新验证密码！")
+		return
+	}
+
+	table := model.Users{}
+	item, _ := facade.DB.Model(&table).Where("id", identity.Uid).Find()
+	if utils.Is.Empty(item) {
+		clearAdminToken(ctx)
+		jsonAdminAuthRequired(ctx, "用户不存在！")
+		return
+	}
+
+	// 改密 / 重置密码后旧会话立即失效（与中间件同一口径）
+	if utils.Hash.Sum32(item["password"]) != identity.Hash {
+		facade.SessionDestroy(identity.Sid)
+		clearAdminToken(ctx)
+		jsonAdminAuthRequired(ctx, "进入后台需要重新验证密码！")
+		return
+	}
+
+	// 权限被回收（分组里已没有后台页面）时不再续用
+	if !backendUser(identity.Uid) {
+		facade.SessionDestroy(identity.Sid)
+		clearAdminToken(ctx)
+		this.json(ctx, nil, facade.Lang(ctx, "当前账号没有后台管理权限！"), 403)
+		return
+	}
+
+	this.json(ctx, gin.H{
+		"valid_time": identity.Valid,
+	}, facade.Lang(ctx, "管理会话有效！"), 200)
+}
+
+// jsonAdminAuthRequired 后台管理会话失效的专用响应
+//
+// auth 必须放在**响应体顶层**（与 middleware/rule.go 的 401 保持一致）：
+// 前端 api/request.js 靠 `data.auth === 'admin'` 判断「该弹密码框」，
+// 而 base.json() 只会把内容塞进 data 里 —— 那样会被当成普通 401，
+// 触发「登录状态异常，需要手动清除 cookie」的登出弹窗（后台进不去、前台登录态也被清掉）。
+func jsonAdminAuthRequired(ctx *gin.Context, msg string) {
+	ctx.JSON(http.StatusOK, gin.H{
+		"code": 401,
+		"msg":  facade.Lang(ctx, msg),
+		"data": nil,
+		"auth": "admin",
+	})
+}
+
+// adminLogout - 结束后台管理会话（只退后台，不影响前台登录态）
+func (this *Comm) adminLogout(ctx *gin.Context) {
+
+	token, _ := ctx.Cookie(facade.AdminTokenName())
+	facade.SessionDestroy(token)
+	clearAdminToken(ctx)
+
+	this.json(ctx, nil, facade.Lang(ctx, "已退出后台！"), 200)
+}
+
+// setAdminToken 写入后台管理会话 cookie
+//
+// HttpOnly：前端不需要读它（请求会自动带上），脚本读不到 → XSS 也偷不走后台会话。
+// path 用 "/"：与前台 cookie 一致，避免按路径分叉后 401 时清不掉。
+// Secure：HTTPS（含反代回源）下才加，避免后台会话在明文链路里被顺带传出去。
+func setAdminToken(ctx *gin.Context, token string) {
+	expire := facade.SessionCookieExpireFor(facade.SessionScopeAdmin)
+	secure := ctx.Request.TLS != nil || strings.EqualFold(ctx.GetHeader("X-Forwarded-Proto"), "https")
+	ctx.SetCookie(facade.AdminTokenName(), token, expire, "/", "", secure, true)
+}
+
+// clearAdminToken 清除后台管理会话 cookie（删除只按 name+domain+path 匹配，HttpOnly 不影响）
+func clearAdminToken(ctx *gin.Context) {
+	ctx.SetCookie(facade.AdminTokenName(), "", -1, "/", "", false, false)
 }
 
 // 设置登录token到客户的cookie中
