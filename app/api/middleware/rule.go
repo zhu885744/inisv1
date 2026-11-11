@@ -9,7 +9,6 @@ import (
 	"inis/app/facade"
 	"inis/app/model"
 	"strings"
-	"sync"
 )
 
 const cacheRulePrefix = "rule[%v][%v]"
@@ -107,23 +106,13 @@ func isLoginRoute(ruleType string) bool {
 // Rule - 规则校验中间件
 func Rule() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		async := sync.WaitGroup{}
-		async.Add(2)
+		// 同步执行即可：两个查询都在毫秒以内（规则走缓存命中、用户来自 ctx），
+		// 为它们各开一个 goroutine + WaitGroup 反而多两次调度和栈分配，
+		// 实现上还引入了跨 goroutine 共享变量的隐式依赖。
+		user := getUserFromContext(ctx)
 
-		var user model.Users
-		go func(async *sync.WaitGroup) {
-			defer async.Done()
-			user = getUserFromContext(ctx)
-		}(&async)
-
-		var rule map[string]any
-		go func(async *sync.WaitGroup) {
-			defer async.Done()
-			rule = getRuleFromCache(ctx)
-			ctx.Set("route", rule)
-		}(&async)
-
-		async.Wait()
+		rule := getRuleFromCache(ctx)
+		ctx.Set("route", rule)
 
 		ruleType := cast.ToString(rule["type"])
 

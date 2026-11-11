@@ -106,6 +106,8 @@ func InitTable() {
 		{"ChatMessageDeletes", InitChatMessageDeletes},
 		// 同步水位（每会话每用户一条：ACK / 已读的最大 seq）
 		{"ChatStates", InitChatStates},
+		// 会话偏好（每会话每用户一条：置顶 / 免打扰，属于个人视图设置）
+		{"ChatConversationPrefs", InitChatConversationPrefs},
 		// 公共聊天室：房间（初始化时确保 id=1 存在）/ 消息 / 禁言
 		{"ChatRooms", InitChatRooms},
 		{"ChatRoomMessages", InitChatRoomMessages},

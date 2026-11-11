@@ -179,12 +179,25 @@ func (this *Room) send(ctx *gin.Context) {
 
 	params := this.params(ctx)
 
+	// @提及：客户端从在线成员里选中的人。这里只做「去重 + 限量」，
+	// 昵称是否真的出现在正文里由 model 层核对（不信任客户端）
+	mentionUids := make([]int, 0, model.ChatRoomMentionMax)
+	for _, id := range cast.ToIntSlice(params["mention_uids"]) {
+		if id > 0 {
+			mentionUids = append(mentionUids, id)
+		}
+		if len(mentionUids) >= model.ChatRoomMentionMax {
+			break
+		}
+	}
+
 	message, err := (&model.ChatRoomMessages{}).Send(
 		uid,
 		strings.TrimSpace(cast.ToString(params["msg_type"])),
 		cast.ToString(params["content"]),
 		strings.TrimSpace(cast.ToString(params["client_msg_id"])),
 		cast.ToInt(params["quote_id"]),
+		mentionUids...,
 	)
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)

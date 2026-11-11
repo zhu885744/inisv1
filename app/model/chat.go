@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -122,6 +123,24 @@ type ChatStates struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
+// ChatConversationPrefs - 单个用户对某个会话的偏好（置顶 / 免打扰）
+//
+// 为什么单独一张表：chat_conversations 是双方共用的一行，摘要、最后时间都必须一致；
+// 而「置顶」「免打扰」纯属个人视图，A 把会话置顶不应该影响 B 的列表顺序。
+// 唯一索引 (uid, conversation_id) 保证一人一档，读写都只碰自己那一行。
+//
+// 这两项都不参与未读统计：免打扰只是「不响铃、不弹通知」，未读角标照常累加，
+// 否则用户会以为消息丢了。
+type ChatConversationPrefs struct {
+	Id             int   `gorm:"type:int(32); comment:主键;" json:"id"`
+	Uid            int   `gorm:"type:int(32); uniqueIndex:uk_chat_conversation_prefs,priority:1; comment:用户;" json:"uid"`
+	ConversationId int   `gorm:"type:int(32); uniqueIndex:uk_chat_conversation_prefs,priority:2; comment:会话ID;" json:"conversation_id"`
+	Pinned         int   `gorm:"type:tinyint(1); default:0; comment:是否置顶;" json:"pinned"`
+	Muted          int   `gorm:"type:tinyint(1); default:0; comment:是否免打扰;" json:"muted"`
+	CreateTime     int64 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime     int64 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+}
+
 // AfterFind - 查询Hook
 func (this *ChatMessages) AfterFind(tx *gorm.DB) (err error) {
 	this.Text = cast.ToString(this.Text)
@@ -150,6 +169,12 @@ func InitChatStates() {
 func InitChatMessageDeletes() {
 	if err := facade.DB.Drive().AutoMigrate(&ChatMessageDeletes{}); err != nil {
 		facade.Log.Error(map[string]any{"error": err}, "ChatMessageDeletes表迁移失败")
+	}
+}
+
+func InitChatConversationPrefs() {
+	if err := facade.DB.Drive().AutoMigrate(&ChatConversationPrefs{}); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "ChatConversationPrefs表迁移失败")
 	}
 }
 
@@ -915,7 +940,82 @@ func (this *ChatMessages) unreadByConversation(uid int, ids []int) map[int]int64
 	return result
 }
 
-// ListMine - 我的会话列表（按最后消息时间倒序）
+// chatPrefsOf - 批量取「我对这些会话」的偏好（一次 IN 查询，避免会话列表 N+1）
+func chatPrefsOf(uid int, ids []int) map[int]ChatConversationPrefs {
+
+	result := make(map[int]ChatConversationPrefs)
+	if uid <= 0 || len(ids) == 0 {
+		return result
+	}
+
+	var rows []ChatConversationPrefs
+	if err := facade.DB.Drive().Model(&ChatConversationPrefs{}).
+		Where("uid = ? AND conversation_id IN ?", uid, ids).
+		Find(&rows).Error; err != nil {
+		return result
+	}
+
+	for _, row := range rows {
+		result[row.ConversationId] = row
+	}
+
+	return result
+}
+
+// SetPref - 设置我对某个会话的置顶 / 免打扰
+//
+// 用 ON CONFLICT 一条 SQL 完成「没有就插、有就改」：这两个开关是高频小操作，
+// 先查再写会多一次往返；冲突键只包含自己那一行，不会影响到对方。
+// values 里没出现的字段保持不变（只传 pinned 时 muted 不会被清掉）。
+func (this *ChatConversations) SetPref(uid, targetUid int, values map[string]any) (map[string]any, error) {
+
+	if uid <= 0 || targetUid <= 0 || uid == targetUid {
+		return nil, errors.New("参数不完整！")
+	}
+
+	conversationId := chatConversationId(uid, targetUid)
+	if conversationId <= 0 {
+		// 没有会话就没有「最后一条消息」可展示，置顶一行空气没有意义
+		return nil, errors.New("你们还没有会话，先聊一句再设置！")
+	}
+
+	row := ChatConversationPrefs{Uid: uid, ConversationId: conversationId}
+	assign := map[string]any{"update_time": time.Now().Unix()}
+
+	if value, ok := values["pinned"]; ok {
+		if cast.ToBool(value) {
+			row.Pinned = 1
+		}
+		assign["pinned"] = row.Pinned
+	}
+
+	if value, ok := values["muted"]; ok {
+		if cast.ToBool(value) {
+			row.Muted = 1
+		}
+		assign["muted"] = row.Muted
+	}
+
+	if err := facade.DB.Drive().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "uid"}, {Name: "conversation_id"}},
+		DoUpdates: clause.Assignments(assign),
+	}).Create(&row).Error; err != nil {
+		facade.Log.Error(map[string]any{"error": err, "uid": uid, "conversation_id": conversationId}, "保存私信会话偏好失败")
+		return nil, errors.New("设置失败，请稍后重试！")
+	}
+
+	// 回读一次：冲突走 UPDATE 时 row 里只有本次提交的字段，未提交的那项还是 0，
+	// 直接返回会把「本来开着」的开关说成关着的
+	current := chatPrefsOf(uid, []int{conversationId})[conversationId]
+
+	return map[string]any{
+		"conversation_id": conversationId,
+		"pinned":          current.Pinned,
+		"muted":           current.Muted,
+	}, nil
+}
+
+// ListMine - 我的会话列表（置顶优先，其余按最后消息时间倒序）
 //
 // 返回结构（other_uid 已换算成「对方」，前端不用再关心表里谁是 uid 谁是 target_uid）：
 //
@@ -929,10 +1029,17 @@ func (this *ChatConversations) ListMine(uid, limit int) []map[string]any {
 		limit = 50
 	}
 
+	// 多取一些再排序：置顶的会话可能已经很旧，如果只按 last_time 取前 limit 条，
+	// 它根本进不了候选集，「置顶」就失效了。会话总数通常远小于 4 倍上限。
+	fetchLimit := limit * 4
+	if fetchLimit > 200 {
+		fetchLimit = 200
+	}
+
 	var rows []ChatConversations
 	_ = facade.DB.Drive().
 		Where("uid = ? OR target_uid = ?", uid, uid).
-		Order("last_time desc").Limit(limit).Find(&rows).Error
+		Order("last_time desc").Limit(fetchLimit).Find(&rows).Error
 
 	ids := make([]int, 0, len(rows))
 	for _, item := range rows {
@@ -959,6 +1066,8 @@ func (this *ChatConversations) ListMine(uid, limit int) []map[string]any {
 			hiddenLast[item.MsgId] = true
 		}
 	}
+
+	prefs := chatPrefsOf(uid, ids)
 
 	list := make([]map[string]any, 0, len(rows))
 	for _, item := range rows {
@@ -988,6 +1097,8 @@ func (this *ChatConversations) ListMine(uid, limit int) []map[string]any {
 			}
 		}
 
+		pref := prefs[item.Id]
+
 		list = append(list, map[string]any{
 			"id":          item.Id,
 			"other_uid":   other,
@@ -996,7 +1107,22 @@ func (this *ChatConversations) ListMine(uid, limit int) []map[string]any {
 			"last_uid":    lastUid,
 			"last_time":   lastTime,
 			"unread":      unread[item.Id],
+			// 置顶 / 免打扰是「我这一侧」的视图设置，前端只用来排序与抑制提醒
+			"pinned": pref.Pinned == 1,
+			"muted":  pref.Muted == 1,
 		})
+	}
+
+	// 置顶优先，其余保持 SQL 的 last_time 倒序（SliceStable 不会打乱相同置顶状态的顺序）
+	sort.SliceStable(list, func(i, j int) bool {
+		if cast.ToBool(list[i]["pinned"]) != cast.ToBool(list[j]["pinned"]) {
+			return cast.ToBool(list[i]["pinned"])
+		}
+		return cast.ToInt64(list[i]["last_time"]) > cast.ToInt64(list[j]["last_time"])
+	})
+
+	if len(list) > limit {
+		list = list[:limit]
 	}
 
 	return list

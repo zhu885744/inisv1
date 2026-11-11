@@ -63,6 +63,11 @@ type client struct {
 	uid atomic.Int64
 	// 最后活跃时间（Unix 秒，原子操作避免并发读写竞争）
 	lastActive atomic.Int64
+	// 最后一次上报「正在输入」的时间（Unix 毫秒）
+	//
+	// 输入状态是高频事件（每敲几个字一次），必须服务端也节流：
+	// 只靠前端节流，改一下客户端就能把 hub 的 notice 通道打满。
+	lastTyping atomic.Int64
 }
 
 // push - 非阻塞投递一条出站消息
@@ -298,6 +303,22 @@ type hub struct {
 	// 跨实例消息（redis pub/sub 订阅侧投递进来，只做本地分发、不再二次发布，见 cluster.go）
 	cluster     chan []byte
 	clusterKick chan string
+	// statusDirty - 在线列表已变更、待推送（只在 hub goroutine 内读写）
+	//
+	// 连接 / 断开 / 身份升级都会改变在线列表。原实现每次都立刻把「全量在线列表」
+	// 推给所有人，单次重连的流量是 O(N²)：500 人在线时一次重连要序列化并下发
+	// 500 条各含 500 个条目的消息。改为标脏 + 定时合并（statusTicker），
+	// 同一时间窗口内的多次变更合并成一次推送。
+	statusDirty bool
+	// statusTicker - 在线状态的合并推送节奏
+	statusTicker *time.Ticker
+	// clientSnap - 在线客户端 ID 的只读快照（原子替换）
+	//
+	// clients 只允许 hub goroutine 读写；其它 goroutine（如 Online 控制器的
+	// 统计方法）必须读这份快照，直接 range clients 会与 hub goroutine 形成数据竞争。
+	clientSnap atomic.Pointer[[]string]
+	// refresh 请求刷新在线状态（任意 goroutine 可投递，由 hub goroutine 处理）
+	refresh chan struct{}
 }
 
 // IP封禁记录
@@ -327,6 +348,8 @@ var Hub = func() *hub {
 		ipBanRecords:         make(map[string]*ipBanRecord),
 		cluster:              make(chan []byte, 1024),
 		clusterKick:          make(chan string, 256),
+		statusTicker:         time.NewTicker(2 * time.Second),
+		refresh:              make(chan struct{}, 16),
 		ackTimeout:           time.Duration(cast.ToInt(getSocketConfig("ack_timeout", 10))) * time.Second,
 		maxRetries:           cast.ToInt(getSocketConfig("max_retries", 3)),
 		offlineMsgTTL:        time.Duration(cast.ToInt(getSocketConfig("offline_msg_ttl", 300))) * time.Second,
@@ -640,7 +663,9 @@ func (hub *hub) ValidateMessage(message []byte) (bool, string) {
 	}
 
 	msgType := cast.ToString(content["type"])
-	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification", "auth"}
+	// typing - 「正在输入」：纯瞬时状态，不走中继结构（见 client.relayTyping），
+	// 所以只在这里放行，不需要 to（聊天室广播）也允许带 to（私聊定向）
+	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification", "auth", "typing"}
 	found := false
 	for _, t := range allowedTypes {
 		if t == msgType {

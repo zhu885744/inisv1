@@ -233,8 +233,8 @@ func (this *Moments) one(ctx *gin.Context) {
 		msg[0] = "数据请求成功！"
 	}
 
-	// 更新动态浏览量
-	go this.updateViews(ctx, cast.ToStringMap(data))
+	// 更新动态浏览量：参数在请求期内取好再交给 goroutine
+	go this.updateViews(ctx.ClientIP(), ctx.Request.UserAgent(), cast.ToStringMap(data))
 
 	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
 	data = applyScopeData(ctx, data, "moments")
@@ -1085,13 +1085,14 @@ func (this *Moments) setTop(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids, "top": isTop}, facade.Lang(ctx, topLabel+"成功！"), 200)
 }
 
-func (this *Moments) updateViews(ctx *gin.Context, data map[string]any) {
+// updateViews - 浏览计数（参数为请求期快照）
+//
+// 由 goroutine 执行，不能持有 *gin.Context（池化复用，异步读会与下一个请求竞争）。
+func (this *Moments) updateViews(ip, userAgent string, data map[string]any) {
 	if utils.Is.Empty(data["id"]) {
 		return
 	}
 
-	ip := ctx.ClientIP()
-	userAgent := ctx.Request.UserAgent()
 	momentID := cast.ToString(data["id"])
 
 	deviceKey := ip + userAgent

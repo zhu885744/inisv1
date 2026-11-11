@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ func init() {
 	// 机审撤回消息后要就地推给双方。model 不能反过来 import 本包（会循环依赖），
 	// 所以由这里把推送能力注入进去；未注入时撤回只改库，刷新后也能看到
 	model.PushChatRevoke = PushPrivate
+	// 聊天室被 @ 时给被提及者推一条提醒（同样走 dispatch 的 chat_mention 分支）
+	model.PushChatMention = PushPrivate
 }
 
 // PushPrivate - 把一条私聊消息推给指定用户（供 API 控制器调用）
@@ -184,6 +187,62 @@ func (this *client) applyChatWatermark(item map[string]any, read bool) {
 	}
 
 	(&model.ChatStates{}).Ack(uid, targetUid, seq)
+}
+
+// typingIntervalMs - 同一连接两次「正在输入」的最小间隔（毫秒）
+//
+// 前端已经做了 3 秒节流，这里再兜一道：输入状态丢了不影响任何数据，
+// 但把 notice 通道打满会拖慢真正的私信与聊天室消息，所以宁可多丢几条。
+const typingIntervalMs int64 = 1500
+
+// relayTyping - 转发「正在输入」状态
+//
+// 两种形态：
+//   - 带 to：私聊，只投递给对方的所有设备（多端在线时每台都要看到提示）；
+//   - 带 room=true：聊天室，广播给所有在线连接，前端按 uid 过滤掉自己。
+//
+// 只发 uid 不带昵称：昵称由前端从在线成员快照里查，
+// 避免服务端为了一个瞬时事件去读用户表（这里每秒可能有几十次调用）。
+func (this *client) relayTyping(item map[string]any) {
+
+	uid := int(this.uid.Load())
+	if uid <= 0 {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	if last := this.lastTyping.Load(); last > 0 && now-last < typingIntervalMs {
+		return
+	}
+	this.lastTyping.Store(now)
+
+	if cast.ToBool(item["room"]) {
+		BroadcastRoom(map[string]any{
+			"type": "room_typing",
+			"data": map[string]any{"uid": uid},
+		})
+		return
+	}
+
+	targetUid := chatTargetUid(cast.ToString(item["to"]))
+	if targetUid <= 0 || targetUid == uid {
+		return
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"type": "chat_typing",
+		"to":   fmt.Sprintf("user_%d", targetUid),
+		"data": map[string]any{"from_uid": uid},
+	})
+	if err != nil {
+		return
+	}
+
+	// 与 PushPrivate 同样的超时保护：hub 正忙时不能把这个读协程挂住
+	select {
+	case Hub.notice <- payload:
+	case <-time.After(500 * time.Millisecond):
+	}
 }
 
 // persistPrivate - 把 socket 收到的私聊消息落库，返回规范化后的消息结构

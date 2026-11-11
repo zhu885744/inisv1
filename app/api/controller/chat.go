@@ -33,6 +33,7 @@ import (
  *   POST chat/delete         删除一条消息（只对自己生效，对方记录不动）
  *   PUT  chat/ack            批量确认「已收到 seq 及之前的消息」（水位只增不减）
  *   PUT  chat/read           把某人的消息标记为已读
+ *   PUT  chat/pref           设置会话置顶 / 免打扰（只影响自己）
  *
  * 权限：全部 type=login（私聊是用户之间的基础能力，不设权限点）。
  * 发送门槛：拉黑与「仅互关好友」统一走 model.ChatPermission，
@@ -101,6 +102,7 @@ func (this *Chat) IPUT(ctx *gin.Context) {
 	allow := map[string]any{
 		"ack":  this.ack,
 		"read": this.read,
+		"pref": this.pref,
 	}
 	err := this.call(allow, method, ctx)
 	if err != nil {
@@ -465,6 +467,50 @@ func (this *Chat) ack(ctx *gin.Context) {
 	lastAck := (&model.ChatStates{}).Ack(uid, targetUid, seq)
 
 	this.json(ctx, gin.H{"last_ack_seq": lastAck}, facade.Lang(ctx, "已确认！"), 200)
+}
+
+// pref - 设置某个会话的置顶 / 免打扰
+//
+// 这两个开关只影响自己：
+//   - pinned：会话列表里排到最前；
+//   - muted：收到新消息照常计未读，但不响提示音、不弹悬浮 / 桌面通知。
+//
+// 只接受这两个字段，且至少传一个；未传的字段保持原值（见 model.SetPref）。
+func (this *Chat) pref(ctx *gin.Context) {
+
+	uid := this.user(ctx).Id
+	if uid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
+		return
+	}
+
+	params := this.params(ctx)
+
+	targetUid := cast.ToInt(params["target_uid"])
+	if targetUid <= 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "target_uid"), 400)
+		return
+	}
+
+	values := map[string]any{}
+	if _, ok := params["pinned"]; ok {
+		values["pinned"] = params["pinned"]
+	}
+	if _, ok := params["muted"]; ok {
+		values["muted"] = params["muted"]
+	}
+	if len(values) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "没有需要修改的内容！"), 400)
+		return
+	}
+
+	result, err := (&model.ChatConversations{}).SetPref(uid, targetUid, values)
+	if err != nil {
+		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
+		return
+	}
+
+	this.json(ctx, result, facade.Lang(ctx, "设置成功！"), 200)
 }
 
 // read - 标记某人的消息为已读

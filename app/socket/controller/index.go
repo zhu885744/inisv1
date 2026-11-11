@@ -221,6 +221,14 @@ func (this *client) read() {
 				continue
 			}
 
+			// 「正在输入」：纯瞬时事件，不落库、不走离线缓存。
+			// 放在通用转发之前处理，是因为它既可能带 to（私聊），
+			// 也可能不带（聊天室全员广播），通用分支对这两种形态都有额外校验。
+			if msgType == "typing" {
+				this.relayTyping(item)
+				continue
+			}
+
 			// 转发类消息的身份要求（防止匿名的跨连接投递）：
 			//   - 全站广播只给管理员，否则任意游客都能向所有在线连接下发任意内容；
 			//   - 定向消息要求已登录，否则游客可以往 user_<uid>（可枚举）投递伪造的私信。
@@ -323,6 +331,14 @@ func (this *client) handleAuth(token string) {
 		return
 	}
 
+	// 账号状态校验（冻结 / 封禁登录）：与 HTTP 侧 Auth 中间件同一口径。
+	// 否则被封禁的账号只要连上 WebSocket、不再发 HTTP 请求，就能继续收发私信。
+	if accountBlocked(userMap) {
+		socketLog("auth 账号已被冻结或限制登录: %s", this.info.ID)
+		this.reply(map[string]any{"type": "error", "content": "账号状态异常，请联系管理员"})
+		return
+	}
+
 	// 提交身份升级请求给 hub.run（统一在 hub goroutine 内更新，避免并发读写）
 	this.hub.upgrade <- &clientUpgrade{
 		client:   this,
@@ -330,6 +346,34 @@ func (this *client) handleAuth(token string) {
 		username: cast.ToString(userMap["nickname"]),
 		isAdmin:  model.IsRootAdmin(uid),
 	}
+}
+
+// accountBlocked 账号是否被冻结 / 封禁登录
+//
+// 与 HTTP 侧 middleware.validateUserStatus 同一口径：WebSocket 也必须拦，
+// 否则封禁只对 HTTP 生效。
+func accountBlocked(user map[string]any) bool {
+	if cast.ToInt(user["status"]) == model.UserStatusFrozen {
+		return true
+	}
+
+	// 封禁限制位里没有「限制登录」就直接放行
+	if cast.ToInt(user["restrictions"])&model.BanTypeLogin == 0 {
+		return false
+	}
+
+	banId := cast.ToInt(user["current_ban_id"])
+	if banId <= 0 {
+		return false
+	}
+
+	banRecord, _ := facade.DB.Model(&model.UserBanRecords{}).Find(banId)
+	if utils.Is.Empty(banRecord) {
+		return false
+	}
+
+	// 申诉中 / 申诉驳回期间封禁继续生效（只有真正解封才放行）
+	return model.BanStatusRestricted(cast.ToInt(cast.ToStringMap(banRecord)["status"]))
 }
 
 // write - 唯一的写协程
@@ -425,7 +469,7 @@ func (hub *hub) run() {
 
 			hub.recordConnection()
 			client.push([]byte(`{"type":"connect","content":"连接成功","id":"` + client.info.ID + `"}`))
-			hub.broadcastStatus()
+			hub.markStatusChanged()
 			socketLog("当前在线人数: %d", len(hub.clients))
 		case client := <-hub.close:
 			socketLog("客户端断开连接: %s", client.info.ID)
@@ -473,14 +517,51 @@ func (hub *hub) run() {
 				}
 			}
 			socketLog("客户端身份升级: %s (uid=%d, 管理员=%v)", up.client.info.ID, up.uid, up.isAdmin)
-			hub.broadcastStatus()
+			hub.markStatusChanged()
+		case <-hub.statusTicker.C:
+			// 合并推送：连接 / 断开 / 身份升级只标脏，由这里按固定节奏统一广播一次，
+			// 避免每次连接都把全量在线列表推给所有人（O(N²) 流量）
+			if hub.statusDirty {
+				hub.statusDirty = false
+				hub.broadcastStatus()
+			}
+		case <-hub.refresh:
+			// 其它 goroutine 请求刷新在线状态（见 Online.BroadcastOnlineStatus）
+			hub.markStatusChanged()
 		}
 	}
 }
 
-// 广播在线状态
+// markStatusChanged - 在线列表发生变更：刷新只读快照并标记待推送
+//
+// 只在 hub goroutine 内调用。快照供其它 goroutine 安全读取（见 clientIDs），
+// 推送由 statusTicker 合并（见 hub.run），避免每次连接都全量广播。
+func (hub *hub) markStatusChanged() {
+	ids := make([]string, 0, len(hub.clients))
+	for id := range hub.clients {
+		ids = append(ids, id)
+	}
+	hub.clientSnap.Store(&ids)
+	hub.statusDirty = true
+}
+
+// clientIDs 在线客户端 ID 快照（任意 goroutine 可安全调用）
+func (hub *hub) clientIDs() []string {
+	if snap := hub.clientSnap.Load(); snap != nil {
+		return *snap
+	}
+	return nil
+}
+
+// broadcastStatus 立即广播一次在线状态
+//
+// 只允许在 hub goroutine 内调用（会遍历 clients）。
 func (hub *hub) broadcastStatus() {
-	// 收集在线用户信息（用户名/访客 + 脱敏 IP + 活跃时间）
+	// 收集在线用户信息（用户名/访客 + 脱敏 IP + 活跃时间 + uid）
+	//
+	// 带上 uid 是为了让聊天室能展示在线成员并按人 @：
+	// 跨域场景下连接 ID 是 guest_xxx（身份是后来 auth 升级的），
+	// 只靠 id 前缀区分不出「这是哪位登录用户」。
 	onlineUsers := make([]map[string]any, 0, len(hub.clients))
 	for _, client := range hub.clients {
 		name := client.username
@@ -489,6 +570,7 @@ func (hub *hub) broadcastStatus() {
 		}
 		onlineUsers = append(onlineUsers, map[string]any{
 			"id":          client.info.ID,
+			"uid":         int(client.uid.Load()),
 			"name":        name,
 			"ip":          maskIP(client.ip),
 			"last_active": client.lastActive.Load(),
@@ -594,7 +676,7 @@ func (hub *hub) dropClient(client *client) {
 		return
 	}
 
-	hub.broadcastStatus()
+	hub.markStatusChanged()
 	hub.recordDisconnection()
 
 	if state, ok := hub.clientStates[client.info.ID]; ok {
@@ -602,13 +684,11 @@ func (hub *hub) dropClient(client *client) {
 		go hub.cleanupClientStateAfterTimeout(client.info.ID)
 	}
 
-	for ip, conn := range hub.ipConnections {
-		for _, cid := range conn.clientIds {
-			if cid == client.info.ID {
-				hub.removeIPConnection(ip, client.info.ID)
-				break
-			}
-		}
+	// 按连接自身的 IP 精确摘除。
+	// 原实现遍历整个 ipConnections（O(全部在线 IP)）去找这条连接，
+	// 每次断开都要把全表的 clientIds 扫一遍；client.ip 在握手时就记下了，直接用它。
+	if client.ip != "" {
+		hub.removeIPConnection(client.ip, client.info.ID)
 	}
 
 	socketLog("当前在线人数: %d", len(hub.clients))
@@ -765,8 +845,16 @@ func (hub *hub) dispatch(message []byte, allowOffline bool) {
 	case strings.HasPrefix(msgType, "room"):
 		// 公共聊天室：消息与各类事件（撤回 / 禁言 / 解禁 / 改资料）都是全员可见，
 		// 直接广播给所有在线连接；离线用户进房间时拉历史即可。
+		// room_typing（正在输入）也走这里，前端按 uid 过滤掉自己。
 		hub.recordMessage("broadcast")
 		hub.broadcast(message)
+	case msgType == "chat_typing" || msgType == "chat_mention":
+		// 私聊的「正在输入」与被 @ 提醒：都是一次性事件，
+		// 只投给目标用户当前在线的设备，不做离线缓存（缓存了重连才收到也没意义）
+		hub.recordMessage("single")
+		if targetUid := chatTargetUid(cast.ToString(content["to"])); targetUid > 0 {
+			hub.deliverUser(targetUid, message)
+		}
 	}
 }
 

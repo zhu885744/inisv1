@@ -162,7 +162,7 @@ func (this *Docs) one(ctx *gin.Context) {
 
 	// 浏览量：与文章一致，同一 IP + UA 每天只计一次（后台预览不计）
 	if !isAdminPreview {
-		go this.updateViews(ctx, item.Id)
+		go this.updateViews(ctx.ClientIP(), ctx.Request.UserAgent(), item.Id)
 	}
 
 	this.json(ctx, this.buildDetail(item), facade.Lang(ctx, "数据请求成功！"), 200)
@@ -753,12 +753,13 @@ func (this *Docs) feedback(ctx *gin.Context) {
 //
 // 与文章（app/api/controller/article.go 的 updateViews）保持同一套口径：
 // 用 IP + UA 的 md5 做访客标识，缓存 24 小时，命中即跳过。
-func (this *Docs) updateViews(ctx *gin.Context, id int) {
+// updateViews - 文档浏览计数（参数为请求期快照，由 goroutine 执行）
+func (this *Docs) updateViews(ip, userAgent string, id int) {
 	if id <= 0 {
 		return
 	}
 
-	deviceKey := ctx.ClientIP() + ctx.Request.UserAgent()
+	deviceKey := ip + userAgent
 	hash := md5.Sum([]byte(deviceKey))
 	cacheKey := fmt.Sprintf("docs_views_cd:%d:%x", id, hash)
 

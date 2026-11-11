@@ -332,6 +332,42 @@ func (c *CommStruct) SanitizeURL(input string) string {
 	return c.SanitizeHTML(value)
 }
 
+// ============================== 富文本注入检测 ==============================
+
+// 富文本内联脚本特征
+//
+// 与 DetectXSS 的区别：DetectXSS 把 <img> / <style> / <iframe> 一律当高危，
+// 用在文章正文上会误杀正常排版。这里只盯「真正能执行脚本」的四类载荷，
+// 其余富文本标签一律放行。
+var (
+	// <script> 标签本身
+	richScriptTagRegex = regexp.MustCompile(`(?is)<\s*script[\s>/]`)
+	// on* 事件属性：
+	//   1) 常规写法 <img src=x onerror=...>，属性前是空白；
+	//   2) 自闭合绕过 <svg/onload=...>，属性前是紧跟标签名的斜杠。
+	// 两种情况都不会把 URL 里的 ?once= 这类查询参数误判成属性。
+	richEventAttrRegex = regexp.MustCompile(`(?is)<[a-z][^>]*\son[a-z]{3,}\s*=|<[a-z][a-z0-9]*\s*/on[a-z]{3,}\s*=`)
+	// javascript: / vbscript: 伪协议
+	richDangerURLRegex = regexp.MustCompile(`(?is)(?:javascript|vbscript)\s*:`)
+	// data:text/html —— 可以承载任意 HTML 的 data URI
+	richDataHTMLRegex = regexp.MustCompile(`(?is)data\s*:\s*text/html`)
+)
+
+// DetectRichTextXSS 富文本（文章正文）脚本注入检测
+//
+// 只判「可执行脚本」：<script>、on* 事件属性、javascript:/vbscript: 伪协议、
+// data:text/html。刻意不做实体解码 —— 代码块里的 &lt;script&gt; 是转义后的
+// 纯文本，必须放行；未转义的 <script> 才是真实载荷。
+func (c *CommStruct) DetectRichTextXSS(input string) bool {
+	if input == "" {
+		return false
+	}
+	return richScriptTagRegex.MatchString(input) ||
+		richEventAttrRegex.MatchString(input) ||
+		richDangerURLRegex.MatchString(input) ||
+		richDataHTMLRegex.MatchString(input)
+}
+
 // DetectXSS 高精度 XSS 检测（防绕过）
 func (c *CommStruct) DetectXSS(input string) bool {
 	if input == "" {

@@ -48,6 +48,12 @@ const (
 	// 私信只是换了个作用域。单独造一张表会出现两套解除口径、两个后台名单，
 	// 处置时要分别记两笔。这里只把作用域折进 room_id（聊天室 = 1，私信 = 0）。
 	ChatMuteDM = 0
+
+	// ChatRoomMentionMax - 一条消息最多 @ 多少人
+	//
+	// 上限不是为了省事，而是防「@全体成员」式的骚扰：一条消息 @ 几十个人，
+	// 每个人都会收到一次独立推送与提醒。
+	ChatRoomMentionMax = 5
 )
 
 // ChatRooms - 聊天室
@@ -443,7 +449,10 @@ func chatRoomQuoteMap(item *ChatRoomMessages) any {
 //
 // quoteId > 0 表示引用当前聊天室里的某条消息：服务端回查原消息并落快照
 // （存在 / 未撤回），不信任客户端传来的引用内容。
-func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string, quoteId int) (map[string]any, error) {
+//
+// mentionUids 是客户端从在线成员里选中的被 @ 用户：只用来发提醒，不进正文
+// （正文里本来就有 @昵称 文本，历史记录靠它渲染）。传空即普通消息。
+func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string, quoteId int, mentionUids ...int) (map[string]any, error) {
 
 	if uid <= 0 {
 		return nil, errors.New("请先登录后再发言！")
@@ -545,7 +554,74 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 		SubmitCloudChatAudit(SceneChat, uid, 0, row.Id, content)
 	}
 
+	// @提及：给被提到的人推一条提醒（图片消息没有正文里的 @昵称，不处理）
+	if msgType != "image" && len(mentionUids) > 0 {
+		notifyRoomMentions(uid, row.Id, content, mentionUids)
+	}
+
 	return ChatRoomMessageItem(&row), nil
+}
+
+// notifyRoomMentions - 给被 @ 的人推一条「聊天室里有人提到你」
+//
+// 客户端传来的 uid 不能直接信：任何人都能凭空指定一批 uid，
+// 那就是一条可以给任意用户发提醒的骚扰通道。这里核对两件事：
+//   - uid 真实存在（一次 IN 查询，最多 5 个）；
+//   - 正文里确实出现了「@该用户昵称」。
+//
+// 昵称不做唯一约束，所以同名的两个用户都会被提醒 —— 这是可接受的偏差，
+// 比「只提醒其中一个、另一个永远收不到」更不容易漏。
+func notifyRoomMentions(fromUid, msgId int, content string, ids []int) {
+
+	if fromUid <= 0 || msgId <= 0 || len(ids) == 0 || PushChatMention == nil {
+		return
+	}
+
+	unique := make([]int, 0, len(ids))
+	seen := make(map[int]bool, len(ids))
+	for _, uid := range ids {
+		if uid <= 0 || uid == fromUid || seen[uid] {
+			continue
+		}
+		seen[uid] = true
+		unique = append(unique, uid)
+		if len(unique) >= ChatRoomMentionMax {
+			break
+		}
+	}
+	if len(unique) == 0 {
+		return
+	}
+
+	var users []Users
+	if err := facade.DB.Drive().Model(&Users{}).
+		Select("id", "nickname").
+		Where("id IN ?", unique).Find(&users).Error; err != nil {
+		return
+	}
+
+	// 提醒里带一小段正文，让人不用切回房间就知道说了什么
+	preview := []rune(ChatPreview("text", content))
+	if len(preview) > 40 {
+		preview = append(preview[:40], '…')
+	}
+
+	for _, user := range users {
+		nickname := strings.TrimSpace(user.Nickname)
+		if nickname == "" || !strings.Contains(content, "@"+nickname) {
+			continue
+		}
+		PushChatMention(user.Id, map[string]any{
+			"type": "chat_mention",
+			"to":   fmt.Sprintf("user_%d", user.Id),
+			"data": map[string]any{
+				"room_id":    PublicRoomId,
+				"message_id": msgId,
+				"from_uid":   fromUid,
+				"preview":    string(preview),
+			},
+		})
+	}
 }
 
 // History - 往前翻历史（beforeId=0 表示取最新一页，返回值按时间正序）

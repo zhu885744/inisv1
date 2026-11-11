@@ -72,6 +72,21 @@ func (this *Article) processFieldValue(val any) any {
 	return val
 }
 
+// assertRichTextSafe - 文章标题 / 摘要 / 正文的脚本注入拦截
+//
+// 文章正文是**原样入库、原样渲染**的（富文本编辑器，不走 bluemonday 全量清洗，
+// 否则会破坏排版与图片）。因此这里只拦截「可执行脚本」载荷，命中即拒绝保存，
+// 返回 false 表示已写出响应，调用方直接 return。
+func (this *Article) assertRichTextSafe(ctx *gin.Context, fields ...any) bool {
+	for _, item := range fields {
+		if facade.Comm.DetectRichTextXSS(cast.ToString(item)) {
+			this.json(ctx, nil, facade.Lang(ctx, "内容包含可执行脚本，已被拦截！"), 400)
+			return false
+		}
+	}
+	return true
+}
+
 func (this *Article) IGET(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
@@ -213,10 +228,12 @@ func (this *Article) one(ctx *gin.Context) {
 	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
 	data = applyScopeData(ctx, data, "article")
 
-	// 更新用户经验
-	go this.updateExp(ctx, cast.ToStringMap(data))
-	// 更新文章浏览量
-	go this.updateViews(ctx, cast.ToStringMap(data))
+	// 更新用户经验 / 浏览量：参数在请求期内取好再交给 goroutine
+	//（gin 的 Context 会被池化复用，不能带进异步路径）
+	ip := ctx.ClientIP()
+	userAgent := ctx.Request.UserAgent()
+	go this.updateExp(uid, cast.ToStringMap(data))
+	go this.updateViews(ip, userAgent, cast.ToStringMap(data))
 
 	// 上一篇 / 下一篇：给详情补上相邻文章，供文末的切换按钮使用
 	data = this.withPrevNext(data)
@@ -443,6 +460,11 @@ func (this *Article) create(ctx *gin.Context) {
 	table.Content, topicIds = (&model.Topic{}).Parse(table.Content)
 	table.Tags = (&model.Topic{}).MergeTagsField(table.Tags, topicIds)
 
+	// 脚本注入拦截（正文原样入库、原样渲染，见 assertRichTextSafe）
+	if !this.assertRichTextSafe(ctx, table.Title, table.Abstract, table.Content) {
+		return
+	}
+
 	// 敏感词：文章走 review 策略 —— 命中高风险词不直接拒绝，而是进待审核，
 	// 避免「正文里出现一个词就整篇发不出去」；block / limit 规则仍然直接拒绝。
 	// warn 的提示随成功消息返回。
@@ -622,6 +644,12 @@ func (this *Article) update(ctx *gin.Context) {
 		content, topicIds := (&model.Topic{}).Parse(cast.ToString(payload["content"]))
 		payload["content"] = content
 		payload["tags"] = (&model.Topic{}).MergeTagsField(baseTags, topicIds)
+	}
+
+	// 脚本注入拦截：正文 / 标题 / 摘要任一被修改都要校验
+	// （payload 里没传的字段是 nil，cast 后为空串，不会误判）
+	if !this.assertRichTextSafe(ctx, payload["title"], payload["abstract"], payload["content"]) {
+		return
 	}
 
 	// 敏感词：只校验本次提交的字段（未改正文的编辑不会被历史内容挡住）。
@@ -979,26 +1007,28 @@ func (this *Article) restore(ctx *gin.Context) {
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
 }
 
-func (this *Article) updateExp(ctx *gin.Context, data map[string]any) {
-	user := this.meta.user(ctx)
-	if user.Id == 0 || utils.Is.Empty(data) {
+// updateExp - 浏览加经验
+//
+// 参数是调用方在请求期内取好的 uid，不持有 *gin.Context：
+// 本函数由 goroutine 执行，而 gin 的 Context 会被池化复用。
+func (this *Article) updateExp(uid int, data map[string]any) {
+	if uid == 0 || utils.Is.Empty(data) {
 		return
 	}
 	_ = (&model.EXP{}).Add(model.EXP{
-		Uid:      user.Id,
+		Uid:      uid,
 		Type:     "visit",
 		BindId:   cast.ToInt(data["id"]),
 		BindType: "article",
 	})
 }
 
-func (this *Article) updateViews(ctx *gin.Context, data map[string]any) {
+// updateViews - 浏览计数（同 updateExp，参数为请求期快照）
+func (this *Article) updateViews(ip, userAgent string, data map[string]any) {
 	if utils.Is.Empty(data["id"]) {
 		return
 	}
 
-	ip := ctx.ClientIP()
-	userAgent := ctx.Request.UserAgent()
 	articleID := cast.ToString(data["id"])
 
 	deviceKey := ip + userAgent

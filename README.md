@@ -232,6 +232,7 @@ inisv1/
 │   │   ├── auth-rules.md               # 权限规则
 │   │   ├── banner.md                   # 轮播图
 │   │   ├── base.md                     # 基础接口
+│   │   ├── chat.md                     # 用户私聊（会话 / 消息 / 撤回 / 已读 / 置顶免打扰）
 │   │   ├── checkin.md                  # 每日签到
 │   │   ├── comm.md                     # 通用（验证码、统计等）
 │   │   ├── comment.md                  # 评论
@@ -259,6 +260,7 @@ inisv1/
 │   │   ├── qps-warn.md                 # QPS 预警
 │   │   ├── report.md                   # 用户举报（提交 / 撤回 / 后台处理）
 │   │   ├── rss.md                      # RSS 订阅
+│   │   ├── room.md                     # 公共聊天室（发言 / 撤回 / 禁言 / 自动清空）
 │   │   ├── search.md                   # 搜索
 │   │   ├── stats.md                    # 数据统计（资源告警阈值）
 │   │   ├── tags.md                     # 标签（含话题主持人 / 精选字段）

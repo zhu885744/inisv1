@@ -3,6 +3,8 @@ package middleware
 import (
 	"net/netip"
 	"strings"
+	"sync"
+	"time"
 
 	"inis/app/facade"
 	"inis/app/model"
@@ -13,20 +15,55 @@ import (
 
 var cacheIpWhitePrefix = "[GET][ip-white][column]"
 
-// getWhitelist 获取白名单列表（带缓存）
+// 白名单进程内快照
+//
+// IsIpWhitelisted 在每个请求（含 JS / 图片等静态资源）上都会被调用，
+// 每次都走 Cache.Has + Cache.Get 是两次网络往返；白名单几乎不变，
+// 用 60 秒的进程内快照即可，新增白名单最多延迟一分钟生效。
+var (
+	whitelistMu     sync.RWMutex
+	whitelistItems  []string
+	whitelistLoaded time.Time
+)
+
+const whitelistTTL = 60 * time.Second
+
+// getWhitelist 获取白名单列表（进程内快照 → 缓存 → 数据库）
 func getWhitelist() []string {
+	whitelistMu.RLock()
+	if whitelistItems != nil && time.Since(whitelistLoaded) < whitelistTTL {
+		items := whitelistItems
+		whitelistMu.RUnlock()
+		return items
+	}
+	whitelistMu.RUnlock()
+
+	whitelistMu.Lock()
+	defer whitelistMu.Unlock()
+
+	if whitelistItems != nil && time.Since(whitelistLoaded) < whitelistTTL {
+		return whitelistItems
+	}
+
 	cacheName := cacheIpWhitePrefix
 	cacheState := cast.ToBool(facade.CacheToml.Get("open"))
 
+	var column []string
 	if cacheState && facade.Cache.Has(cacheName) {
-		return cast.ToStringSlice(facade.Cache.Get(cacheName))
+		column = cast.ToStringSlice(facade.Cache.Get(cacheName))
+	} else {
+		list, _ := facade.DB.Model(&model.IpWhite{}).Column("ip")
+		column = cast.ToStringSlice(utils.ArrayEmpty(utils.ArrayUnique(cast.ToStringSlice(list))))
+
+		if cacheState {
+			go facade.Cache.Set(cacheName, column)
+		}
 	}
 
-	list, _ := facade.DB.Model(&model.IpWhite{}).Column("ip")
-	column := cast.ToStringSlice(utils.ArrayEmpty(utils.ArrayUnique(cast.ToStringSlice(list))))
-
-	if cacheState {
-		go facade.Cache.Set(cacheName, column)
+	// 空结果不缓存：数据库刚启动 / 查询失败时不要把「空白名单」锁死一分钟
+	if len(column) > 0 {
+		whitelistItems = column
+		whitelistLoaded = time.Now()
 	}
 
 	return column

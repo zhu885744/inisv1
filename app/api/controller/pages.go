@@ -241,8 +241,8 @@ func (this *Pages) one(ctx *gin.Context) {
 	if !utils.Is.Empty(data) {
 		code = 200
 		msg[0] = "数据请求成功！"
-		// 更新页面浏览量
-		go this.updateViews(ctx, cast.ToStringMap(data))
+		// 更新页面浏览量（参数在请求期内取好再交给 goroutine）
+		go this.updateViews(ctx.ClientIP(), ctx.Request.UserAgent(), cast.ToStringMap(data))
 	}
 
 	// 可见范围：公开 / 登录可见 / 付费可见。无权查看时清空正文，并回传 scope_state 供前端引导
@@ -768,14 +768,12 @@ func (this *Pages) config(ctx *gin.Context) (result map[string]any) {
 	return result
 }
 
-// 更新页面浏览量
-func (this *Pages) updateViews(ctx *gin.Context, data map[string]any) {
+// 更新页面浏览量（参数为请求期快照，由 goroutine 执行，不持有 *gin.Context）
+func (this *Pages) updateViews(ip, userAgent string, data map[string]any) {
 	if utils.Is.Empty(data["id"]) {
 		return
 	}
 
-	ip := ctx.ClientIP()
-	userAgent := ctx.Request.UserAgent()
 	pageID := cast.ToString(data["id"])
 
 	deviceKey := ip + userAgent

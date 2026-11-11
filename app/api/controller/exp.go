@@ -7,7 +7,6 @@ import (
 	"inis/app/validator"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -766,11 +765,20 @@ func (this *EXP) active(ctx *gin.Context) {
 		params["end"] = end.Unix()
 	}
 
-	var table []model.EXP
+	// 原生聚合查询：直接用 Drive().Raw().Scan() 执行。
+	//
+	// 不能用 facade 的 Query()+Column() 组合 —— Query 内部把 Raw 的结果丢掉了
+	// （见 facade/mysql.go 的说明），Column 随后会重新拼成普通 SELECT，
+	// 导致这条聚合 SQL 从来没执行过，排行榜一直是空数据。
+	// 表名取自 GORM 的命名策略，自定义了表前缀也不会查错表。
+	tableName := facade.DB.Drive().NamingStrategy.TableName("EXP")
+	sql := "SELECT uid, SUM(value) AS total, COUNT(id) AS number FROM " + tableName +
+		" WHERE create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY SUM(value) DESC LIMIT ?"
 
-	sql := "SELECT uid, SUM(value) AS total, COUNT(id) as number FROM inis_exp WHERE create_time >= ? AND create_time <= ? GROUP BY uid ORDER BY SUM(value) DESC LIMIT ?"
-	total, _ := facade.DB.Model(&table).Query(sql, params["start"], params["end"], this.meta.limit(ctx)).Column("uid", "total", "number")
-	list := cast.ToSlice(total)
+	var list []map[string]any
+	if err := facade.DB.Drive().Raw(sql, params["start"], params["end"], this.meta.limit(ctx)).Scan(&list).Error; err != nil {
+		facade.Log.Error(map[string]any{"error": err.Error()}, "EXP排行榜查询失败")
+	}
 
 	cacheName := this.cache.name(ctx)
 	// 管理员能看到更完整的用户字段（权限组、封禁记录等），而缓存名只由请求参数决定，
@@ -781,29 +789,45 @@ func (this *EXP) active(ctx *gin.Context) {
 		msg[1] = "（来自缓存）"
 		data = cached
 	} else {
-		result := make([]any, len(list))
-
-		wg := sync.WaitGroup{}
-
-		for key, val := range list {
-			wg.Add(1)
-			go func(key int, val any) {
-				defer wg.Done()
-				value := cast.ToStringMap(val)
-				field := []string{"id", "nickname", "avatar", "description", "title", "gender", "result"}
-				author, _ := facade.DB.Model(&model.Users{}).Where("id", value["uid"]).Find()
-				item := facade.Comm.WithField(author, field)
-				// 分级脱敏（见 privacy.go）：排行榜会被写入共享缓存，因此不区分「本人」，
-				// 一律按他人规则处理 —— 非管理员看不到他人的登录时间（login_time）、
-				// 权限组（result.auth）与封禁记录里的操作人 IP/UA 等管理侧数据
-				this.meta.privacyUserList(ctx, item)
-				item["exp"] = cast.ToInt(value["total"])
-				item["count"] = value["number"]
-				result[key] = item
-			}(key, val)
+		// 批量取回所有上榜用户：原实现是「每人一次查询 + 一个 goroutine」，
+		// 榜单一长就是几十个并发查询，且 goroutine 数量随 limit 失控。
+		uids := make([]any, 0, len(list))
+		for _, val := range list {
+			if uid := cast.ToInt(cast.ToStringMap(val)["uid"]); uid > 0 {
+				uids = append(uids, uid)
+			}
 		}
 
-		wg.Wait()
+		field := []string{"id", "nickname", "avatar", "description", "title", "gender", "result"}
+		authors := make(map[int]map[string]any, len(uids))
+		if len(uids) > 0 {
+			rows, _ := facade.DB.Model(&[]model.Users{}).
+				WhereIn("id", uids).
+				Field(field).
+				Select()
+			for _, row := range rows {
+				authors[cast.ToInt(row["id"])] = row
+			}
+		}
+
+		result := make([]any, len(list))
+		for key, val := range list {
+			value := cast.ToStringMap(val)
+
+			author := authors[cast.ToInt(value["uid"])]
+			if author == nil {
+				author = map[string]any{}
+			}
+
+			item := facade.Comm.WithField(author, field)
+			// 分级脱敏（见 privacy.go）：排行榜会被写入共享缓存，因此不区分「本人」，
+			// 一律按他人规则处理 —— 非管理员看不到他人的登录时间（login_time）、
+			// 权限组（result.auth）与封禁记录里的操作人 IP/UA 等管理侧数据
+			this.meta.privacyUserList(ctx, item)
+			item["exp"] = cast.ToInt(value["total"])
+			item["count"] = value["number"]
+			result[key] = item
+		}
 
 		data = result
 		if cacheEnable {

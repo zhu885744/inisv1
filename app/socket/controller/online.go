@@ -5,51 +5,61 @@ import (
 )
 
 // Online - 在线状态控制器
+//
+// 注意：hub.clients 只允许 hub goroutine 读写，这里的每个方法都不能直接遍历它，
+// 一律读 clientIDs()（hub 维护的只读快照），否则会与 hub goroutine 形成
+// 数据竞争（并发读写 map 会直接 fatal）。
 type Online struct {
 	base
 }
 
 // GetOnlineUsers - 获取在线用户列表
 func (this Online) GetOnlineUsers() []string {
-	onlineUsers := []string{}
-	for clientId := range Hub.clients {
-		onlineUsers = append(onlineUsers, clientId)
-	}
-	return onlineUsers
+	return Hub.clientIDs()
 }
 
 // GetOnlineCount - 获取在线用户数量
 func (this Online) GetOnlineCount() int {
-	return len(Hub.clients)
+	return len(Hub.clientIDs())
 }
 
 // IsUserOnline - 检查用户是否在线
 func (this Online) IsUserOnline(clientId string) bool {
-	_, ok := Hub.clients[clientId]
-	return ok
+	for _, id := range Hub.clientIDs() {
+		if id == clientId {
+			return true
+		}
+	}
+	return false
 }
 
-// BroadcastOnlineStatus - 广播在线状态
+// BroadcastOnlineStatus - 请求广播一次在线状态
+//
+// 不能直接调用 hub.broadcastStatus（它会遍历 clients，只能由 hub goroutine 执行），
+// 这里投递一个刷新请求，由 hub goroutine 标脏、随定时任务合并推送。
 func (this Online) BroadcastOnlineStatus() {
-	Hub.broadcastStatus()
+	select {
+	case Hub.refresh <- struct{}{}:
+	default:
+	}
 }
 
 // PushOnlineStatus - 推送在线状态给指定客户端
 func (this Online) PushOnlineStatus(clientId string) {
-	onlineUsers := []string{}
-	for id := range Hub.clients {
-		onlineUsers = append(onlineUsers, id)
-	}
+	ids := Hub.clientIDs()
 
 	statusMsg, _ := json.Marshal(map[string]any{
-		"type": "status",
-		"content": map[string]any{
-			"online_users": onlineUsers,
-			"online_count": len(onlineUsers),
+		"type": "single",
+		"to":   clientId,
+		"data": map[string]any{
+			"online_users": ids,
+			"online_count": len(ids),
 		},
 	})
 
-	if client, ok := Hub.clients[clientId]; ok {
-		client.push(statusMsg)
+	// 走 hub 的投递通道，不直接读写 clients
+	select {
+	case Hub.notice <- statusMsg:
+	default:
 	}
 }

@@ -19,6 +19,13 @@ import (
 // 未注入时（例如离线任务）只改库，对方下次拉历史就能看到「已撤回」。
 var PushChatRevoke func(targetUid int, payload map[string]any)
 
+// PushChatMention - 聊天室 @提及 的实时推送钩子
+//
+// 与 PushChatRevoke 同样的注入方式（model ← socket 的单向依赖），
+// 由 app/socket/controller 在 init 里赋值为 socket.PushPrivate。
+// 未注入时提及只落库、不提醒，消息本身不受影响。
+var PushChatMention func(targetUid int, payload map[string]any)
+
 /**
  * 云端内容审核（异步兜底）
  *

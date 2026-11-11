@@ -52,7 +52,10 @@ func Cors() gin.HandlerFunc {
 
 		header.Set("Access-Control-Max-Age", strconv.Itoa(maxAge))
 		header.Set("Access-Control-Allow-Credentials", strconv.FormatBool(allowCredentials))
-		header.Set("Content-Type", "application/json; charset=utf-8")
+		// 不要在这里写死 Content-Type。
+		// 原实现在全局中间件里设成 application/json，会连带静态资源、首页 HTML、
+		// WebSocket 握手一起被标成 JSON —— 浏览器对 CSS / JS 做严格 MIME 校验，
+		// 类型不对会直接拒载。Content-Type 由各 handler（ctx.JSON / ServeFile / ctx.Data）自己给。
 		header.Set("Access-Control-Allow-Methods", strings.TrimSpace(allowedMethods))
 		header.Set("Access-Control-Allow-Headers", strings.TrimSpace(allowedHeaders))
 		header.Set("Access-Control-Expose-Headers", strings.TrimSpace(exposedHeaders))

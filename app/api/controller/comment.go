@@ -6,6 +6,7 @@ import (
 	"inis/app/model"
 	"inis/app/validator"
 	"math"
+	"math/rand"
 	"strings"
 	"time"
 	"unicode"
@@ -599,7 +600,17 @@ func (this *Comment) rand(ctx *gin.Context) {
 	mold = this.buildQuery(mold, params)
 	mold = this.withAuditFilter(mold, ctx)
 
-	item, _ := mold.OrderRaw("RAND()").Limit(limit).Select()
+	// 随机取数：不用 ORDER BY RAND()（大表上等于全表扫 + 临时表排序），
+	// 改为「先取总数、随机起始页」，代价固定为两次范围扫描。
+	var item []map[string]any
+	mold = mold.Limit(limit)
+	if total, _ := mold.Count(); total > int64(limit) {
+		page := rand.Intn(int(total)/limit) + 1
+		item, _ = mold.Page(page).Select()
+	} else {
+		item, _ = mold.Select()
+	}
+
 	data := this.maskCommentData(ctx, utils.ArrayMapWithField(item, params["field"]))
 	// 可见范围：随机获取的评论同样脱敏
 	data = applyScopeData(ctx, data, "comment")

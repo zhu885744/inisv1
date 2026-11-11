@@ -8,6 +8,7 @@ import (
 	"inis/app/model"
 	"io"
 	"math"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -813,9 +814,21 @@ func (this *Attachment) rand(ctx *gin.Context) {
 		query = query.Where("uploader_id", this.meta.user(ctx).Id)
 	}
 
-	query = this.buildQuery(query, params).OrderRaw("RAND()").Limit(limit)
+	query = this.buildQuery(query, params).Limit(limit)
 
-	items, _ := query.Select()
+	// 随机取数：不用 ORDER BY RAND()。
+	//
+	// RAND() 会让 MySQL 把符合条件的所有行读出来建临时表再排序，附件表一大
+	// 每次请求都是全表扫描（而且这个接口免登录）。改为「先取总数、随机起始页」，
+	// 代价固定为两次范围扫描，页内再打乱顺序，随机性完全够用。
+	var items []map[string]any
+	if total, _ := query.Count(); total > int64(limit) {
+		page := rand.Intn(int(total)/limit) + 1
+		items, _ = query.Page(page).Select()
+	} else {
+		items, _ = query.Select()
+	}
+
 	data := utils.Array.MapWithField(utils.Rand.MapSlice(items), params["field"])
 
 	if utils.Is.Empty(data) {

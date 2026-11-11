@@ -168,7 +168,7 @@ func QpsPoint() gin.HandlerFunc {
 		key := fmt.Sprintf("ip=%s&path=%s&method=%s", ip, path, method)
 
 		if !qpsAllow("point", key, speed, time.Now()) {
-			go QpsWarn(ctx)
+			QpsWarn(ctx)
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
 		}
@@ -202,7 +202,7 @@ func QpsGlobal() gin.HandlerFunc {
 
 		ip := ctx.ClientIP()
 		if !qpsAllow("global", ip, speed, time.Now()) {
-			go QpsWarn(ctx)
+			QpsWarn(ctx)
 			ctx.AbortWithStatusJSON(200, gin.H{"code": 429, "msg": facade.Lang(ctx, "请求过于频繁！"), "data": nil})
 			return
 		}
@@ -254,12 +254,24 @@ func qpsAutoUnban() {
 		if cacheState {
 			facade.Cache.Del("[GET][ip-black][column]")
 		}
+		// 解封后同步失效进程内快照，否则已解封的 IP 还会被拦最多 30 秒
+		if len(expiredIPs) > 0 {
+			ResetIpBanCache()
+		}
 	}
 }
 
 // QpsWarn - QPS警告（支持分级封禁）
+//
+// 由限流中间件同步调用（不再 go 出去）：gin 的 Context 是池化复用的，
+// 交给异步 goroutine 读 Header / URL 会与下一个请求形成数据竞争。
 func QpsWarn(ctx *gin.Context) {
 	ip := ctx.ClientIP()
+
+	// 快照本次请求的上下文：后面写库与发通知都用这些值，不再碰 ctx
+	path := ctx.Request.URL.Path
+	method := strings.ToUpper(ctx.Request.Method)
+	agent := ctx.GetHeader("User-Agent")
 
 	// 白名单IP不受限制
 	if IsIpWhitelisted(ip) {
@@ -337,7 +349,7 @@ func QpsWarn(ctx *gin.Context) {
 		// 创建或更新封禁记录
 		ipBlack := &model.IpBlack{
 			Ip:             ip,
-			Agent:          ctx.GetHeader("User-Agent"),
+			Agent:          agent,
 			Cause:          cause,
 			ViolationCount: existingBan.ViolationCount + 1,
 		}
@@ -365,22 +377,23 @@ func QpsWarn(ctx *gin.Context) {
 			facade.Cache.Del(fmt.Sprintf(qpsWarnCountKey, ip))
 		}
 
-		// 清除缓存
+		// 清除缓存（Cache 层的列表缓存 + 进程内的封禁快照）
 		if cacheState {
 			facade.Cache.Del("[GET][ip-black][column]")
 		}
+		ResetIpBanCache()
 
 		// 发送封禁通知
-		go sendBanNotification(ctx, ip, newLevel, ipBlack.Duration, ipBlack.IsPermanent)
+		go sendBanNotification(ip, agent, path, newLevel, ipBlack.Duration, ipBlack.IsPermanent)
 
 		return
 	}
 
 	_, err := facade.DB.Model(&model.QpsWarn{}).Create(&model.QpsWarn{
 		Ip:     ip,
-		Agent:  ctx.GetHeader("User-Agent"),
-		Path:   ctx.Request.URL.Path,
-		Method: strings.ToUpper(ctx.Request.Method),
+		Agent:  agent,
+		Path:   path,
+		Method: method,
 	})
 
 	if err != nil {
@@ -399,7 +412,8 @@ func QpsWarn(ctx *gin.Context) {
 // 场景开关、管理员收件邮箱、发送队列与失败重试都由邮件模块处理，
 // 这里只负责组织正文。原来的 SYSTEM_QPS_NOTIFY（邮件/Webhook）从未实现，
 // 只有两条 TODO 日志，已下线。
-func sendBanNotification(ctx *gin.Context, ip string, level int, duration int64, isPermanent bool) {
+// 参数全部来自调用方在请求期内取好的快照，不持有 *gin.Context。
+func sendBanNotification(ip, agent, path string, level int, duration int64, isPermanent bool) {
 	durationStr := "永久"
 	if !isPermanent {
 		if duration >= 24*7 {
@@ -417,11 +431,11 @@ func sendBanNotification(ctx *gin.Context, ip string, level int, duration int64,
 		"时间：" + time.Now().Format("2006-01-02 15:04:05"),
 	}
 
-	if agent := strings.TrimSpace(ctx.GetHeader("User-Agent")); agent != "" {
+	if agent = strings.TrimSpace(agent); agent != "" {
 		lines = append(lines, "User-Agent："+agent)
 	}
 
-	if path := ctx.Request.URL.Path; path != "" {
+	if path != "" {
 		lines = append(lines, "触发路径："+path)
 	}
 

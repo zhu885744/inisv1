@@ -47,11 +47,19 @@
 | :--- | :--- | :--- | :--- |
 | `connect` | 服务端 → 客户端 | `{ type, content: "连接成功", id }` | 连接者 |
 | `pong` | 服务端 → 客户端 | `{ type }` | 请求者 |
-| `status`（在线状态） | 服务端 → 全部 | `{ content: { online_users: [...], online_count } }` | 所有人 |
+| `status`（在线状态） | 服务端 → 全部 | `{ content: { online_users: [{ id, uid, name, ip, last_active }], online_count } }` | 所有人 |
 | `status`（系统状态） | 服务端 → 管理员 | `{ content: { info, database, cache, resource }, admin_only: true, timestamp }` | **仅管理员** |
 | `kicked` | 服务端 → 客户端 | `{ type, content }` | 被踢者 / 发起者 |
 | `error` | 服务端 → 客户端 | `{ type, content }` | 发起者（如非管理员发 kick） |
 | `broadcast` / `single` / `private` | 双向 | 广播 / 单播 / 私聊（含 `msg_id`、ACK 重传），字段见下方「下行消息结构」 | 按需 |
+| `chat_typing` | 服务端 → 客户端 | `{ type, to, data: { from_uid } }` | 被私聊的一方（含多端） |
+| `room_typing` | 服务端 → 全部 | `{ type, data: { uid } }` | 所有人（前端按 uid 过滤自己） |
+| `chat_mention` | 服务端 → 客户端 | `{ type, to, data: { room_id, message_id, from_uid, preview } }` | 被 @ 的人（含多端） |
+
+`chat_typing` / `room_typing` / `chat_mention` 都是**一次性瞬时事件**：服务端不落库、不进离线缓存，
+只投给当前在线的连接（见 `dispatch` 的 `chat_typing` 分支与 `room*` 广播分支）。
+`online_users` 里的 `uid` 是登录用户 id（访客为 0），跨域场景下连接 id 仍是 `guest_xxx`，
+前端要用 `uid` 区分「这是哪位登录用户」，不要看 id 前缀。
 
 #### 下行消息结构（两种，字段名不同）
 
@@ -90,7 +98,7 @@
 客户端发送任意 JSON，但必须满足（`ValidateMessage`）：
 
 - 合法 JSON，且**必须含 `type`**；
-- `type` 必须在白名单内：`broadcast` / `single` / `private` / `notification` / `ack` / `read` / `ping` / `pong` / `auth`（`kick` 由管理员使用，走单独分支）；
+- `type` 必须在白名单内：`broadcast` / `single` / `private` / `notification` / `ack` / `read` / `ping` / `pong` / `auth` / `typing`（`kick` 由管理员使用，走单独分支）；
 - `type` 为 `single` / `private` 时**必须含 `to`**；
 - 单条消息不超过 `max_message_size`（默认 1 MB；连接层 `SetReadLimit` 固定 1 MB，超出直接断开）。
 
@@ -103,6 +111,7 @@
 | 有 `to`，其它 type | 统一改写为 `single`，只发给 `to` |
 | `type=single` 但没给 `to` | `ValidateMessage` 直接拒绝（不转发） |
 | `ack` / `read` / `ping` / `auth` | 不转发，只做本地处理 |
+| `typing` | 不转发、不落库，改写为 `chat_typing`（带 `to`）或 `room_typing`（带 `room:1`） |
 
 > `single` 的目标不在线时，服务端会把它缓存为离线消息（见下文「离线消息」）；
 > 私聊 `private` 还会补 `msg_id` 并等待 ACK。
@@ -114,6 +123,7 @@
 | `ping` | `{ type }` | 应用层心跳，服务端回 `pong`（WS 层另有 ping） |
 | `auth` | `{ type, token }` | 连接后升级身份（跨域带不上 Cookie 时用） |
 | `kick` | `{ type, to }` | **仅管理员**：断开 `to` 指向的连接（`user_1` / `guest_xxx`） |
+| `typing` | `{ type, to }` 或 `{ type, room: 1 }` | 正在输入。私聊带 `to:"user_<uid>"`，聊天室带 `room:1`。必须已登录；服务端按 1.5 秒 / 连接节流，丢了不影响消息本身 |
 
 > 两种 `status` 靠 `content` 字段区分：含 `online_count` → 在线状态；含 `resource` / `database` → 系统状态。
 > 系统状态由 `app/socket/controller/status.go` 推送，间隔见 `socket.status_interval`（默认 3 秒）；

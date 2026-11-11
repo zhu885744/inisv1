@@ -293,6 +293,12 @@ func (this meta) permit(ctx *gin.Context) (ok bool) {
 	return utils.InArray[any](name, rules)
 }
 
+// maxLimit - 单页最大条数
+//
+// limit 直接来自请求参数（多数列表接口免登录），不封顶时 ?limit=1000000
+// 会一次性把整表拉进内存，既是内存风险也是 DB 压力。
+const maxLimit = 200
+
 // limit - 分页条数：取请求参数，未传或非法（<=0）时回落到默认 10
 func (this meta) limit(ctx *gin.Context) (result int) {
 
@@ -306,6 +312,11 @@ func (this meta) limit(ctx *gin.Context) (result int) {
 	// 限制小于等于 0 - 返回默认值
 	if limit <= 0 {
 		return 10
+	}
+
+	// 超过上限按上限处理：宁可少给数据，也不让一个请求把库拖垮
+	if limit > maxLimit {
+		return maxLimit
 	}
 
 	return limit

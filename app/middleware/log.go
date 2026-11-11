@@ -12,13 +12,40 @@ import (
 	"time"
 )
 
+// requestLog 请求日志快照
+//
+// gin 的 *gin.Context 是池化复用的：handler 返回后对象会被归还、下一个请求接着用。
+// 因此异步写日志前必须把需要的值全部取出来，绝不能把 ctx 交给 goroutine ——
+// 否则异步读 ctx 里的 params map 会和下一个请求并发读写同一个 map（直接 fatal）。
+type requestLog struct {
+	params    map[string]any
+	path      string
+	method    string
+	ip        string
+	userAgent string
+	errors    string
+}
+
 // GinLogger - 接收gin框架默认的日志
 func GinLogger() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		// 在进入业务处理前取时间，日志里的 cost 才是真实请求耗时
 		start := time.Now()
 		ctx.Next()
-		go logRequest(ctx, start)
+
+		// 快照必须在当前 goroutine 内完成（见 requestLog 注释）
+		snapshot := requestLog{
+			path:      ctx.Request.URL.Path,
+			method:    ctx.Request.Method,
+			ip:        ctx.ClientIP(),
+			userAgent: ctx.Request.UserAgent(),
+			errors:    ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
+		}
+		if params, ok := ctx.Get("params"); ok {
+			snapshot.params = cast.ToStringMap(params)
+		}
+
+		go logRequest(snapshot, start)
 	}
 }
 
@@ -89,11 +116,10 @@ func GinRecovery(debug ...bool) gin.HandlerFunc {
 }
 
 // logRequest - 记录请求日志（start 由中间件在 ctx.Next() 之前取得）
-func logRequest(ctx *gin.Context, start time.Time) {
-	params, _ := ctx.Get("params")
+func logRequest(snapshot requestLog, start time.Time) {
 
-	path := ctx.Request.URL.Path
-	method := ctx.Request.Method
+	path := snapshot.path
+	method := snapshot.method
 
 	if strings.Contains(path, ".") || path == "/" {
 		return
@@ -105,10 +131,10 @@ func logRequest(ctx *gin.Context, start time.Time) {
 			"method": method,
 			// 脱敏后落盘：密码 / 密钥 / 验证码整值打码，手机号、邮箱、账号做掩码。
 			// 日志文件曾被明文记录「账号 + 密码」，属于可直接撞库的泄露，详见 redact.go
-			"params":     SanitizeLogParams(params),
-			"ip":         ctx.ClientIP(),
-			"user-agent": ctx.Request.UserAgent(),
-			"errors":     ctx.Errors.ByType(gin.ErrorTypePrivate).String(),
+			"params":     SanitizeLogParams(snapshot.params),
+			"ip":         snapshot.ip,
+			"user-agent": snapshot.userAgent,
+			"errors":     snapshot.errors,
 			"cost":       time.Since(start).String(),
 		}, "middleware")
 	}

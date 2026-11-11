@@ -1417,7 +1417,14 @@ func (this *ModelStruct) Restore(args ...any) (tx *gorm.DB, err error) {
 }
 
 // Query - 原生查询
+//
+// GORM 的链式方法都返回新的 *gorm.DB，不修改接收者。原实现把 Raw() 的返回值
+// 丢掉了，于是 SQL 根本没有进入后续的 Find/Scan —— 调用方看起来执行了原生查询，
+// 实际跑的是「整表 SELECT」，exp 排行榜的聚合语句就是这样静默失效的。
+//
+// 注意：需要「原生 SQL + 多列聚合结果」时，优先用 Drive().Raw(...).Scan(&dest)，
+// 语义最清晰；本方法只保证 Raw 之后的链式调用不会丢。
 func (this *ModelStruct) Query(sql any, args ...any) *ModelStruct {
-	this.model.Raw(cast.ToString(sql), args...)
+	this.model = this.model.Raw(cast.ToString(sql), args...)
 	return this
 }

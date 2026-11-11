@@ -723,8 +723,12 @@ func createAuthRules() (result []AuthRules) {
 				"path=flat&type=common&name=扁平化",
 				"path=counts&type=common&name=批量评论数",
 			),
-			"PUT":    loginUpdate(),
-			"POST":   loginCreate(),
+			"PUT": loginUpdate(),
+			"POST": loginCreate(
+				// 补全实况图是后台维护动作（批量修历史评论），不属于用户发评论，
+				// 因此单独标 default：普通用户不应能触发全表扫描。
+				"path=repair-live&type=default&name=补全评论实况图",
+			),
 			"DELETE": loginDelete(),
 		},
 		// @ 提及：候选列表只给「我关注的人」，登录即可用（写入没有独立接口 —— @ 在保存内容时解析）
@@ -760,6 +764,9 @@ func createAuthRules() (result []AuthRules) {
 			"PUT": {
 				"path=ack&type=login&name=私信送达确认",
 				"path=read&type=login&name=私信标记已读",
+				// 会话置顶 / 免打扰是「我对这个会话」的本地偏好，只影响自己，
+				// 登录即可，不设权限点。
+				"path=pref&type=login&name=私信会话偏好设置",
 			},
 		},
 		// 私信管理（后台）：会话列表 / 消息内容 / 撤回。

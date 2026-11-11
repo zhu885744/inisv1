@@ -10,10 +10,12 @@ import (
 	"inis/theme"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -58,6 +60,18 @@ var imageCacheBytes atomic.Int64
 const (
 	imageCacheMaxLen   = 1024
 	imageCacheMaxBytes = 16 << 20 // 16MB
+)
+
+// 图片处理上限
+//
+//   - maxThumbSide：size 参数（?size=800x600）的单边上限。这个值完全来自 URL，
+//     不设上限时 ?size=50000x50000 会让 imaging.Fill 一次性分配约 10GB 的像素缓冲，
+//     未登录即可打爆进程内存，而且分配发生在写缓存之前，缓存救不了。
+//   - maxSourcePixels：源图像素上限（防解码炸弹）。一张 1KB 的 50000x50000 PNG
+//     解码后同样占满内存，超限直接回原图、不做动态处理。
+const (
+	maxThumbSide    = 2048
+	maxSourcePixels = 50 << 20
 )
 
 // Gin - gin引擎
@@ -205,9 +219,18 @@ func Run(callback ...func()) {
 
 	port := ":" + cast.ToString(AppToml.Get("app.port", 8080))
 
+	// 默认的 http.Server 没有任何超时：慢速连接（Slowloris）能用极低带宽占满
+	// goroutine 与连接数，头部不读完就一直挂着。这里补齐所有时间维度。
+	// WebSocket 升级后 net/http 会清掉连接的 deadline（hijack 后由 gorilla 自己管），
+	// 因此这些超时不会误杀长连接。
 	Server = &http.Server{
-		Addr:    port,
-		Handler: Gin,
+		Addr:              port,
+		Handler:           Gin,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       120 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB，防止超长 header 撑爆内存
 	}
 
 	go func() {
@@ -317,10 +340,9 @@ func writeGifError(ctx *gin.Context) func(string) {
 func writeImageFile(ctx *gin.Context) func(string, string) {
 	return func(path string, ext string) {
 		ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-		// 这里已经开始写响应体，HTTP 状态码无法再更改，出错只记录日志
-		if _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte); err != nil {
-			facade.Log.Error(map[string]any{"error": err, "path": path}, "写入图片文件失败")
-		}
+		ctx.Header("Cache-Control", "public, max-age=3600")
+		// 流式返回：原实现把整张图读进内存再写出，大图并发时会形成内存尖峰
+		http.ServeFile(ctx.Writer, ctx.Request, "public"+path)
 	}
 }
 
@@ -466,8 +488,15 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 		return
 	}
 
-	width := cast.ToInt(match[1])
-	height := cast.ToInt(match[2])
+	width := clampThumbSide(cast.ToInt(match[1]))
+	height := clampThumbSide(cast.ToInt(match[2]))
+
+	// 非法尺寸（0 或负数）按「不处理」走原图，避免 imaging 收到 0 宽高
+	if width <= 0 || height <= 0 {
+		writeImage(path, ext)
+		return
+	}
+
 	mode := ctx.DefaultQuery("mode", utils.Ternary(width == height, "fill", ""))
 
 	cacheKey := fmt.Sprintf("%s?size=%dx%d&mode=%s", path, width, height, mode)
@@ -475,6 +504,13 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 	// 命中缓存则直接返回，避免重复读盘+解码+编码
 	if cached, ok := imageCache.Load(cacheKey); ok {
 		_, _ = ctx.Writer.Write(cached.([]byte))
+		return
+	}
+
+	// 解码前先读图片头判断尺寸：超大图（解码炸弹）直接回原图，
+	// 避免成像阶段一次性分配巨量像素内存
+	if !imageSourceAllowed("public" + path) {
+		writeImage(path, ext)
 		return
 	}
 
@@ -522,6 +558,35 @@ func handleImageFile(ctx *gin.Context, path, ext string, writeImage func(string,
 	}
 }
 
+// clampThumbSide 缩略图单边夹取：非法值返回 0（调用方按「不处理」处理）
+func clampThumbSide(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	if value > maxThumbSide {
+		return maxThumbSide
+	}
+	return value
+}
+
+// imageSourceAllowed 源图像素是否在上限内
+//
+// 只读图片头（DecodeConfig），不解码像素，代价极低。
+func imageSourceAllowed(file string) bool {
+	handle, err := os.Open(file)
+	if err != nil {
+		return false
+	}
+	defer handle.Close()
+
+	config, _, err := image.DecodeConfig(handle)
+	if err != nil {
+		return false
+	}
+
+	return int64(config.Width)*int64(config.Height) <= maxSourcePixels
+}
+
 // processImage 处理图片
 func processImage(src image.Image, width, height int, mode string) *image.NRGBA {
 	switch mode {
@@ -555,17 +620,24 @@ func getImageFormat(ext string) imaging.Format {
 }
 
 // handleStaticFile 处理静态文件
+//
+// 用 http.ServeFile 流式返回：原实现是 `utils.File().Byte()` 把整个文件读进内存
+// 再一次性写出 —— 一个 5MB 的 js 每个请求就分配 5MB 堆内存，并发一高就是内存尖峰；
+// 而且响应里没有 Last-Modified / ETag，浏览器每次刷新都全量重传。
+// ServeFile 自带 Range 支持、Last-Modified 与 304 协商，Content-Type 沿用上面的显式设置。
 func handleStaticFile(ctx *gin.Context, path, ext string, isExist func(string) bool) {
-	if !isExist("public" + path) {
+	file := "public" + path
+
+	if !isExist(file) {
 		ctx.JSON(HTTPStatusOK, gin.H{"code": CodeError, "msg": ResourceNotFound, "data": nil})
 		return
 	}
 
 	ctx.Header("Content-Type", utils.Mime.Type(ext)+"; charset=utf-8")
-	// 这里已经开始写响应体，HTTP 状态码无法再更改，出错只记录日志
-	if _, err := ctx.Writer.Write(utils.File().Byte("public" + path).Byte); err != nil {
-		facade.Log.Error(map[string]any{"error": err, "path": path}, "写入静态文件失败")
-	}
+	// 静态资源指纹化后可以更长；这里给 1 小时，配合 Last-Modified 协商
+	ctx.Header("Cache-Control", "public, max-age=3600")
+
+	http.ServeFile(ctx.Writer, ctx.Request, file)
 }
 
 // console 控制台
