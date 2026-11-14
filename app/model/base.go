@@ -108,8 +108,11 @@ func InitTable() {
 		{"ChatStates", InitChatStates},
 		// 会话偏好（每会话每用户一条：置顶 / 免打扰，属于个人视图设置）
 		{"ChatConversationPrefs", InitChatConversationPrefs},
-		// 公共聊天室：房间（初始化时确保 id=1 存在）/ 消息 / 禁言
+		// 聊天室：房间（初始化时确保 id=1 的公共大厅存在）/ 成员 / 入群申请 / 消息 / 禁言
 		{"ChatRooms", InitChatRooms},
+		{"ChatRoomMembers", InitChatRoomMembers},
+		{"ChatRoomJoinRequests", InitChatRoomJoinRequests},
+		{"ChatRoomInvites", InitChatRoomInvites},
 		{"ChatRoomMessages", InitChatRoomMessages},
 		// 聊天室消息的「按人删除」记录（只影响删除者自己的历史）
 		{"ChatRoomMessageDeletes", InitChatRoomMessageDeletes},

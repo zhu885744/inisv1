@@ -843,9 +843,18 @@ func (hub *hub) dispatch(message []byte, allowOffline bool) {
 		hub.recordMessage("single")
 		hub.singlecast(message, allowOffline)
 	case strings.HasPrefix(msgType, "room"):
-		// 公共聊天室：消息与各类事件（撤回 / 禁言 / 解禁 / 改资料）都是全员可见，
-		// 直接广播给所有在线连接；离线用户进房间时拉历史即可。
+		// 聊天室事件分两种投递方式：
+		//   - 带 to：自建群按成员扇出（服务端为每个成员各发一条，dispatch 走单播），
+		//     公共大厅不带 to，走下面的全员广播；
+		//   - 不带 to：公共大厅的消息 / 撤回 / 禁言 / 解禁 / 改资料，全员可见。
 		// room_typing（正在输入）也走这里，前端按 uid 过滤掉自己。
+		if to := cast.ToString(content["to"]); to != "" {
+			hub.recordMessage("single")
+			// 群消息不写离线队列：离线成员重新进群时会按 after_seq 拉历史，
+			// 缓存一份反而会在重连时和历史记录重复。
+			hub.singlecast(message, false)
+			return
+		}
 		hub.recordMessage("broadcast")
 		hub.broadcast(message)
 	case msgType == "chat_typing" || msgType == "chat_mention":

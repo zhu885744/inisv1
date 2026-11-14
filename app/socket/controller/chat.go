@@ -217,10 +217,31 @@ func (this *client) relayTyping(item map[string]any) {
 	this.lastTyping.Store(now)
 
 	if cast.ToBool(item["room"]) {
-		BroadcastRoom(map[string]any{
+		// 多群：room_id 缺省按公共大厅处理（老客户端不带这个字段）
+		roomId := cast.ToInt(item["room_id"])
+		if roomId <= 0 {
+			roomId = model.PublicRoomId
+		}
+
+		payload := map[string]any{
 			"type": "room_typing",
-			"data": map[string]any{"uid": uid},
-		})
+			"data": map[string]any{"uid": uid, "room_id": roomId},
+		}
+
+		if roomId == model.PublicRoomId {
+			BroadcastRoom(payload)
+			return
+		}
+
+		// 自建群：只推给成员，别让别的群看到「有人在输入」
+		for _, targetUid := range model.RoomMemberUids(roomId) {
+			one := make(map[string]any, len(payload)+1)
+			for key, value := range payload {
+				one[key] = value
+			}
+			one["to"] = fmt.Sprintf("user_%d", targetUid)
+			PushPrivate(targetUid, one)
+		}
 		return
 	}
 

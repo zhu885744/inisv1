@@ -16,21 +16,54 @@ import (
 )
 
 /**
- * 公共聊天室
+ * 聊天室（公共大厅 + 用户自建群聊）
  *
  * 与私信（chat.go）是两套结构，刻意不复用 chat_messages：
  *   - 私信是「点对点」，未读 / 已读 / 会话摘要都围绕两个人算；
- *   - 聊天室是「一对多」，没有接收者、没有逐人已读，只有一条全局时间线，
+ *   - 聊天室是「一对多」，没有接收者、没有逐人已读，只有每条时间线，
  *     多出来的只是「谁发的」「管理员撤回了谁」「谁被禁言了」。
  * 混在一张表里会让私信的未读统计到处加排除条件，得不偿失。
  *
- * 房间只有 id=1 一个（PublicRoomId）：全站公共，所有登录用户都能发言。
- * 消息的 seq 仍复用自增主键 id，前端按 id 去重 / 断线后 after_seq 补拉。
+ * 多房间：
+ *   - id=1（PublicRoomId）是官方公共大厅：owner_uid=0、全员隐式成员、不可解散；
+ *   - 其余房间是用户自建的群聊，靠 chat_room_members 维护成员与角色，
+ *     靠 chat_room_join_requests 处理「需审批」的入群申请；
+ *   - 消息的 seq 仍复用自增主键 id，前端按 id 去重 / 断线后 after_seq 补拉。
  */
 
 const (
-	// PublicRoomId - 公共聊天室的固定 ID：前后端都直接写死它，不需要「按名字找房间」
+	// PublicRoomId - 公共大厅的固定 ID：前后端都直接写死它，不需要「按名字找房间」
 	PublicRoomId = 1
+
+	// ChatRoomJoinFree / ChatRoomJoinApprove / ChatRoomJoinInvite - 入群方式
+	//
+	// 自由加入：发现页可见、点一下即入群；
+	// 需审批：可见、申请后由群主 / 管理员批准；
+	// 仅邀请：不出现在发现页，只能由群成员邀请（当前实现为群主直接拉人）。
+	ChatRoomJoinFree    = 0
+	ChatRoomJoinApprove = 1
+	ChatRoomJoinInvite  = 2
+
+	// ChatRoomRoleMember / ChatRoomRoleAdmin / ChatRoomRoleOwner - 成员角色
+	ChatRoomRoleMember = 0
+	ChatRoomRoleAdmin  = 1
+	ChatRoomRoleOwner  = 2
+
+	// ChatRoomRequestPending / Approved / Rejected - 入群申请状态
+	ChatRoomRequestPending  = 0
+	ChatRoomRequestApproved = 1
+	ChatRoomRequestRejected = 2
+
+	// ChatRoomMaxMembers 单个群的人数上限（大厅不受限）
+	ChatRoomMaxMembers = 200
+	// ChatRoomCreateMaxOwned 每人最多拥有的群数（防批量建群刷屏）
+	ChatRoomCreateMaxOwned = 3
+	// ChatRoomCreateMinDays 建群门槛：注册满 N 天
+	ChatRoomCreateMinDays = 3
+	// ChatRoomCreateMinExp 建群门槛：或经验值达到该值（Level 表里「入门」档）
+	//
+	// 两个条件是「或」关系：老用户即使没攒够经验也能建，新号攒了经验也能建。
+	ChatRoomCreateMinExp = 2000
 
 	// ChatRoomRevokeWindow - 本人撤回自己消息的时间窗（秒），与私信保持一致
 	ChatRoomRevokeWindow = 120
@@ -64,6 +97,19 @@ type ChatRooms struct {
 	Avatar      string `gorm:"size:255; default:''; comment:头像;" json:"avatar"`
 	// Status - 1 正常 / 0 关闭（关闭后只能看历史，不能发言）
 	Status int `gorm:"type:tinyint(1); default:1; comment:状态;" json:"status"`
+	// OwnerUid - 群主；0 = 官方公共大厅（无人拥有、不可解散、全员隐式成员）
+	OwnerUid int `gorm:"type:int(32); default:0; index:idx_chat_rooms_owner; comment:群主;" json:"owner_uid"`
+	// JoinType - 入群方式：0 自由加入 / 1 需审批 / 2 仅邀请
+	JoinType int `gorm:"type:tinyint(1); default:0; comment:入群方式;" json:"join_type"`
+	// Notice - 群公告（纯文本，展示在房间页顶部；空串表示没有公告）
+	Notice     string `gorm:"size:2000; default:''; comment:群公告;" json:"notice"`
+	NoticeTime int64  `gorm:"comment:公告发布时间;" json:"notice_time"`
+	// MemberCount - 成员数冗余计数（列表页展示 / 排序用；大厅不统计，返回 0）
+	MemberCount int `gorm:"type:int(32); default:0; comment:成员数;" json:"member_count"`
+	// MaxMembers - 人数上限（大厅为 0 表示不限）
+	MaxMembers int `gorm:"type:int(32); default:200; comment:人数上限;" json:"max_members"`
+	// LastMsgId - 最后一条消息 id（列表页摘要 / 排序用）
+	LastMsgId int `gorm:"type:int(32); default:0; comment:最后消息ID;" json:"last_msg_id"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -112,6 +158,29 @@ type ChatRoomMessageDeletes struct {
 	CreateTime int64 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
 }
 
+// ChatRoomInvites - 群邀请（链接与二维码共用一份数据）
+//
+// code 是随机串而不是群 id：邀请链接会出现在聊天记录 / 群公告里，
+// 用 id 拼等于「改个数字就能进」，随机 16 位才挡得住。
+type ChatRoomInvites struct {
+	Id         int    `gorm:"type:int(32); comment:主键;" json:"id"`
+	RoomId     int    `gorm:"type:int(32); index:idx_chat_room_invites_room; comment:房间ID;" json:"room_id"`
+	Code       string `gorm:"size:32; uniqueIndex:uk_chat_room_invites_code; comment:邀请码;" json:"code"`
+	CreatorUid int    `gorm:"type:int(32); default:0; comment:创建人;" json:"creator_uid"`
+	ExpireTime int64  `gorm:"default:0; comment:过期时间戳（0=永久）;" json:"expire_time"`
+	MaxUses    int    `gorm:"type:int(32); default:0; comment:最大使用次数（0=不限）;" json:"max_uses"`
+	UsedCount  int    `gorm:"type:int(32); default:0; comment:已使用次数;" json:"used_count"`
+	// Status - 1 有效 / 0 停用
+	Status int `gorm:"type:tinyint(1); default:1; comment:状态;" json:"status"`
+	// 以下为公共字段
+	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	Result     any                   `gorm:"type:varchar(256); comment:不存储数据，用于封装返回结果;" json:"result"`
+	CreateTime int64                 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime int64                 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
+}
+
 // ChatRoomMutes - 聊天室禁言记录
 //
 // 一次禁言一条记录，解除时软删除；Active 只认「未删除 + 未到期」的那条。
@@ -132,6 +201,49 @@ type ChatRoomMutes struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
+// ChatRoomMembers - 群成员
+//
+// 只有用户自建的群才在这里留记录；官方大厅（id=1）是「登录即成员」，
+// 不写成员行 —— 否则几十万用户一人一行，收益只有一条 COUNT(*)。
+//
+// (room_id, uid) 唯一：重复入群直接命中已有行，不会因为连点产生两条。
+// 退群用物理删除（Unscoped）：软删除会让唯一索引挡住「退群后重新加入」。
+type ChatRoomMembers struct {
+	Id     int `gorm:"type:int(32); comment:主键;" json:"id"`
+	RoomId int `gorm:"type:int(32); uniqueIndex:uk_chat_room_members,priority:1; index:idx_chat_room_members_uid; comment:房间ID;" json:"room_id"`
+	Uid    int `gorm:"type:int(32); uniqueIndex:uk_chat_room_members,priority:2; comment:成员;" json:"uid"`
+	// Role - 0 成员 / 1 管理员 / 2 群主
+	Role int `gorm:"type:tinyint(1); default:0; comment:角色;" json:"role"`
+	// LastReadId - 已读到的消息 id（列表页未读数 = 群最后消息 - 该值）
+	LastReadId int `gorm:"type:int(32); default:0; comment:已读消息ID;" json:"last_read_id"`
+	// MuteNotify - 1 = 免打扰（前端只用来不提醒，不影响未读计数）
+	MuteNotify int   `gorm:"type:tinyint(1); default:0; comment:免打扰;" json:"mute_notify"`
+	JoinTime   int64 `gorm:"comment:入群时间;" json:"join_time"`
+	// 以下为公共字段
+	Json       any   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
+	Text       any   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
+	CreateTime int64 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime int64 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+}
+
+// ChatRoomJoinRequests - 入群申请（仅「需审批」的群产生记录）
+//
+// 同一用户在同一群的多次申请各留一条：群里看到的是时间线，
+// 批准时只处理指定那一条，早先被拒的记录仍可追溯。
+type ChatRoomJoinRequests struct {
+	Id     int `gorm:"type:int(32); comment:主键;" json:"id"`
+	RoomId int `gorm:"type:int(32); index:idx_chat_room_requests_room; comment:房间ID;" json:"room_id"`
+	Uid    int `gorm:"type:int(32); index:idx_chat_room_requests_uid; comment:申请人;" json:"uid"`
+	// Status - 0 待审 / 1 通过 / 2 拒绝
+	Status      int    `gorm:"type:tinyint(1); default:0; comment:状态;" json:"status"`
+	Message     string `gorm:"size:120; default:''; comment:申请留言;" json:"message"`
+	OperatorUid int    `gorm:"type:int(32); default:0; comment:处理人;" json:"operator_uid"`
+	OperateTime int64  `gorm:"comment:处理时间;" json:"operate_time"`
+	// 以下为公共字段
+	CreateTime int64 `gorm:"autoCreateTime; comment:创建时间;" json:"create_time"`
+	UpdateTime int64 `gorm:"autoUpdateTime; comment:更新时间;" json:"update_time"`
+}
+
 // 迁移
 
 func InitChatRooms() {
@@ -140,6 +252,18 @@ func InitChatRooms() {
 	}
 	// 建完表立刻保证 id=1 存在：前端写死了 /room/1，房间缺了整页就是空的
 	(&ChatRooms{}).Ensure()
+}
+
+func InitChatRoomMembers() {
+	if err := facade.DB.Drive().AutoMigrate(&ChatRoomMembers{}); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "ChatRoomMembers表迁移失败")
+	}
+}
+
+func InitChatRoomJoinRequests() {
+	if err := facade.DB.Drive().AutoMigrate(&ChatRoomJoinRequests{}); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "ChatRoomJoinRequests表迁移失败")
+	}
 }
 
 func InitChatRoomMessages() {
@@ -151,6 +275,12 @@ func InitChatRoomMessages() {
 func InitChatRoomMutes() {
 	if err := facade.DB.Drive().AutoMigrate(&ChatRoomMutes{}); err != nil {
 		facade.Log.Error(map[string]any{"error": err}, "ChatRoomMutes表迁移失败")
+	}
+}
+
+func InitChatRoomInvites() {
+	if err := facade.DB.Drive().AutoMigrate(&ChatRoomInvites{}); err != nil {
+		facade.Log.Error(map[string]any{"error": err}, "ChatRoomInvites表迁移失败")
 	}
 }
 
@@ -166,11 +296,20 @@ func chatRoomHiddenQuery(uid int) *gorm.DB {
 		Select("msg_id").Where("uid = ?", uid)
 }
 
-// Ensure - 幂等创建公共聊天室（已有 id=1 时什么都不做）
+// Ensure - 幂等创建公共大厅（已有 id=1 时只补齐新增字段的默认值）
 func (this *ChatRooms) Ensure() {
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", PublicRoomId).First(&room).Error; err == nil && room.Id > 0 {
+		// 老库里 id=1 是升级前建的：owner/join_type/max_members 全是零值，
+		// 这里补一次，保证「大厅不可解散、全员可加入、不限人数」的口径成立。
+		if room.OwnerUid != 0 || room.JoinType != ChatRoomJoinFree || room.MaxMembers != 0 {
+			facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", PublicRoomId).Updates(map[string]any{
+				"owner_uid":   0,
+				"join_type":   ChatRoomJoinFree,
+				"max_members": 0,
+			})
+		}
 		return
 	}
 
@@ -179,6 +318,9 @@ func (this *ChatRooms) Ensure() {
 		Name:        "公共聊天室",
 		Description: "全站用户都在这儿，随便聊点什么",
 		Status:      1,
+		OwnerUid:    0,
+		JoinType:    ChatRoomJoinFree,
+		MaxMembers:  0,
 	}
 
 	if err := facade.DB.Drive().Create(&seed).Error; err != nil {
@@ -186,27 +328,55 @@ func (this *ChatRooms) Ensure() {
 	}
 }
 
-// Info - 房间信息（公开字段，未登录也能看）
-func (this *ChatRooms) Info() map[string]any {
+// Info - 房间信息（公开字段）；roomId 省略时返回公共大厅
+func (this *ChatRooms) Info(roomId ...int) map[string]any {
+
+	id := PublicRoomId
+	if len(roomId) > 0 && roomId[0] > 0 {
+		id = roomId[0]
+	}
 
 	var room ChatRooms
-	if err := facade.DB.Drive().Where("id = ?", PublicRoomId).First(&room).Error; err != nil || room.Id <= 0 {
+	if err := facade.DB.Drive().Where("id = ?", id).First(&room).Error; err != nil || room.Id <= 0 {
+		return map[string]any{}
+	}
+
+	return chatRoomItem(&room)
+}
+
+// chatRoomItem - 房间对外结构（列表 / 详情共用）
+func chatRoomItem(room *ChatRooms) map[string]any {
+
+	if room == nil || room.Id <= 0 {
 		return map[string]any{}
 	}
 
 	return map[string]any{
-		"id":          room.Id,
-		"name":        room.Name,
-		"description": room.Description,
-		"avatar":      room.Avatar,
-		"status":      room.Status,
-		"create_time": room.CreateTime,
-		"update_time": room.UpdateTime,
+		"id":           room.Id,
+		"name":         room.Name,
+		"description":  room.Description,
+		"avatar":       room.Avatar,
+		"status":       room.Status,
+		"owner_uid":    room.OwnerUid,
+		"join_type":    room.JoinType,
+		"notice":       room.Notice,
+		"notice_time":  room.NoticeTime,
+		"member_count": room.MemberCount,
+		"max_members":  room.MaxMembers,
+		"last_msg_id":  room.LastMsgId,
+		"is_official":  room.OwnerUid == 0,
+		"create_time":  room.CreateTime,
+		"update_time":  room.UpdateTime,
 	}
 }
 
-// Update - 修改房间资料（仅超级管理员，权限判断在控制器里做）
-func (this *ChatRooms) Update(params map[string]any) (map[string]any, error) {
+// Update - 修改房间资料（权限判断在控制器里做）；roomId 省略时改公共大厅
+func (this *ChatRooms) Update(params map[string]any, roomId ...int) (map[string]any, error) {
+
+	id := PublicRoomId
+	if len(roomId) > 0 && roomId[0] > 0 {
+		id = roomId[0]
+	}
 
 	updates := map[string]any{}
 
@@ -237,17 +407,62 @@ func (this *ChatRooms) Update(params map[string]any) (map[string]any, error) {
 		updates["avatar"] = avatar
 	}
 
+	// 群里允许改入群方式（自由 / 审批 / 仅邀请）；大厅固定为自由加入，不跟着改
+	if value, ok := params["join_type"]; ok && id != PublicRoomId {
+		joinType := cast.ToInt(value)
+		if joinType < ChatRoomJoinFree || joinType > ChatRoomJoinInvite {
+			return nil, errors.New("入群方式不正确！")
+		}
+		updates["join_type"] = joinType
+	}
+
 	if len(updates) == 0 {
 		return nil, errors.New("没有需要修改的内容！")
 	}
 
 	updates["update_time"] = time.Now().Unix()
 
-	if err := facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", PublicRoomId).Updates(updates).Error; err != nil {
+	db := facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", id)
+
+	// 大厅原先是「关闭即全员禁言」的开关：只有超级管理员能关，这里保持原口径
+	if value, ok := params["status"]; ok {
+		status := cast.ToInt(value)
+		if status != 0 && status != 1 {
+			return nil, errors.New("状态值不正确！")
+		}
+		updates["status"] = status
+	}
+
+	if err := db.Updates(updates).Error; err != nil {
 		return nil, errors.New("修改失败，请稍后重试！")
 	}
 
-	return (&ChatRooms{}).Info(), nil
+	return (&ChatRooms{}).Info(id), nil
+}
+
+// SetNotice - 发布 / 修改群公告（传空串即清除公告）
+func (this *ChatRooms) SetNotice(roomId int, notice string) (map[string]any, error) {
+
+	if roomId <= 0 {
+		return nil, errors.New("聊天室不存在！")
+	}
+
+	notice = strings.TrimSpace(notice)
+	if len([]rune(notice)) > 500 {
+		return nil, errors.New("群公告不能超过 500 个字！")
+	}
+
+	updates := map[string]any{
+		"notice":      notice,
+		"notice_time": time.Now().Unix(),
+		"update_time": time.Now().Unix(),
+	}
+
+	if err := facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", roomId).Updates(updates).Error; err != nil {
+		return nil, errors.New("公告发布失败，请稍后重试！")
+	}
+
+	return (&ChatRooms{}).Info(roomId), nil
 }
 
 // Active - 该用户当前是否被禁言，以及解禁时间（0 = 永久）
@@ -452,13 +667,16 @@ func chatRoomQuoteMap(item *ChatRoomMessages) any {
 //
 // mentionUids 是客户端从在线成员里选中的被 @ 用户：只用来发提醒，不进正文
 // （正文里本来就有 @昵称 文本，历史记录靠它渲染）。传空即普通消息。
-func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string, quoteId int, mentionUids ...int) (map[string]any, error) {
+func (this *ChatRoomMessages) Send(roomId, uid int, msgType, content, clientMsgId string, quoteId int, mentionUids ...int) (map[string]any, error) {
 
 	if uid <= 0 {
 		return nil, errors.New("请先登录后再发言！")
 	}
+	if roomId <= 0 {
+		return nil, errors.New("聊天室不存在！")
+	}
 
-	room := (&ChatRooms{}).Info()
+	room := (&ChatRooms{}).Info(roomId)
 	if cast.ToInt(room["id"]) <= 0 {
 		return nil, errors.New("聊天室不存在！")
 	}
@@ -466,7 +684,12 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 		return nil, errors.New("聊天室已关闭，暂时不能发言！")
 	}
 
-	if muted, until := (&ChatRoomMutes{}).Active(PublicRoomId, uid); muted {
+	// 自建群必须先是成员；大厅是所有登录用户的隐式成员
+	if roomId != PublicRoomId && !RoomIsMember(roomId, uid) {
+		return nil, errors.New("你还不是该聊天室的成员！")
+	}
+
+	if muted, until := (&ChatRoomMutes{}).Active(roomId, uid); muted {
 		if until > 0 {
 			return nil, fmt.Errorf("你已被禁言，%s 后自动解除！", time.Unix(until, 0).Format("01-02 15:04"))
 		}
@@ -507,7 +730,7 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 	// 幂等：同一个 client_msg_id 重复提交（连点 / 重试）直接返回已存在的那条
 	if clientMsgId != "" {
 		var exist ChatRoomMessages
-		if err := db.Where("room_id = ? AND uid = ? AND client_msg_id = ?", PublicRoomId, uid, clientMsgId).
+		if err := db.Where("room_id = ? AND uid = ? AND client_msg_id = ?", roomId, uid, clientMsgId).
 			First(&exist).Error; err == nil && exist.Id > 0 {
 			return ChatRoomMessageItem(&exist), nil
 		}
@@ -516,7 +739,7 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 	// 引用：只接受同一聊天室里、未被撤回的消息
 	var quote ChatRoomMessages
 	if quoteId > 0 {
-		if err := db.Where("room_id = ? AND id = ?", PublicRoomId, quoteId).First(&quote).Error; err != nil || quote.Id <= 0 {
+		if err := db.Where("room_id = ? AND id = ?", roomId, quoteId).First(&quote).Error; err != nil || quote.Id <= 0 {
 			return nil, errors.New("引用的消息不存在！")
 		}
 		if quote.IsRevoked == 1 {
@@ -525,7 +748,7 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 	}
 
 	row := ChatRoomMessages{
-		RoomId:      PublicRoomId,
+		RoomId:      roomId,
 		Uid:         uid,
 		MsgType:     msgType,
 		Content:     content,
@@ -554,9 +777,16 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 		SubmitCloudChatAudit(SceneChat, uid, 0, row.Id, content)
 	}
 
+	// 群的「最后一条消息」与未读游标都以它为准：一次性写回，
+	// 列表页排序、未读数都不用再扫消息表
+	facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", roomId).Updates(map[string]any{
+		"last_msg_id": row.Id,
+		"update_time": row.CreateTime,
+	})
+
 	// @提及：给被提到的人推一条提醒（图片消息没有正文里的 @昵称，不处理）
 	if msgType != "image" && len(mentionUids) > 0 {
-		notifyRoomMentions(uid, row.Id, content, mentionUids)
+		notifyRoomMentions(roomId, uid, row.Id, content, mentionUids)
 	}
 
 	return ChatRoomMessageItem(&row), nil
@@ -571,7 +801,7 @@ func (this *ChatRoomMessages) Send(uid int, msgType, content, clientMsgId string
 //
 // 昵称不做唯一约束，所以同名的两个用户都会被提醒 —— 这是可接受的偏差，
 // 比「只提醒其中一个、另一个永远收不到」更不容易漏。
-func notifyRoomMentions(fromUid, msgId int, content string, ids []int) {
+func notifyRoomMentions(roomId, fromUid, msgId int, content string, ids []int) {
 
 	if fromUid <= 0 || msgId <= 0 || len(ids) == 0 || PushChatMention == nil {
 		return
@@ -615,7 +845,7 @@ func notifyRoomMentions(fromUid, msgId int, content string, ids []int) {
 			"type": "chat_mention",
 			"to":   fmt.Sprintf("user_%d", user.Id),
 			"data": map[string]any{
-				"room_id":    PublicRoomId,
+				"room_id":    roomId,
 				"message_id": msgId,
 				"from_uid":   fromUid,
 				"preview":    string(preview),
@@ -625,8 +855,11 @@ func notifyRoomMentions(fromUid, msgId int, content string, ids []int) {
 }
 
 // History - 往前翻历史（beforeId=0 表示取最新一页，返回值按时间正序）
-func (this *ChatRoomMessages) History(uid, beforeId, limit int) (list []map[string]any, hasMore bool) {
+func (this *ChatRoomMessages) History(roomId, uid, beforeId, limit int) (list []map[string]any, hasMore bool) {
 
+	if roomId <= 0 {
+		roomId = PublicRoomId
+	}
 	if limit <= 0 {
 		limit = 30
 	}
@@ -635,7 +868,7 @@ func (this *ChatRoomMessages) History(uid, beforeId, limit int) (list []map[stri
 	}
 
 	db := facade.DB.Drive().Model(&ChatRoomMessages{}).
-		Where("room_id = ?", PublicRoomId).
+		Where("room_id = ?", roomId).
 		// 我删除过的消息不再出现在我的历史里（删除只对自己生效）
 		Where("id NOT IN (?)", chatRoomHiddenQuery(uid))
 	if beforeId > 0 {
@@ -661,8 +894,11 @@ func (this *ChatRoomMessages) History(uid, beforeId, limit int) (list []map[stri
 }
 
 // Sync - 断线补拉：id > afterSeq 的消息（正序）
-func (this *ChatRoomMessages) Sync(uid int, afterSeq int64, limit int) (list []map[string]any, lastSeq int64, hasMore bool) {
+func (this *ChatRoomMessages) Sync(roomId, uid int, afterSeq int64, limit int) (list []map[string]any, lastSeq int64, hasMore bool) {
 
+	if roomId <= 0 {
+		roomId = PublicRoomId
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -675,7 +911,7 @@ func (this *ChatRoomMessages) Sync(uid int, afterSeq int64, limit int) (list []m
 
 	var rows []ChatRoomMessages
 	err := facade.DB.Drive().Model(&ChatRoomMessages{}).
-		Where("room_id = ?", PublicRoomId).
+		Where("room_id = ?", roomId).
 		Where("id NOT IN (?)", chatRoomHiddenQuery(uid)).
 		Where("id > ?", afterSeq).
 		Order("id asc").Limit(limit + 1).Find(&rows).Error
@@ -705,16 +941,19 @@ func (this *ChatRoomMessages) Sync(uid int, afterSeq int64, limit int) (list []m
 //
 // 权限：消息作者本人（2 分钟内）或超级管理员（不限时间、不限作者）。
 // 撤回只清内容并打标记，不删行 —— 时间线不能凭空少一条，别人会以为看错了。
-func (this *ChatRoomMessages) Revoke(msgId, operatorUid int, isAdmin bool) (map[string]any, error) {
+func (this *ChatRoomMessages) Revoke(roomId, msgId, operatorUid int, isAdmin bool) (map[string]any, error) {
 
 	if msgId <= 0 || operatorUid <= 0 {
 		return nil, errors.New("参数错误！")
+	}
+	if roomId <= 0 {
+		roomId = PublicRoomId
 	}
 
 	db := facade.DB.Drive()
 
 	var row ChatRoomMessages
-	if err := db.Where("room_id = ? AND id = ?", PublicRoomId, msgId).First(&row).Error; err != nil || row.Id <= 0 {
+	if err := db.Where("room_id = ? AND id = ?", roomId, msgId).First(&row).Error; err != nil || row.Id <= 0 {
 		return nil, errors.New("消息不存在或已被删除！")
 	}
 
@@ -757,15 +996,18 @@ func (this *ChatRoomMessages) Revoke(msgId, operatorUid int, isAdmin bool) (map[
 //
 // 公共聊天室里所有登录用户都能看到每条消息，所以不校验作者：
 // 任何人都可以把任意一条从「自己的」视图里删掉。
-func (this *ChatRoomMessages) Delete(uid, msgId int) error {
+func (this *ChatRoomMessages) Delete(roomId, uid, msgId int) error {
 
 	if uid <= 0 || msgId <= 0 {
 		return errors.New("参数不完整！")
 	}
+	if roomId <= 0 {
+		roomId = PublicRoomId
+	}
 
 	var row ChatRoomMessages
 	if err := facade.DB.Drive().
-		Where("room_id = ? AND id = ?", PublicRoomId, msgId).
+		Where("room_id = ? AND id = ?", roomId, msgId).
 		First(&row).Error; err != nil || row.Id <= 0 {
 		return errors.New("消息不存在！")
 	}
@@ -943,23 +1185,34 @@ func saveRoomAutoClearConfig(config map[string]any) error {
 // 而前端把消息 id 当 seq 游标（after_seq / before_id）。id 归零后，
 // 本地还留着旧消息的客户端会认为「新消息都比我的水位小」，补拉永远拿不到。
 // DELETE 保留自增序列，新消息 id 始终大于历史 id，游标语义不会被破坏。
-func (this *ChatRoomMessages) Clear() (int64, error) {
+func (this *ChatRoomMessages) Clear(roomId ...int) (int64, error) {
 
 	if facade.DB == nil {
 		return 0, errors.New("数据库尚未就绪！")
 	}
 
-	tx := facade.DB.Drive().Unscoped().
-		Where("room_id = ?", PublicRoomId).
+	id := PublicRoomId
+	if len(roomId) > 0 && roomId[0] > 0 {
+		id = roomId[0]
+	}
+
+	db := facade.DB.Drive()
+
+	// 先记下要删的消息 id：隐藏记录是按 msg_id 关联的，清完消息就查不出来了
+	var ids []int
+	db.Model(&ChatRoomMessages{}).Where("room_id = ?", id).Pluck("id", &ids)
+
+	tx := db.Unscoped().
+		Where("room_id = ?", id).
 		Delete(&ChatRoomMessages{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
 
-	// 消息都清空了，隐藏记录已无意义：一并清掉，避免长期累积一堆指向不存在消息的行
-	facade.DB.Drive().Unscoped().
-		Where("1 = 1").
-		Delete(&ChatRoomMessageDeletes{})
+	// 只清这个房间的隐藏记录，别把别的群（自建群）的记录一起带走
+	if len(ids) > 0 {
+		db.Unscoped().Where("msg_id IN ?", ids).Delete(&ChatRoomMessageDeletes{})
+	}
 
 	return tx.RowsAffected, nil
 }

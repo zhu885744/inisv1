@@ -189,12 +189,20 @@ func (this *ChatAdmin) revoke(ctx *gin.Context) {
 	}
 
 	if scene := strings.TrimSpace(cast.ToString(this.param(ctx, "scene", model.ChatMuteScopeDM))); scene == model.SceneChat {
-		message, err := (&model.ChatRoomMessages{}).Revoke(msgId, this.user(ctx).Id, true)
+		// 多群：后台从「聊天室消息」列表进来时会带上 room_id；
+		// 不带则按公共大厅处理，保持旧行为。
+		roomId := cast.ToInt(this.param(ctx, "room_id", 0))
+		if roomId <= 0 {
+			roomId = model.PublicRoomId
+		}
+
+		message, err := (&model.ChatRoomMessages{}).Revoke(roomId, msgId, this.user(ctx).Id, true)
 		if err != nil {
 			this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
 			return
 		}
-		socketctrl.BroadcastRoom(map[string]any{
+		// 按房间扇出：自建群的撤回只该被该群成员看到
+		pushRoomEvent(roomId, map[string]any{
 			"type": "room_revoke",
 			"data": message,
 		})
