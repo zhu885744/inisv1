@@ -52,6 +52,9 @@ type ThemeToken struct {
 	Type  string `json:"type"`
 	Desc  string `json:"desc,omitempty"`
 	Unit  string `json:"unit,omitempty"`
+	// Shared 为 true 表示该 token 与明暗模式无关（圆角这类「形状」），
+	// 只存一套值：浅色块里输出一次，深色块省略，深色直接继承。
+	Shared bool `json:"shared,omitempty"`
 }
 
 // ThemePreset - 内置主题预设
@@ -81,7 +84,7 @@ var themeGroups = []facade.H{
 	{"key": "text", "label": "文字层级", "desc": "标题、正文、辅助文字与占位信息"},
 	{"key": "brand", "label": "品牌与语义", "desc": "主色（按钮 / 链接 / 强调）与成功、警告色"},
 	{"key": "gradient", "label": "渐变", "desc": "默认关闭（none）；配置后叠加在纯色之上，不改动原有主色"},
-	{"key": "shape", "label": "圆角", "desc": "控件 10 / 卡片 14 / 弹层 18；可用下方「统一圆角」批量调整"},
+	{"key": "shape", "label": "圆角", "desc": "控件 10 / 卡片 14 / 弹层 18；浅色与深色共用一套，改动会同时生效，可用下方「统一圆角」批量调整"},
 	{"key": "depth", "label": "阴影", "desc": "浮层投影；深色模式默认无阴影，靠表面提亮区分层级"},
 }
 
@@ -108,11 +111,11 @@ var themeTokens = []ThemeToken{
 	{Key: "gradient-brand", Label: "品牌渐变", Group: "gradient", Type: themeTypePaint, Desc: "主按钮背景；默认 none，配置后叠加在品牌色上"},
 	{Key: "gradient-page", Label: "页面渐变", Group: "gradient", Type: themeTypePaint, Desc: "整页背景；默认 none，配置后叠加在页面底色上"},
 
-	{Key: "radius-xs", Label: "迷你圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "标签内小按钮"},
-	{Key: "radius-sm", Label: "小圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "按钮、输入框"},
-	{Key: "radius", Label: "基础圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "控件默认"},
-	{Key: "radius-lg", Label: "卡片圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "卡片、面板"},
-	{Key: "radius-xl", Label: "弹层圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "弹窗、浮层"},
+	{Key: "radius-xs", Label: "迷你圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "标签内小按钮", Shared: true},
+	{Key: "radius-sm", Label: "小圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "按钮、输入框", Shared: true},
+	{Key: "radius", Label: "基础圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "控件默认", Shared: true},
+	{Key: "radius-lg", Label: "卡片圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "卡片、面板", Shared: true},
+	{Key: "radius-xl", Label: "弹层圆角", Group: "shape", Type: themeTypeLength, Unit: "px", Desc: "弹窗、浮层", Shared: true},
 
 	{Key: "shadow-sm", Label: "轻微阴影", Group: "depth", Type: themeTypeShadow, Desc: "卡片默认投影"},
 	{Key: "shadow", Label: "悬浮阴影", Group: "depth", Type: themeTypeShadow, Desc: "卡片 hover / 下拉"},
@@ -336,6 +339,15 @@ func themeFillDefaults(settings *ThemeSettings) {
 		if settings.Dark[token.Key] == "" {
 			settings.Dark[token.Key] = themeTokenValue(nil, token, true)
 		}
+	}
+
+	// 圆角这类 Shared token 只保留一套值：以浅色为准，深色强制跟随。
+	// 旧配置里两套圆角不一致时，这里一次性收敛，避免「深色还是旧圆角」的残留。
+	for _, token := range themeTokens {
+		if !token.Shared {
+			continue
+		}
+		settings.Dark[token.Key] = settings.Light[token.Key]
 	}
 }
 
@@ -832,6 +844,11 @@ func themeBlock(selector string, settings ThemeSettings, dark bool) string {
 	builder.WriteString(" {\n")
 
 	for _, token := range themeTokens {
+		// 与明暗模式无关的 token（圆角）只在浅色块里输出一次，
+		// 深色块里省略，深色自然继承同一套值，不再出现两套圆角。
+		if dark && token.Shared {
+			continue
+		}
 		fmt.Fprintf(&builder, "  --%s: %s;\n", token.Key, themeTokenValue(values, token, dark))
 	}
 
