@@ -223,7 +223,7 @@ func (this *client) read() {
 
 			// 「正在输入」：纯瞬时事件，不落库、不走离线缓存。
 			// 放在通用转发之前处理，是因为它既可能带 to（私聊），
-			// 也可能不带（聊天室全员广播），通用分支对这两种形态都有额外校验。
+			// 也可能不带（群聊全员广播），通用分支对这两种形态都有额外校验。
 			if msgType == "typing" {
 				this.relayTyping(item)
 				continue
@@ -559,7 +559,7 @@ func (hub *hub) clientIDs() []string {
 func (hub *hub) broadcastStatus() {
 	// 收集在线用户信息（用户名/访客 + 脱敏 IP + 活跃时间 + uid）
 	//
-	// 带上 uid 是为了让聊天室能展示在线成员并按人 @：
+	// 带上 uid 是为了让群聊能展示在线成员并按人 @：
 	// 跨域场景下连接 ID 是 guest_xxx（身份是后来 auth 升级的），
 	// 只靠 id 前缀区分不出「这是哪位登录用户」。
 	onlineUsers := make([]map[string]any, 0, len(hub.clients))
@@ -843,7 +843,7 @@ func (hub *hub) dispatch(message []byte, allowOffline bool) {
 		hub.recordMessage("single")
 		hub.singlecast(message, allowOffline)
 	case strings.HasPrefix(msgType, "room"):
-		// 聊天室事件分两种投递方式：
+		// 群聊事件分两种投递方式：
 		//   - 带 to：自建群按成员扇出（服务端为每个成员各发一条，dispatch 走单播），
 		//     公共大厅不带 to，走下面的全员广播；
 		//   - 不带 to：公共大厅的消息 / 撤回 / 禁言 / 解禁 / 改资料，全员可见。

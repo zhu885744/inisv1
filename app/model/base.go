@@ -98,9 +98,9 @@ func InitTable() {
 		// 用户私聊：会话 / 消息（依赖 Users；未读数由消息表聚合，无冗余计数表）
 		{"ChatConversations", InitChatConversations},
 		{"ChatMessages", InitChatMessages},
-		// 敏感词命中审计（场景 / 动作 / 规则版本；私信与聊天室不存原文）
+		// 敏感词命中审计（场景 / 动作 / 规则版本；私信与群聊不存原文）
 		{"SensitiveHits", InitSensitiveHits},
-		// 聊天违规留证（私信 / 聊天室的命中片段，后台「聊天审核」的数据源）
+		// 聊天违规留证（私信 / 群聊的命中片段，后台「聊天审核」的数据源）
 		{"ChatModeration", InitChatModeration},
 		// 消息的「按人删除」记录（只影响删除者自己的历史 / 未读数）
 		{"ChatMessageDeletes", InitChatMessageDeletes},
@@ -108,13 +108,13 @@ func InitTable() {
 		{"ChatStates", InitChatStates},
 		// 会话偏好（每会话每用户一条：置顶 / 免打扰，属于个人视图设置）
 		{"ChatConversationPrefs", InitChatConversationPrefs},
-		// 聊天室：房间（初始化时确保 id=1 的公共大厅存在）/ 成员 / 入群申请 / 消息 / 禁言
+		// 群聊：房间（初始化时确保 id=1 的公共大厅存在）/ 成员 / 入群申请 / 消息 / 禁言
 		{"ChatRooms", InitChatRooms},
 		{"ChatRoomMembers", InitChatRoomMembers},
 		{"ChatRoomJoinRequests", InitChatRoomJoinRequests},
 		{"ChatRoomInvites", InitChatRoomInvites},
 		{"ChatRoomMessages", InitChatRoomMessages},
-		// 聊天室消息的「按人删除」记录（只影响删除者自己的历史）
+		// 群聊消息的「按人删除」记录（只影响删除者自己的历史）
 		{"ChatRoomMessageDeletes", InitChatRoomMessageDeletes},
 		// 禁言（私信禁言复用同一张表：room_id = 0 表示私信作用域）
 		{"ChatRoomMutes", InitChatRoomMutes},

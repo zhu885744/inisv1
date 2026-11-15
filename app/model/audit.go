@@ -19,7 +19,7 @@ import (
 // 未注入时（例如离线任务）只改库，对方下次拉历史就能看到「已撤回」。
 var PushChatRevoke func(targetUid int, payload map[string]any)
 
-// PushChatMention - 聊天室 @提及 的实时推送钩子
+// PushChatMention - 群聊 @提及 的实时推送钩子
 //
 // 与 PushChatRevoke 同样的注入方式（model ← socket 的单向依赖），
 // 由 app/socket/controller 在 init 里赋值为 socket.PushPrivate。
@@ -58,7 +58,7 @@ type cloudAuditTask struct {
 	BindType string
 	BindId   int
 	Uid      int
-	// ToUid 私信接收者（聊天室为 0），写违规留证时用
+	// ToUid 私信接收者（群聊为 0），写违规留证时用
 	ToUid int
 	Text  string
 	// ImageURL / SavePath 图像审核用（BindType = image）
@@ -166,7 +166,7 @@ func runCloudAudit(task cloudAuditTask) {
 			AuditMsg:     firstAuditMessage(result.Messages),
 		}
 		if isChatMessageBind(task.BindType) {
-			// 私信 / 聊天室：撤回本条 + 写违规留证（后台「聊天审核」复核）
+			// 私信 / 群聊：撤回本条 + 写违规留证（后台「聊天审核」复核）
 			revokeChatByCloud(task.Scene, task.BindId)
 			NoteChatModeration(task.Scene, task.Uid, task.ToUid, task.Text, decision, task.BindId)
 		} else {
@@ -211,7 +211,7 @@ func runCloudAudit(task cloudAuditTask) {
 	}
 }
 
-// isChatMessageBind - 该任务对应的是私信 / 聊天室消息（而不是内容表）
+// isChatMessageBind - 该任务对应的是私信 / 群聊消息（而不是内容表）
 func isChatMessageBind(bindType string) bool {
 	return bindType == "dm-message" || bindType == "chat-message"
 }
@@ -221,7 +221,7 @@ const AuditProviderBaiduMatch = "cloud"
 
 // auditApplyStatus - 回写内容表的 audit 状态与驳回原因
 //
-// 只处理同时有 audit / reason 字段的内容表；私信 / 聊天室的消息表没有这两个字段，
+// 只处理同时有 audit / reason 字段的内容表；私信 / 群聊的消息表没有这两个字段，
 // 由聊天的违规留证（ChatModeration）单独处理，不在本函数范围内。
 //
 // 通过（AuditStatusPassed）时不写 reason：人工通过时后端会清空原因，
@@ -404,7 +404,7 @@ func notifyCloudAudit(bindType string, id int, status int, reason string) {
 	CreateUserNotify(uid, 0, typ, titleText, content, bind, id)
 }
 
-// SubmitCloudChatAudit - 私信 / 聊天室的云端审核（异步）
+// SubmitCloudChatAudit - 私信 / 群聊的云端审核（异步）
 //
 // 消息表没有 audit 字段，处置方式与内容表不同：
 //   - block：撤回本条消息（内容清空、保留行）+ 写违规留证，后台「聊天审核」可复核；
@@ -506,7 +506,7 @@ func revokeChatByCloud(scene string, msgId int) {
 		"revoke_uid":  0,
 		"revoke_time": now,
 	}).Error; err != nil {
-		facade.Log.Error(map[string]any{"error": err.Error(), "msg_id": msgId}, "云端审核撤回聊天室消息失败")
+		facade.Log.Error(map[string]any{"error": err.Error(), "msg_id": msgId}, "云端审核撤回群聊消息失败")
 	}
 }
 

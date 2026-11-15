@@ -664,7 +664,7 @@ func (hub *hub) ValidateMessage(message []byte) (bool, string) {
 
 	msgType := cast.ToString(content["type"])
 	// typing - 「正在输入」：纯瞬时状态，不走中继结构（见 client.relayTyping），
-	// 所以只在这里放行，不需要 to（聊天室广播）也允许带 to（私聊定向）
+	// 所以只在这里放行，不需要 to（群聊广播）也允许带 to（私聊定向）
 	allowedTypes := []string{"broadcast", "single", "private", "ack", "status", "read", "ping", "pong", "notification", "auth", "typing"}
 	found := false
 	for _, t := range allowedTypes {

@@ -7,12 +7,12 @@ import (
 	socketctrl "inis/app/socket/controller"
 )
 
-// RoomStruct - 公共聊天室的维护任务
+// RoomStruct - 公共群聊的维护任务
 type RoomStruct struct{}
 
 var Room *RoomStruct
 
-// Run - 公共聊天室自动清空
+// Run - 公共群聊自动清空
 //
 // 调度频率固定为每小时，是否真正清空由配置决定：
 //

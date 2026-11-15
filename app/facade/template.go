@@ -343,7 +343,7 @@ scenes = ["comment", "article", "moment", "dm", "chat"]
 level = "high"
 match = "contains"
 
-# 广告：可能是正常讨论，先进审核（私信 / 聊天室实时场景由业务侧按动作降级处理）
+# 广告：可能是正常讨论，先进审核（私信 / 群聊实时场景由业务侧按动作降级处理）
 [[rules]]
 word = "广告"
 action = "review"

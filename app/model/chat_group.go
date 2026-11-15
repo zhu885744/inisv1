@@ -13,7 +13,7 @@ import (
 )
 
 /**
- * 群聊：用户自建的聊天室（多房间）
+ * 群聊：用户自建的群聊（多房间）
  *
  * 与公共大厅（id=1）共用 chat_rooms / chat_room_messages 两张表：
  *   - 大厅是「登录即成员」，不写 chat_room_members，靠 PublicRoomId 直接放行；
@@ -149,14 +149,14 @@ func RoomCanCreate(uid int) (bool, string) {
 		return false, "用户不存在！"
 	}
 	if user.Status != UserStatusNormal {
-		return false, "账号状态异常，暂时不能创建聊天室！"
+		return false, "账号状态异常，暂时不能创建群聊！"
 	}
 
 	var owned int64
 	facade.DB.Drive().Model(&ChatRooms{}).
 		Where("owner_uid = ?", uid).Count(&owned)
 	if owned >= ChatRoomCreateMaxOwned {
-		return false, fmt.Sprintf("每人最多创建 %d 个聊天室！", ChatRoomCreateMaxOwned)
+		return false, fmt.Sprintf("每人最多创建 %d 个群聊！", ChatRoomCreateMaxOwned)
 	}
 
 	if user.Exp >= ChatRoomCreateMinExp {
@@ -168,10 +168,10 @@ func RoomCanCreate(uid int) (bool, string) {
 		if days >= ChatRoomCreateMinDays {
 			return true, ""
 		}
-		return false, fmt.Sprintf("注册满 %d 天或经验达到 %d 才能创建聊天室！", ChatRoomCreateMinDays, ChatRoomCreateMinExp)
+		return false, fmt.Sprintf("注册满 %d 天或经验达到 %d 才能创建群聊！", ChatRoomCreateMinDays, ChatRoomCreateMinExp)
 	}
 
-	return false, fmt.Sprintf("经验达到 %d 才能创建聊天室！", ChatRoomCreateMinExp)
+	return false, fmt.Sprintf("经验达到 %d 才能创建群聊！", ChatRoomCreateMinExp)
 }
 
 // ---------- 房间读写 ----------
@@ -185,12 +185,12 @@ func RoomCreate(ownerUid int, params map[string]any) (map[string]any, error) {
 
 	name := strings.TrimSpace(cast.ToString(params["name"]))
 	if len([]rune(name)) < 2 || len([]rune(name)) > 30 {
-		return nil, errors.New("聊天室名称需要 2 ~ 30 个字！")
+		return nil, errors.New("群聊名称需要 2 ~ 30 个字！")
 	}
 
 	description := strings.TrimSpace(cast.ToString(params["description"]))
 	if len([]rune(description)) > 200 {
-		return nil, errors.New("聊天室简介不能超过 200 个字！")
+		return nil, errors.New("群聊简介不能超过 200 个字！")
 	}
 
 	avatar := strings.TrimSpace(cast.ToString(params["avatar"]))
@@ -372,12 +372,12 @@ func roomUnread(roomId, uid int) int {
 func RoomDetail(roomId, uid int) (map[string]any, error) {
 
 	if roomId <= 0 {
-		return nil, errors.New("聊天室不存在！")
+		return nil, errors.New("群聊不存在！")
 	}
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return nil, errors.New("聊天室不存在或已解散！")
+		return nil, errors.New("群聊不存在或已解散！")
 	}
 
 	role := -1
@@ -424,10 +424,10 @@ func RoomJoin(roomId, uid int, message string) (map[string]any, error) {
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return nil, errors.New("聊天室不存在或已解散！")
+		return nil, errors.New("群聊不存在或已解散！")
 	}
 	if room.Status != 1 {
-		return nil, errors.New("聊天室已关闭，暂时不能加入！")
+		return nil, errors.New("群聊已关闭，暂时不能加入！")
 	}
 
 	if roomId == PublicRoomId {
@@ -439,7 +439,7 @@ func RoomJoin(roomId, uid int, message string) (map[string]any, error) {
 	}
 
 	if room.MaxMembers > 0 && room.MemberCount >= room.MaxMembers && room.JoinType == ChatRoomJoinFree {
-		return nil, errors.New("聊天室人数已满！")
+		return nil, errors.New("群聊人数已满！")
 	}
 
 	switch room.JoinType {
@@ -477,7 +477,7 @@ func RoomJoin(roomId, uid int, message string) (map[string]any, error) {
 		return map[string]any{"joined": false, "pending": true, "room": chatRoomItem(&room)}, nil
 	}
 
-	return nil, errors.New("该聊天室仅限邀请加入！")
+	return nil, errors.New("该群聊仅限邀请加入！")
 }
 
 // RoomLeave - 退群（群主不能直接退，需先解散）
@@ -487,15 +487,15 @@ func RoomLeave(roomId, uid int) error {
 		return errors.New("参数不完整！")
 	}
 	if roomId == PublicRoomId {
-		return errors.New("公共聊天室不能退出！")
+		return errors.New("公共群聊不能退出！")
 	}
 
 	role := RoomRole(roomId, uid)
 	if role < 0 {
-		return errors.New("你还不是该聊天室的成员！")
+		return errors.New("你还不是该群聊的成员！")
 	}
 	if role == ChatRoomRoleOwner {
-		return errors.New("群主不能退出，请先解散聊天室！")
+		return errors.New("群主不能退出，请先解散群聊！")
 	}
 
 	if err := facade.DB.Drive().Unscoped().
@@ -524,16 +524,16 @@ func RoomDissolve(roomId, uid int) error {
 		return errors.New("参数不完整！")
 	}
 	if roomId == PublicRoomId {
-		return errors.New("公共聊天室不能解散！")
+		return errors.New("公共群聊不能解散！")
 	}
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return errors.New("聊天室不存在或已解散！")
+		return errors.New("群聊不存在或已解散！")
 	}
 
 	if !RoomCanManage(roomId, uid) {
-		return errors.New("只有群主可以解散聊天室！")
+		return errors.New("只有群主可以解散群聊！")
 	}
 
 	db := facade.DB.Drive()
@@ -586,7 +586,7 @@ func RoomSetRole(roomId, operatorUid, targetUid, role int) error {
 		return errors.New("参数不完整！")
 	}
 	if roomId == PublicRoomId {
-		return errors.New("公共聊天室不需要设置管理员！")
+		return errors.New("公共群聊不需要设置管理员！")
 	}
 	if !RoomCanManage(roomId, operatorUid) {
 		return errors.New("只有群主可以设置管理员！")
@@ -601,7 +601,7 @@ func RoomSetRole(roomId, operatorUid, targetUid, role int) error {
 	var member ChatRoomMembers
 	if err := facade.DB.Drive().
 		Where("room_id = ? AND uid = ?", roomId, targetUid).First(&member).Error; err != nil {
-		return errors.New("该用户不在聊天室里！")
+		return errors.New("该用户不在群聊里！")
 	}
 	if member.Role == ChatRoomRoleOwner {
 		return errors.New("不能修改群主的角色！")
@@ -618,7 +618,7 @@ func RoomKick(roomId, operatorUid, targetUid int) error {
 		return errors.New("参数不完整！")
 	}
 	if roomId == PublicRoomId {
-		return errors.New("公共聊天室不能移除成员！")
+		return errors.New("公共群聊不能移除成员！")
 	}
 	if !RoomCanModerate(roomId, operatorUid) {
 		return errors.New("没有权限移除成员！")
@@ -629,7 +629,7 @@ func RoomKick(roomId, operatorUid, targetUid int) error {
 
 	targetRole := RoomRole(roomId, targetUid)
 	if targetRole < 0 {
-		return errors.New("该用户不在聊天室里！")
+		return errors.New("该用户不在群聊里！")
 	}
 	if targetRole == ChatRoomRoleOwner {
 		return errors.New("不能移除群主！")
@@ -671,15 +671,15 @@ func RoomAddMember(roomId, operatorUid, targetUid int) error {
 	}
 
 	if RoomIsMember(roomId, targetUid) {
-		return errors.New("该用户已经在聊天室里了！")
+		return errors.New("该用户已经在群聊里了！")
 	}
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return errors.New("聊天室不存在或已解散！")
+		return errors.New("群聊不存在或已解散！")
 	}
 	if room.MaxMembers > 0 && room.MemberCount >= room.MaxMembers {
-		return errors.New("聊天室人数已满！")
+		return errors.New("群聊人数已满！")
 	}
 
 	member := ChatRoomMembers{
@@ -752,10 +752,10 @@ func RoomHandleRequest(roomId, operatorUid, requestId int, approve bool) error {
 	if approve {
 		var room ChatRooms
 		if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-			return errors.New("聊天室不存在或已解散！")
+			return errors.New("群聊不存在或已解散！")
 		}
 		if room.MaxMembers > 0 && room.MemberCount >= room.MaxMembers {
-			return errors.New("聊天室人数已满，无法通过申请！")
+			return errors.New("群聊人数已满，无法通过申请！")
 		}
 	}
 

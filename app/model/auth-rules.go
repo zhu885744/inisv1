@@ -120,6 +120,8 @@ func EnsureAuthRules() {
 	NormalizeAuthRuleTypes()
 	SyncAuthRuleNames()
 	PruneAuthRules()
+	// 术语迁移（聊天室 → 群聊）：权限规则名 / 后台页面名 / 配置备注里已落库的旧词一并纠正
+	RenameChatRoomTerms()
 }
 
 // SyncAuthRuleNames - 回填「没有模块前缀」的权限规则名称（幂等）
@@ -784,44 +786,44 @@ func createAuthRules() (result []AuthRules) {
 				"path=unmute&type=default&name=解除聊天禁言",
 			},
 		},
-		// 公共聊天室（id=1）：全部要求登录 —— 游客只能看，不能发言，也就没必要给只读入口。
+		// 公共群聊（id=1）：全部要求登录 —— 游客只能看，不能发言，也就没必要给只读入口。
 		// 发言 / 撤回是普通用户的日常操作（type=login）；
 		// 禁言 / 解禁 / 改资料额外要求「超级管理员」，那层判断在控制器里用
 		// model.IsRootAdmin 做（root 权限组 + all 规则），这里不再拆权限点。
 		"room": {
 			"GET": {
-				"path=list&type=login&name=聊天室列表",
-				"path=info&type=login&name=聊天室信息",
-				"path=messages&type=login&name=聊天室消息",
-				"path=members&type=login&name=聊天室成员",
-				"path=requests&type=login&name=聊天室入群申请",
-				"path=invite&type=login&name=聊天室邀请信息",
-				"path=invites&type=login&name=聊天室邀请列表",
-				"path=mutes&type=login&name=聊天室禁言名单",
-				"path=auto-clear&type=login&name=聊天室自动清空配置",
+				"path=list&type=login&name=群聊列表",
+				"path=info&type=login&name=群聊信息",
+				"path=messages&type=login&name=群聊消息",
+				"path=members&type=login&name=群聊成员",
+				"path=requests&type=login&name=群聊入群申请",
+				"path=invite&type=login&name=群聊邀请信息",
+				"path=invites&type=login&name=群聊邀请列表",
+				"path=mutes&type=login&name=群聊禁言名单",
+				"path=auto-clear&type=login&name=群聊自动清空配置",
 			},
 			"POST": {
-				"path=create&type=login&name=创建聊天室",
-				"path=join&type=login&name=加入聊天室",
-				"path=leave&type=login&name=退出聊天室",
-				"path=dissolve&type=login&name=解散聊天室",
-				"path=announce&type=login&name=发布聊天室公告",
-				"path=member-role&type=login&name=设置聊天室管理员",
-				"path=member-add&type=login&name=邀请聊天室成员",
-				"path=member-remove&type=login&name=移出聊天室成员",
-				"path=invite-create&type=login&name=生成聊天室邀请",
-				"path=join-by-code&type=login&name=凭邀请加入聊天室",
+				"path=create&type=login&name=创建群聊",
+				"path=join&type=login&name=加入群聊",
+				"path=leave&type=login&name=退出群聊",
+				"path=dissolve&type=login&name=解散群聊",
+				"path=announce&type=login&name=发布群聊公告",
+				"path=member-role&type=login&name=设置群聊管理员",
+				"path=member-add&type=login&name=邀请群聊成员",
+				"path=member-remove&type=login&name=移出群聊成员",
+				"path=invite-create&type=login&name=生成群聊邀请",
+				"path=join-by-code&type=login&name=凭邀请加入群聊",
 				"path=request-handle&type=login&name=审批入群申请",
-				"path=read&type=login&name=聊天室已读上报",
-				"path=send&type=login&name=聊天室发言",
-				"path=revoke&type=login&name=聊天室撤回",
-				"path=delete&type=login&name=删除聊天室消息",
-				"path=mute&type=login&name=聊天室禁言",
-				"path=unmute&type=login&name=聊天室解禁",
+				"path=read&type=login&name=群聊已读上报",
+				"path=send&type=login&name=群聊发言",
+				"path=revoke&type=login&name=群聊撤回",
+				"path=delete&type=login&name=删除群聊消息",
+				"path=mute&type=login&name=群聊禁言",
+				"path=unmute&type=login&name=群聊解禁",
 			},
 			"PUT": {
-				"path=update&type=login&name=聊天室资料修改",
-				"path=auto-clear&type=login&name=保存聊天室自动清空配置",
+				"path=update&type=login&name=群聊资料修改",
+				"path=auto-clear&type=login&name=保存群聊自动清空配置",
 			},
 		},
 		// 拉黑（黑名单）：拉黑 / 解除 / 状态查询都要登录；
@@ -1070,7 +1072,7 @@ func createAuthRules() (result []AuthRules) {
 			},
 		},
 		"qps-warn": permModule(),
-		// 聊天审核：私信 / 聊天室命中词库的留证记录。
+		// 聊天审核：私信 / 群聊命中词库的留证记录。
 		// 只提供列表 / 数量 / 标记处理 / 删除 —— 禁言、封禁、撤回各有专门接口，这里不重复实现。
 		"chat-moderation": {
 			"GET": {

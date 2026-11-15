@@ -700,8 +700,8 @@ func (this *Chat) userBriefs(ids []int) map[int]map[string]any {
 
 // userBriefsByIds - 批量取用户公开信息
 //
-// 包级函数供私信与聊天室共用：两条链路的「作者信息」口径必须一致，
-// 否则同一个人在私信里是昵称、在聊天室里是「用户 #id」。
+// 包级函数供私信与群聊共用：两条链路的「作者信息」口径必须一致，
+// 否则同一个人在私信里是昵称、在群聊里是「用户 #id」。
 func userBriefsByIds(ids []int) map[int]map[string]any {
 
 	result := make(map[int]map[string]any, len(ids))

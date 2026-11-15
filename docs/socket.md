@@ -123,7 +123,7 @@
 | `ping` | `{ type }` | 应用层心跳，服务端回 `pong`（WS 层另有 ping） |
 | `auth` | `{ type, token }` | 连接后升级身份（跨域带不上 Cookie 时用） |
 | `kick` | `{ type, to }` | **仅管理员**：断开 `to` 指向的连接（`user_1` / `guest_xxx`） |
-| `typing` | `{ type, to }` 或 `{ type, room: 1 }` | 正在输入。私聊带 `to:"user_<uid>"`，聊天室带 `room:1`。必须已登录；服务端按 1.5 秒 / 连接节流，丢了不影响消息本身 |
+| `typing` | `{ type, to }` 或 `{ type, room: 1 }` | 正在输入。私聊带 `to:"user_<uid>"`，群聊带 `room:1`。必须已登录；服务端按 1.5 秒 / 连接节流，丢了不影响消息本身 |
 
 > 两种 `status` 靠 `content` 字段区分：含 `online_count` → 在线状态；含 `resource` / `database` → 系统状态。
 > 系统状态由 `app/socket/controller/status.go` 推送，间隔见 `socket.status_interval`（默认 3 秒）；

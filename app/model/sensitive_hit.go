@@ -16,7 +16,7 @@ import (
  * 也为后续申诉与误伤分析留数据基础。
  *
  * 隐私取舍：
- *   - 私信 / 聊天室不落原文摘要，只存内容哈希，避免人工看到用户全文；
+ *   - 私信 / 群聊不落原文摘要，只存内容哈希，避免人工看到用户全文；
  *   - 其它场景只在 block / review 时保留 120 字摘要，便于复核误伤；
  *   - uid 原样存储（后台需要定位用户），但不在日志里输出全文。
  */
@@ -31,7 +31,7 @@ type SensitiveHits struct {
 	Match       string `gorm:"size:16; comment:匹配方式;" json:"match"`
 	Version     string `gorm:"size:32; comment:词库版本;" json:"version"`
 	ContentHash string `gorm:"size:64; comment:内容哈希（不存全文）;" json:"content_hash"`
-	Excerpt     string `gorm:"size:255; comment:内容摘要（私信/聊天室不存）;" json:"excerpt"`
+	Excerpt     string `gorm:"size:255; comment:内容摘要（私信/群聊不存）;" json:"excerpt"`
 	// 机审维度：本地词库命中为 0 / 空，云端审核记为百度的 type / subType
 	// （30 涉政、33 涉黄、36 广告…），后台据此按维度统计与筛选
 	AuditType    int    `gorm:"type:int(12); default:0; index:idx_sensitive_hits_audit; comment:机审主维度;" json:"audit_type"`
@@ -53,7 +53,7 @@ func recordSensitiveHit(scene string, uid int, text string, decision SensitiveDe
 		return
 	}
 
-	// 私信 / 聊天室：实时且隐私敏感，不保存原文摘要
+	// 私信 / 群聊：实时且隐私敏感，不保存原文摘要
 	excerpt := ""
 	if scene != SceneDM && scene != SceneChat &&
 		(decision.Action == ActionBlock || decision.Action == ActionReview) {

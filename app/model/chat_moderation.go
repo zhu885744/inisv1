@@ -7,9 +7,9 @@ import (
 )
 
 /**
- * 聊天违规留证（私信 / 公共聊天室）
+ * 聊天违规留证（私信 / 公共群聊）
  *
- * 为什么需要：私信与聊天室对 review / warn / log 是**放行**的（隐私敏感，不塞人工审核队列），
+ * 为什么需要：私信与群聊对 review / warn / log 是**放行**的（隐私敏感，不塞人工审核队列），
  * 若不留证据，后台只剩一条统计数字，管理员无法判断「这句话到底算不算违规」。
  * 命中词库时留一条可复核的记录，就是后台「聊天审核」的数据来源。
  *
@@ -30,10 +30,10 @@ const (
 
 type ChatModeration struct {
 	Id      int    `gorm:"type:int(32); comment:主键;" json:"id"`
-	Scene   string `gorm:"size:16; index:idx_chat_moderation_scene; comment:场景（dm 私信 / chat 聊天室）;" json:"scene"`
+	Scene   string `gorm:"size:16; index:idx_chat_moderation_scene; comment:场景（dm 私信 / chat 群聊）;" json:"scene"`
 	MsgId   int    `gorm:"type:int(32); comment:关联消息ID;" json:"msg_id"`
 	Uid     int    `gorm:"type:int(32); index:idx_chat_moderation_uid; comment:发送者;" json:"uid"`
-	ToUid   int    `gorm:"type:int(32); comment:私信接收者（聊天室为 0）;" json:"to_uid"`
+	ToUid   int    `gorm:"type:int(32); comment:私信接收者（群聊为 0）;" json:"to_uid"`
 	Action  string `gorm:"size:16; comment:命中规则的处置动作;" json:"action"`
 	Word    string `gorm:"size:64; comment:命中的词;" json:"word"`
 	Level   string `gorm:"size:16; comment:风险等级;" json:"level"`

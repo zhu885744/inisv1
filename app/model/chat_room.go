@@ -16,11 +16,11 @@ import (
 )
 
 /**
- * 聊天室（公共大厅 + 用户自建群聊）
+ * 群聊（公共大厅 + 用户自建群聊）
  *
  * 与私信（chat.go）是两套结构，刻意不复用 chat_messages：
  *   - 私信是「点对点」，未读 / 已读 / 会话摘要都围绕两个人算；
- *   - 聊天室是「一对多」，没有接收者、没有逐人已读，只有每条时间线，
+ *   - 群聊是「一对多」，没有接收者、没有逐人已读，只有每条时间线，
  *     多出来的只是「谁发的」「管理员撤回了谁」「谁被禁言了」。
  * 混在一张表里会让私信的未读统计到处加排除条件，得不偿失。
  *
@@ -79,7 +79,7 @@ const (
 	//
 	// 为什么不另建一张「封禁表」：禁言本来就有到期时间 / 原因 / 操作人这套字段，
 	// 私信只是换了个作用域。单独造一张表会出现两套解除口径、两个后台名单，
-	// 处置时要分别记两笔。这里只把作用域折进 room_id（聊天室 = 1，私信 = 0）。
+	// 处置时要分别记两笔。这里只把作用域折进 room_id（群聊 = 1，私信 = 0）。
 	ChatMuteDM = 0
 
 	// ChatRoomMentionMax - 一条消息最多 @ 多少人
@@ -89,10 +89,10 @@ const (
 	ChatRoomMentionMax = 5
 )
 
-// ChatRooms - 聊天室
+// ChatRooms - 群聊
 type ChatRooms struct {
 	Id          int    `gorm:"type:int(32); comment:主键;" json:"id"`
-	Name        string `gorm:"size:60; default:'公共聊天室'; comment:名称;" json:"name"`
+	Name        string `gorm:"size:60; default:'公共群聊'; comment:名称;" json:"name"`
 	Description string `gorm:"size:255; default:''; comment:简介;" json:"description"`
 	Avatar      string `gorm:"size:255; default:''; comment:头像;" json:"avatar"`
 	// Status - 1 正常 / 0 关闭（关闭后只能看历史，不能发言）
@@ -119,7 +119,7 @@ type ChatRooms struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
-// ChatRoomMessages - 聊天室消息（一条全局时间线）
+// ChatRoomMessages - 群聊消息（一条全局时间线）
 type ChatRoomMessages struct {
 	Id      int    `gorm:"type:int(32); comment:主键;" json:"id"`
 	RoomId  int    `gorm:"type:int(32); index:idx_chat_room_messages_room; comment:房间ID;" json:"room_id"`
@@ -146,7 +146,7 @@ type ChatRoomMessages struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
-// ChatRoomMessageDeletes - 聊天室消息的「按人删除」记录
+// ChatRoomMessageDeletes - 群聊消息的「按人删除」记录
 //
 // 公共时间线是所有人的共同记录，右键「删除」只应影响操作者自己：
 // 这里记一条 (uid, msg_id)，该用户的历史 / 补拉会过滤掉它；
@@ -181,7 +181,7 @@ type ChatRoomInvites struct {
 	DeleteTime soft_delete.DeletedAt `gorm:"comment:删除时间; default:0;" json:"delete_time"`
 }
 
-// ChatRoomMutes - 聊天室禁言记录
+// ChatRoomMutes - 群聊禁言记录
 //
 // 一次禁言一条记录，解除时软删除；Active 只认「未删除 + 未到期」的那条。
 // 不加唯一索引：同一个人可以被反复禁言 / 解禁，历史记录留着便于排查。
@@ -290,7 +290,7 @@ func InitChatRoomMessageDeletes() {
 	}
 }
 
-// chatRoomHiddenQuery - 我在聊天室里删除过的消息 id 子查询
+// chatRoomHiddenQuery - 我在群聊里删除过的消息 id 子查询
 func chatRoomHiddenQuery(uid int) *gorm.DB {
 	return facade.DB.Drive().Model(&ChatRoomMessageDeletes{}).
 		Select("msg_id").Where("uid = ?", uid)
@@ -310,12 +310,17 @@ func (this *ChatRooms) Ensure() {
 				"max_members": 0,
 			})
 		}
+		// 术语迁移：大厅是系统建的，老库里名字还是「公共聊天室」，改成「公共群聊」。
+		// 只在名称仍是旧默认值时替换 —— 超级管理员自定义过的名字不能被覆盖。
+		if room.Name == "公共聊天室" {
+			facade.DB.Drive().Model(&ChatRooms{}).Where("id = ?", PublicRoomId).Update("name", "公共群聊")
+		}
 		return
 	}
 
 	seed := ChatRooms{
 		Id:          PublicRoomId,
-		Name:        "公共聊天室",
+		Name:        "公共群聊",
 		Description: "全站用户都在这儿，随便聊点什么",
 		Status:      1,
 		OwnerUid:    0,
@@ -324,7 +329,7 @@ func (this *ChatRooms) Ensure() {
 	}
 
 	if err := facade.DB.Drive().Create(&seed).Error; err != nil {
-		facade.Log.Error(map[string]any{"error": err}, "公共聊天室初始化失败")
+		facade.Log.Error(map[string]any{"error": err}, "公共群聊初始化失败")
 	}
 }
 
@@ -383,10 +388,10 @@ func (this *ChatRooms) Update(params map[string]any, roomId ...int) (map[string]
 	if value, ok := params["name"]; ok {
 		name := strings.TrimSpace(cast.ToString(value))
 		if name == "" {
-			return nil, errors.New("聊天室名称不能为空！")
+			return nil, errors.New("群聊名称不能为空！")
 		}
 		if len([]rune(name)) > 30 {
-			return nil, errors.New("聊天室名称不能超过 30 个字！")
+			return nil, errors.New("群聊名称不能超过 30 个字！")
 		}
 		updates["name"] = name
 	}
@@ -394,7 +399,7 @@ func (this *ChatRooms) Update(params map[string]any, roomId ...int) (map[string]
 	if value, ok := params["description"]; ok {
 		description := strings.TrimSpace(cast.ToString(value))
 		if len([]rune(description)) > 200 {
-			return nil, errors.New("聊天室简介不能超过 200 个字！")
+			return nil, errors.New("群聊简介不能超过 200 个字！")
 		}
 		updates["description"] = description
 	}
@@ -444,7 +449,7 @@ func (this *ChatRooms) Update(params map[string]any, roomId ...int) (map[string]
 func (this *ChatRooms) SetNotice(roomId int, notice string) (map[string]any, error) {
 
 	if roomId <= 0 {
-		return nil, errors.New("聊天室不存在！")
+		return nil, errors.New("群聊不存在！")
 	}
 
 	notice = strings.TrimSpace(notice)
@@ -467,7 +472,7 @@ func (this *ChatRooms) SetNotice(roomId int, notice string) (map[string]any, err
 
 // Active - 该用户当前是否被禁言，以及解禁时间（0 = 永久）
 //
-// roomId 传 PublicRoomId 查聊天室禁言，传 ChatMuteDM（0）查私信禁言。
+// roomId 传 PublicRoomId 查群聊禁言，传 ChatMuteDM（0）查私信禁言。
 func (this *ChatRoomMutes) Active(roomId, uid int) (muted bool, until int64) {
 
 	if roomId < 0 || uid <= 0 {
@@ -576,7 +581,7 @@ func (this *ChatRoomMutes) List(roomId int) []map[string]any {
 
 // ListAll - 生效中的禁言（不区分作用域，后台「禁言名单」用）
 //
-// 每行带上 scope：room_id = ChatMuteDM(0) 的是私信禁言，其余是聊天室禁言。
+// 每行带上 scope：room_id = ChatMuteDM(0) 的是私信禁言，其余是群聊禁言。
 func (this *ChatRoomMutes) ListAll() []map[string]any {
 
 	result := make([]map[string]any, 0)
@@ -619,7 +624,7 @@ func ChatMuteScopeName(scope string) string {
 	if scope == ChatMuteScopeDM {
 		return "私信"
 	}
-	return "聊天室"
+	return "群聊"
 }
 
 // ChatRoomMessageItem - 消息对外结构
@@ -660,9 +665,9 @@ func chatRoomQuoteMap(item *ChatRoomMessages) any {
 	}
 }
 
-// Send - 发一条聊天室消息
+// Send - 发一条群聊消息
 //
-// quoteId > 0 表示引用当前聊天室里的某条消息：服务端回查原消息并落快照
+// quoteId > 0 表示引用当前群聊里的某条消息：服务端回查原消息并落快照
 // （存在 / 未撤回），不信任客户端传来的引用内容。
 //
 // mentionUids 是客户端从在线成员里选中的被 @ 用户：只用来发提醒，不进正文
@@ -673,20 +678,20 @@ func (this *ChatRoomMessages) Send(roomId, uid int, msgType, content, clientMsgI
 		return nil, errors.New("请先登录后再发言！")
 	}
 	if roomId <= 0 {
-		return nil, errors.New("聊天室不存在！")
+		return nil, errors.New("群聊不存在！")
 	}
 
 	room := (&ChatRooms{}).Info(roomId)
 	if cast.ToInt(room["id"]) <= 0 {
-		return nil, errors.New("聊天室不存在！")
+		return nil, errors.New("群聊不存在！")
 	}
 	if cast.ToInt(room["status"]) != 1 {
-		return nil, errors.New("聊天室已关闭，暂时不能发言！")
+		return nil, errors.New("群聊已关闭，暂时不能发言！")
 	}
 
 	// 自建群必须先是成员；大厅是所有登录用户的隐式成员
 	if roomId != PublicRoomId && !RoomIsMember(roomId, uid) {
-		return nil, errors.New("你还不是该聊天室的成员！")
+		return nil, errors.New("你还不是该群聊的成员！")
 	}
 
 	if muted, until := (&ChatRoomMutes{}).Active(roomId, uid); muted {
@@ -714,7 +719,7 @@ func (this *ChatRoomMessages) Send(roomId, uid int, msgType, content, clientMsgI
 		return nil, errors.New("图片地址不合法！")
 	}
 
-	// 敏感词：聊天室实时性高、扩散快，按 block / limit 拦截；
+	// 敏感词：群聊实时性高、扩散快，按 block / limit 拦截；
 	// review / warn / log 放行 —— 放行的消息在入库后留一条「命中片段」作为证据，
 	// 后台「聊天审核」据此判断违规，并可配合撤回 / 禁言处置。
 	sensitiveHit := SensitiveDecision{}
@@ -736,7 +741,7 @@ func (this *ChatRoomMessages) Send(roomId, uid int, msgType, content, clientMsgI
 		}
 	}
 
-	// 引用：只接受同一聊天室里、未被撤回的消息
+	// 引用：只接受同一群聊里、未被撤回的消息
 	var quote ChatRoomMessages
 	if quoteId > 0 {
 		if err := db.Where("room_id = ? AND id = ?", roomId, quoteId).First(&quote).Error; err != nil || quote.Id <= 0 {
@@ -792,7 +797,7 @@ func (this *ChatRoomMessages) Send(roomId, uid int, msgType, content, clientMsgI
 	return ChatRoomMessageItem(&row), nil
 }
 
-// notifyRoomMentions - 给被 @ 的人推一条「聊天室里有人提到你」
+// notifyRoomMentions - 给被 @ 的人推一条「群聊里有人提到你」
 //
 // 客户端传来的 uid 不能直接信：任何人都能凭空指定一批 uid，
 // 那就是一条可以给任意用户发提醒的骚扰通道。这里核对两件事：
@@ -994,7 +999,7 @@ func (this *ChatRoomMessages) Revoke(roomId, msgId, operatorUid int, isAdmin boo
 //   - 撤回：清空内容并广播给所有人，时间线上留一条「撤回」提示；
 //   - 删除：只写一条 (uid, msg_id) 隐藏记录，别人完全看不到变化。
 //
-// 公共聊天室里所有登录用户都能看到每条消息，所以不校验作者：
+// 公共群聊里所有登录用户都能看到每条消息，所以不校验作者：
 // 任何人都可以把任意一条从「自己的」视图里删掉。
 func (this *ChatRoomMessages) Delete(roomId, uid, msgId int) error {
 
@@ -1015,7 +1020,7 @@ func (this *ChatRoomMessages) Delete(roomId, uid, msgId int) error {
 	record := ChatRoomMessageDeletes{Uid: uid, MsgId: msgId}
 	if err := facade.DB.Drive().Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&record).Error; err != nil {
-		facade.Log.Error(map[string]any{"error": err, "uid": uid, "msg_id": msgId}, "删除聊天室消息失败")
+		facade.Log.Error(map[string]any{"error": err, "uid": uid, "msg_id": msgId}, "删除群聊消息失败")
 		return errors.New("删除失败，请稍后重试！")
 	}
 
@@ -1159,7 +1164,7 @@ func saveRoomAutoClearConfig(config map[string]any) error {
 		table := Config{
 			Key:        RoomAutoClearConfigKey,
 			Json:       jsonValue,
-			Remark:     "公共聊天室自动清空（间隔天数 / 上次清空时间）",
+			Remark:     "公共群聊自动清空（间隔天数 / 上次清空时间）",
 			CreateTime: now,
 			UpdateTime: now,
 		}
@@ -1167,7 +1172,7 @@ func saveRoomAutoClearConfig(config map[string]any) error {
 	}
 
 	if err != nil {
-		facade.Log.Error(map[string]any{"error": err, "key": RoomAutoClearConfigKey}, "保存聊天室自动清空配置失败")
+		facade.Log.Error(map[string]any{"error": err, "key": RoomAutoClearConfigKey}, "保存群聊自动清空配置失败")
 		return err
 	}
 
@@ -1179,7 +1184,7 @@ func saveRoomAutoClearConfig(config map[string]any) error {
 	return nil
 }
 
-// Clear - 物理删除公共聊天室的全部消息（自动清空任务调用）
+// Clear - 物理删除公共群聊的全部消息（自动清空任务调用）
 //
 // 用 DELETE 而不是 TRUNCATE：TRUNCATE 会把自增 id 重置为 1，
 // 而前端把消息 id 当 seq 游标（after_seq / before_id）。id 归零后，
@@ -1245,7 +1250,7 @@ func RoomAutoClearTick() int64 {
 
 	cleared, err := (&ChatRoomMessages{}).Clear()
 	if err != nil {
-		facade.Log.Error(map[string]any{"error": err}, "公共聊天室自动清空失败")
+		facade.Log.Error(map[string]any{"error": err}, "公共群聊自动清空失败")
 		return 0
 	}
 
@@ -1254,14 +1259,14 @@ func RoomAutoClearTick() int64 {
 	if err := saveRoomAutoClearConfig(config); err != nil {
 		// 配置没写回去也没关系：下一小时会再清一次（此刻表已空，代价很小），
 		// 但必须记日志，否则「明明清空了，后台时间却没变」很难排查
-		facade.Log.Error(map[string]any{"error": err}, "记录聊天室清空时间失败")
+		facade.Log.Error(map[string]any{"error": err}, "记录群聊清空时间失败")
 	}
 
 	facade.Log.Info(map[string]any{
 		"cleared": cleared,
 		"days":    days,
 		"at":      now,
-	}, "公共聊天室已自动清空")
+	}, "公共群聊已自动清空")
 
 	return cleared
 }

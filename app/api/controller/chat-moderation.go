@@ -13,7 +13,7 @@ import (
 )
 
 /**
- * ChatModeration - 聊天审核（私信 / 公共聊天室）
+ * ChatModeration - 聊天审核（私信 / 公共群聊）
  *
  * 数据来自 model.ChatModeration：消息命中词库时留下的「命中片段」，
  * 只包含命中词前后各 40 字，不含整条消息，后台据此判断是否违规。

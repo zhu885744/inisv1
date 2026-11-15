@@ -449,7 +449,7 @@ func ChatPermission(uid, targetUid int) error {
 		return errors.New("不能给自己发私信！")
 	}
 	// 私信禁言优先于关系判断：被后台禁言的人，跟谁的关系再好也不能发
-	// （与聊天室禁言同一张表，room_id = ChatMuteDM 表示私信作用域）
+	// （与群聊禁言同一张表，room_id = ChatMuteDM 表示私信作用域）
 	if muted, until := (&ChatRoomMutes{}).Active(ChatMuteDM, uid); muted {
 		if until > 0 {
 			return fmt.Errorf("你的私信功能已被禁言，%s 后自动解除！", time.Unix(until, 0).Format("01-02 15:04"))

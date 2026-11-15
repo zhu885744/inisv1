@@ -74,7 +74,7 @@ func RoomCreateInvite(roomId, uid, days, maxUses int) (map[string]any, error) {
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", roomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return nil, errors.New("聊天室不存在或已解散！")
+		return nil, errors.New("群聊不存在或已解散！")
 	}
 
 	if days < 0 {
@@ -137,7 +137,7 @@ func RoomInviteInfo(code string, uid int) (map[string]any, error) {
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", invite.RoomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return nil, errors.New("聊天室不存在或已解散！")
+		return nil, errors.New("群聊不存在或已解散！")
 	}
 
 	joined := RoomIsMember(invite.RoomId, uid)
@@ -199,10 +199,10 @@ func RoomJoinByCode(code string, uid int) (map[string]any, error) {
 
 	var room ChatRooms
 	if err := facade.DB.Drive().Where("id = ?", invite.RoomId).First(&room).Error; err != nil || room.Id <= 0 {
-		return nil, errors.New("聊天室不存在或已解散！")
+		return nil, errors.New("群聊不存在或已解散！")
 	}
 	if room.Status != 1 {
-		return nil, errors.New("聊天室已关闭，暂时不能加入！")
+		return nil, errors.New("群聊已关闭，暂时不能加入！")
 	}
 
 	// 已经在群里：直接返回成功，避免「重复点链接」报错
@@ -216,7 +216,7 @@ func RoomJoinByCode(code string, uid int) (map[string]any, error) {
 	}
 
 	if room.MaxMembers > 0 && room.MemberCount >= room.MaxMembers {
-		return nil, errors.New("聊天室人数已满！")
+		return nil, errors.New("群聊人数已满！")
 	}
 
 	member := ChatRoomMembers{

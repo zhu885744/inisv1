@@ -1274,11 +1274,11 @@
 | 文章 | `article.create` / `article.update` | 判定「标题 + 摘要 + 正文」；block、limit 拒绝；review 进待审核 |
 | 动态 | `moments.create` / `moments.update` | 同上，判定正文 |
 | 私信 | `model.ChatMessages.Send` | 文本与拍一拍后缀判定；block、limit 拒绝；review / warn / log 放行并记审计 |
-| 聊天室 | 聊天室发送接口 | 同上（私信 / 聊天室隐私敏感，不塞人工审核队列） |
+| 群聊 | 群聊发送接口 | 同上（私信 / 群聊隐私敏感，不塞人工审核队列） |
 
 > 命中 `warn` 时，评论 / 文章 / 动态的成功响应 `msg` 会追加提示文案，例如
 > `创建成功！（内容包含敏感词「广告」，已放行，请注意用词！）`，前端展示 `msg` 即可，无需额外解析字段。
-> 私信 / 聊天室只记审计，处置依靠撤回与禁言能力。
+> 私信 / 群聊只记审计，处置依靠撤回与禁言能力。
 
 **命中审计（inis_sensitive_hits）**:
 
@@ -1287,7 +1287,7 @@
 | `uid` / `scene` / `action` / `word` / `level` / `match` | 命中上下文 |
 | `version` | 判定时的词库版本，用于回溯「这次误伤是哪一版规则判的」 |
 | `content_hash` | 归一化后内容的 SHA-256，用于同内容聚合，不存全文 |
-| `excerpt` | 内容摘要，最多 120 字；**私信 / 聊天室不落摘要**，仅 block / review 且非私密场景才存 |
+| `excerpt` | 内容摘要，最多 120 字；**私信 / 群聊不落摘要**，仅 block / review 且非私密场景才存 |
 
 审计异步落库（独立 goroutine），失败只记日志，不影响业务主流程。
 

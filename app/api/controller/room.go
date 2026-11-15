@@ -14,7 +14,7 @@ import (
 )
 
 /**
- * Room - 聊天室（公共大厅 id=1 + 用户自建群聊）
+ * Room - 群聊（公共大厅 id=1 + 用户自建群聊）
  *
  * 接口（除 auto-clear 外都支持 room_id，缺省为公共大厅）：
  *   GET  room/list        群列表（scope=mine 我的 / discover 发现）
@@ -119,11 +119,11 @@ func (this *Room) IPUT(ctx *gin.Context) {
 	}
 }
 
-// IDEL - 聊天室不走 REST DELETE：
+// IDEL - 群聊不走 REST DELETE：
 // 单条消息的删除是「按人隐藏」（POST room/delete）；
 // 解散群聊是 POST room/dissolve（需要走权限与成员清理）。
 func (this *Room) IDEL(ctx *gin.Context) {
-	this.json(ctx, nil, facade.Lang(ctx, "聊天室消息请使用 room/delete 单条删除！"), 405)
+	this.json(ctx, nil, facade.Lang(ctx, "群聊消息请使用 room/delete 单条删除！"), 405)
 }
 
 func (this *Room) INDEX(ctx *gin.Context) {
@@ -205,7 +205,7 @@ func (this *Room) list(ctx *gin.Context) {
 	// 后台：全量房间（含官方大厅），只有超级管理员能看
 	if scope == "all" {
 		if !model.IsRootAdmin(uid) {
-			this.json(ctx, nil, facade.Lang(ctx, "无权限：仅超级管理员可查看全部聊天室！"), 403)
+			this.json(ctx, nil, facade.Lang(ctx, "无权限：仅超级管理员可查看全部群聊！"), 403)
 			return
 		}
 
@@ -306,7 +306,7 @@ func (this *Room) messages(ctx *gin.Context) {
 
 	// 自建群：不是成员不能看历史（大厅跳过；超级管理员可进任意群审消息）
 	if roomId != model.PublicRoomId && !model.RoomIsMember(roomId, uid) && !model.IsRootAdmin(uid) {
-		this.json(ctx, nil, facade.Lang(ctx, "你还不是该聊天室的成员！"), 403)
+		this.json(ctx, nil, facade.Lang(ctx, "你还不是该群聊的成员！"), 403)
 		return
 	}
 
@@ -421,7 +421,7 @@ func (this *Room) revoke(ctx *gin.Context) {
 //
 // 与撤回不同：不删表、不改内容、不广播，只给当前用户写一条隐藏记录。
 // 同账号的其它在线设备通过 room_delete 私推同步移除（type 仍是 room* 前缀，
-// 前端 store 会把它转给聊天室页处理）。
+// 前端 store 会把它转给群聊页处理）。
 func (this *Room) remove(ctx *gin.Context) {
 
 	uid := this.user(ctx).Id
@@ -515,7 +515,7 @@ func (this *Room) mute(ctx *gin.Context) {
 		return
 	}
 
-	// 广播禁言事件：被禁言的人若正开着聊天室，输入框会立刻变成「已禁言」
+	// 广播禁言事件：被禁言的人若正开着群聊，输入框会立刻变成「已禁言」
 	pushRoomEvent(roomId, map[string]any{
 		"type": "room_mute",
 		"data": map[string]any{
@@ -625,7 +625,7 @@ func (this *Room) members(ctx *gin.Context) {
 	}
 
 	if !model.RoomIsMember(roomId, uid) && !model.IsRootAdmin(uid) {
-		this.json(ctx, nil, facade.Lang(ctx, "你还不是该聊天室的成员！"), 403)
+		this.json(ctx, nil, facade.Lang(ctx, "你还不是该群聊的成员！"), 403)
 		return
 	}
 
@@ -654,7 +654,7 @@ func (this *Room) requests(ctx *gin.Context) {
 
 	roomId := this.roomIdOf(ctx)
 	if roomId == model.PublicRoomId {
-		this.json(ctx, nil, facade.Lang(ctx, "公共聊天室不需要审批！"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "公共群聊不需要审批！"), 400)
 		return
 	}
 	if !model.RoomCanModerate(roomId, uid) {
@@ -718,7 +718,7 @@ func (this *Room) join(ctx *gin.Context) {
 		})
 	}
 
-	tip := "已加入聊天室！"
+	tip := "已加入群聊！"
 	if cast.ToBool(result["pending"]) {
 		tip = "申请已提交，等待群主审批！"
 	}
@@ -748,7 +748,7 @@ func (this *Room) leave(ctx *gin.Context) {
 		"data": map[string]any{"room_id": roomId, "uid": uid},
 	})
 
-	this.json(ctx, gin.H{"room_id": roomId}, facade.Lang(ctx, "已退出聊天室！"), 200)
+	this.json(ctx, gin.H{"room_id": roomId}, facade.Lang(ctx, "已退出群聊！"), 200)
 }
 
 // dissolve - 解散群聊（群主 / 超级管理员）
@@ -762,7 +762,7 @@ func (this *Room) dissolve(ctx *gin.Context) {
 
 	roomId := this.roomIdOf(ctx)
 	if roomId == model.PublicRoomId {
-		this.json(ctx, nil, facade.Lang(ctx, "公共聊天室不能解散！"), 400)
+		this.json(ctx, nil, facade.Lang(ctx, "公共群聊不能解散！"), 400)
 		return
 	}
 
@@ -787,7 +787,7 @@ func (this *Room) dissolve(ctx *gin.Context) {
 		socketctrl.PushPrivate(targetUid, item)
 	}
 
-	this.json(ctx, gin.H{"room_id": roomId}, facade.Lang(ctx, "聊天室已解散！"), 200)
+	this.json(ctx, gin.H{"room_id": roomId}, facade.Lang(ctx, "群聊已解散！"), 200)
 }
 
 // announce - 发布群公告（群主 / 超级管理员；大厅由后台发布）
@@ -953,7 +953,7 @@ func (this *Room) joinByCode(ctx *gin.Context) {
 		})
 	}
 
-	this.json(ctx, result, facade.Lang(ctx, "已加入聊天室！"), 200)
+	this.json(ctx, result, facade.Lang(ctx, "已加入群聊！"), 200)
 }
 
 // memberAdd - 邀请成员（群主 / 管理员；「仅邀请」的群只能这样进人）
@@ -979,7 +979,7 @@ func (this *Room) memberAdd(ctx *gin.Context) {
 		"data": map[string]any{"room_id": roomId, "uid": targetUid, "operator_uid": uid},
 	})
 
-	this.json(ctx, gin.H{"uid": targetUid}, facade.Lang(ctx, "已邀请加入聊天室！"), 200)
+	this.json(ctx, gin.H{"uid": targetUid}, facade.Lang(ctx, "已邀请加入群聊！"), 200)
 }
 
 // memberRemove - 移出成员（群主 / 管理员）
@@ -1004,7 +1004,7 @@ func (this *Room) memberRemove(ctx *gin.Context) {
 		"data": map[string]any{"room_id": roomId, "uid": targetUid, "operator_uid": uid},
 	})
 
-	this.json(ctx, gin.H{"uid": targetUid}, facade.Lang(ctx, "已移出聊天室！"), 200)
+	this.json(ctx, gin.H{"uid": targetUid}, facade.Lang(ctx, "已移出群聊！"), 200)
 }
 
 // requestHandle - 审批入群申请
@@ -1066,11 +1066,11 @@ func (this *Room) update(ctx *gin.Context) {
 	roomId := this.roomIdOf(ctx)
 
 	if roomId == model.PublicRoomId && !model.IsRootAdmin(uid) {
-		this.json(ctx, nil, facade.Lang(ctx, "无权限：仅超级管理员可修改聊天室！"), 403)
+		this.json(ctx, nil, facade.Lang(ctx, "无权限：仅超级管理员可修改群聊！"), 403)
 		return
 	}
 	if roomId != model.PublicRoomId && !model.RoomCanManage(roomId, uid) {
-		this.json(ctx, nil, facade.Lang(ctx, "无权限：仅群主可修改聊天室资料！"), 403)
+		this.json(ctx, nil, facade.Lang(ctx, "无权限：仅群主可修改群聊资料！"), 403)
 		return
 	}
 

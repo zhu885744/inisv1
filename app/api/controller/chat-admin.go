@@ -24,9 +24,9 @@ import (
  * 接口：
  *   GET  chat-admin/conversations  全部私信会话（可按 uid / 最后一条摘要筛选，分页）
  *   GET  chat-admin/messages       某会话的消息内容（游标分页，含双方资料）
- *   GET  chat-admin/mutes          生效中的禁言名单（私信 + 聊天室）
+ *   GET  chat-admin/mutes          生效中的禁言名单（私信 + 群聊）
  *   POST chat-admin/revoke         撤回一条消息（scene=dm / chat，推送给双方或全房广播）
- *   POST chat-admin/mute           禁言（私信 + 聊天室一次写两条，复用 chat_room_mutes）
+ *   POST chat-admin/mute           禁言（私信 + 群聊一次写两条，复用 chat_room_mutes）
  *   POST chat-admin/unmute         解除禁言（可按作用域，也可一次解除两处）
  *
  * 权限：以上接口都在 auth_rules 里登记为 type=default（独立权限点），
@@ -176,8 +176,8 @@ func (this *ChatAdmin) messages(ctx *gin.Context) {
 
 // revoke - 撤回一条消息（后台，不限时间 / 不限发送者）
 //
-// scene=dm（默认）撤回私信，scene=chat 撤回聊天室消息；
-// 聊天室撤回走 room_revoke 广播，与前台撤回同一套前端处理，所有人立刻看到「已撤回」。
+// scene=dm（默认）撤回私信，scene=chat 撤回群聊消息；
+// 群聊撤回走 room_revoke 广播，与前台撤回同一套前端处理，所有人立刻看到「已撤回」。
 // 这里不调用 room/revoke：那个接口写死了「仅超级管理员」，而聊天管理的授权是权限点，
 // 被授予「撤回私信消息」的运营账号不该因为不是 root 就点不动。
 func (this *ChatAdmin) revoke(ctx *gin.Context) {
@@ -189,7 +189,7 @@ func (this *ChatAdmin) revoke(ctx *gin.Context) {
 	}
 
 	if scene := strings.TrimSpace(cast.ToString(this.param(ctx, "scene", model.ChatMuteScopeDM))); scene == model.SceneChat {
-		// 多群：后台从「聊天室消息」列表进来时会带上 room_id；
+		// 多群：后台从「群聊消息」列表进来时会带上 room_id；
 		// 不带则按公共大厅处理，保持旧行为。
 		roomId := cast.ToInt(this.param(ctx, "room_id", 0))
 		if roomId <= 0 {
@@ -233,10 +233,10 @@ func (this *ChatAdmin) revoke(ctx *gin.Context) {
 	this.json(ctx, message, facade.Lang(ctx, "已撤回！"), 200)
 }
 
-// mute - 禁言用户（私信 + 聊天室同时生效）
+// mute - 禁言用户（私信 + 群聊同时生效）
 //
 // 复用现有禁言体系（chat_room_mutes）：room_id = ChatMuteDM(0) 表示私信作用域，
-// 聊天室仍用 PublicRoomId。一次处置写两条记录，两处一起失效、一起去「禁言名单」解除，
+// 群聊仍用 PublicRoomId。一次处置写两条记录，两处一起失效、一起去「禁言名单」解除，
 // 不另建「封禁」概念。
 func (this *ChatAdmin) mute(ctx *gin.Context) {
 
@@ -257,7 +257,7 @@ func (this *ChatAdmin) mute(ctx *gin.Context) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能禁言自己！"), 400)
 		return
 	}
-	// 管理员之间不互相禁言：避免有权限的账号把别的管理员踢出聊天室
+	// 管理员之间不互相禁言：避免有权限的账号把别的管理员踢出群聊
 	if model.IsRootAdmin(targetUid) {
 		this.json(ctx, nil, facade.Lang(ctx, "不能禁言其他管理员！"), 400)
 		return
@@ -278,7 +278,7 @@ func (this *ChatAdmin) mute(ctx *gin.Context) {
 
 	reason := strings.TrimSpace(cast.ToString(params["reason"]))
 
-	// 私信与聊天室一起禁：审核页只给一个「禁言」动作，避免运营在两处分别点一次
+	// 私信与群聊一起禁：审核页只给一个「禁言」动作，避免运营在两处分别点一次
 	for _, roomId := range []int{model.ChatMuteDM, model.PublicRoomId} {
 		if err := (&model.ChatRoomMutes{}).Mute(roomId, targetUid, until, reason, operatorUid); err != nil {
 			this.json(ctx, nil, facade.Lang(ctx, err.Error()), 400)
@@ -286,7 +286,7 @@ func (this *ChatAdmin) mute(ctx *gin.Context) {
 		}
 	}
 
-	// 广播：被禁言的人若正开着聊天室，输入框立刻变成「已禁言」
+	// 广播：被禁言的人若正开着群聊，输入框立刻变成「已禁言」
 	socketctrl.BroadcastRoom(map[string]any{
 		"type": "room_mute",
 		"data": map[string]any{
@@ -301,10 +301,10 @@ func (this *ChatAdmin) mute(ctx *gin.Context) {
 		"until":  until,
 		"reason": reason,
 		"scopes": []string{model.ChatMuteScopeDM, model.ChatMuteScopeRoom},
-	}, facade.Lang(ctx, "已禁言（私信 + 聊天室）！"), 200)
+	}, facade.Lang(ctx, "已禁言（私信 + 群聊）！"), 200)
 }
 
-// mutes - 生效中的禁言名单（私信 + 聊天室）
+// mutes - 生效中的禁言名单（私信 + 群聊）
 //
 // 后台「禁言名单」用：与前台 room/mutes 不同，这里不要求超级管理员，
 // 走 chat-admin 的权限点；一次禁言会同时产生 dm / room 两条记录，这里都列出来。
@@ -374,7 +374,7 @@ func (this *ChatAdmin) unmute(ctx *gin.Context) {
 		}
 	}
 
-	// 解除聊天室禁言要广播，否则正开着聊天室的用户输入框不会恢复
+	// 解除群聊禁言要广播，否则正开着群聊的用户输入框不会恢复
 	if scope != model.ChatMuteScopeDM {
 		socketctrl.BroadcastRoom(map[string]any{
 			"type": "room_unmute",
