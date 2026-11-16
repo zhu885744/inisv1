@@ -899,12 +899,25 @@ func (this *ChatMessages) refreshConversationSummary(conversationId int) {
 }
 
 // UnreadTotal - 我的私信未读总数（左栏 / 用户中心角标用）
+//
+// 只统计「仍然存在的会话」里的消息，与 unreadByConversation 保持同一口径：
+// 会话被清理后，这些消息在左栏已经没有入口，也永远不会被标已读，
+// 若仍计入总数就成了清不掉的「幽灵未读」—— 表现为列表一条红点都没有，
+// 通知页 / 用户中心的私信角标却一直挂着几十条。
 func (this *ChatMessages) UnreadTotal(uid int) int64 {
 	if uid <= 0 {
 		return 0
 	}
+
+	var ids []int
+	if err := facade.DB.Drive().Model(&ChatConversations{}).
+		Where("uid = ? OR target_uid = ?", uid, uid).
+		Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
+		return 0
+	}
+
 	count, _ := facade.DB.Model(&ChatMessages{}).
-		Where("receive_uid = ? AND is_read = 0", uid).
+		Where("receive_uid = ? AND is_read = 0 AND conversation_id IN ?", uid, ids).
 		Where("id NOT IN (?)", chatHiddenQuery(uid)).
 		Count()
 	return count

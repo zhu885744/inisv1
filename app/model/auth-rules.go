@@ -122,6 +122,8 @@ func EnsureAuthRules() {
 	PruneAuthRules()
 	// 术语迁移（聊天室 → 群聊）：权限规则名 / 后台页面名 / 配置备注里已落库的旧词一并纠正
 	RenameChatRoomTerms()
+	// /chat 游客可见：只读接口的规则类型要跟着代码改成 common，老库里也要纠正
+	SyncPublicRoomRules()
 }
 
 // SyncAuthRuleNames - 回填「没有模块前缀」的权限规则名称（幂等）
@@ -187,6 +189,61 @@ func SyncAuthRuleNames() {
 	if updated > 0 && facade.Log != nil {
 		facade.Log.Info(map[string]any{"rows": updated}, "已补全权限规则名称的模块前缀")
 	}
+}
+
+// SyncPublicRoomRules - 把游客可读的群聊接口规则纠正为 type=common（幂等）
+//
+// 背景：/chat 改成游客可见后，room/list、room/info、room/messages 必须是 common，
+// 否则游客一进页面就被 401 拦掉。但规则的 hash 只由 method + route 生成，
+// 改 type 不会产生新 hash —— EnsureAuthRules 的「缺失才插入」对老库完全无效，
+// 库里那三条还是 login。这里按 method + route 定向回写，顺带清规则缓存。
+func SyncPublicRoomRules() {
+
+	// 维护任务：任何异常都不应影响服务启动
+	defer func() {
+		if err := recover(); err != nil {
+			if facade.Log != nil {
+				facade.Log.Error(map[string]any{"error": err}, "纠正群聊只读规则类型时发生panic")
+			}
+		}
+	}()
+
+	if facade.DB == nil || !facade.Installed() {
+		return
+	}
+
+	db := facade.DB.Drive()
+	if db == nil {
+		return
+	}
+
+	routes := [][2]string{
+		{"GET", "/api/room/list"},
+		{"GET", "/api/room/info"},
+		{"GET", "/api/room/messages"},
+	}
+
+	updated := 0
+	for _, item := range routes {
+		tx := db.Model(&AuthRules{}).Unscoped().
+			Where("route = ? AND method = ? AND type <> ?", item[1], item[0], "common").
+			Update("type", "common")
+		if tx.Error != nil {
+			continue
+		}
+		updated += int(tx.RowsAffected)
+	}
+
+	if updated <= 0 {
+		return
+	}
+
+	if facade.Log != nil {
+		facade.Log.Info(map[string]any{"rows": updated}, "已把群聊只读接口的规则类型纠正为 common")
+	}
+
+	// 中间件按 method + path 缓存规则（标签 rule），不清缓存会继续按旧的 login 判定
+	facade.Cache.DelTags([]any{"rule"})
 }
 
 // NormalizeAuthRuleTypes - 纠正历史数据中非法的规则类型
@@ -786,15 +843,16 @@ func createAuthRules() (result []AuthRules) {
 				"path=unmute&type=default&name=解除聊天禁言",
 			},
 		},
-		// 公共群聊（id=1）：全部要求登录 —— 游客只能看，不能发言，也就没必要给只读入口。
+		// 群聊：/chat 页面游客可见，只读接口（列表 / 资料 / 大厅消息）放开给未登录用户。
 		// 发言 / 撤回是普通用户的日常操作（type=login）；
 		// 禁言 / 解禁 / 改资料额外要求「超级管理员」，那层判断在控制器里用
 		// model.IsRootAdmin 做（root 权限组 + all 规则），这里不再拆权限点。
 		"room": {
 			"GET": {
-				"path=list&type=login&name=群聊列表",
-				"path=info&type=login&name=群聊信息",
-				"path=messages&type=login&name=群聊消息",
+				// 游客可读：只返回公共大厅与空列表，自建群的消息仍要成员身份
+				"path=list&type=common&name=群聊列表",
+				"path=info&type=common&name=群聊信息",
+				"path=messages&type=common&name=群聊消息",
 				"path=members&type=login&name=群聊成员",
 				"path=requests&type=login&name=群聊入群申请",
 				"path=invite&type=login&name=群聊邀请信息",

@@ -194,10 +194,6 @@ func pushRoomManagers(roomId int, payload map[string]any) {
 func (this *Room) list(ctx *gin.Context) {
 
 	uid := this.user(ctx).Id
-	if uid <= 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
 
 	scope := strings.TrimSpace(cast.ToString(this.param(ctx, "scope", "mine")))
 	keyword := strings.TrimSpace(cast.ToString(this.param(ctx, "keyword", "")))
@@ -214,6 +210,17 @@ func (this *Room) list(ctx *gin.Context) {
 		list, total := model.RoomListAll(keyword, page, size)
 
 		this.json(ctx, gin.H{"data": list, "total": total}, facade.Lang(ctx, "查询成功！"), 200)
+		return
+	}
+
+	// 游客：只给一张空的「我的群聊」+ 公共大厅资料。
+	// /chat 页面游客可见（列表里只有大厅入口），不必为此要求登录。
+	if uid <= 0 {
+		this.json(ctx, gin.H{
+			"data":        []map[string]any{},
+			"can_create":  map[string]any{"allowed": false, "reason": "登录后即可创建自己的群聊"},
+			"public_room": (&model.ChatRooms{}).Info(model.PublicRoomId),
+		}, facade.Lang(ctx, "查询成功！"), 200)
 		return
 	}
 
@@ -264,20 +271,22 @@ func (this *Room) create(ctx *gin.Context) {
 func (this *Room) info(ctx *gin.Context) {
 
 	uid := this.user(ctx).Id
-	if uid <= 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
 
 	roomId := this.roomIdOf(ctx)
 
+	// 游客也能看房间资料：RoomDetail(roomId, 0) 对大厅返回 joined=true、my_role=-1，
+	// 前端据此渲染只读态（输入框换成「请登录」提示）。
 	room, err := model.RoomDetail(roomId, uid)
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, err.Error()), 404)
 		return
 	}
 
-	muted, until := (&model.ChatRoomMutes{}).Active(roomId, uid)
+	// 禁言状态只对登录用户有意义：uid=0 时别去查 room_id=0（那是私信作用域）
+	muted, until := false, int64(0)
+	if uid > 0 {
+		muted, until = (&model.ChatRoomMutes{}).Active(roomId, uid)
+	}
 
 	this.json(ctx, gin.H{
 		"room":        room,
@@ -297,15 +306,17 @@ func (this *Room) info(ctx *gin.Context) {
 func (this *Room) messages(ctx *gin.Context) {
 
 	uid := this.user(ctx).Id
-	if uid <= 0 {
-		this.json(ctx, nil, facade.Lang(ctx, "请先登录！"), 401)
-		return
-	}
 
 	roomId := this.roomIdOf(ctx)
 
+	// 游客只读公共大厅；自建群的消息仍然只给成员看
+	if uid <= 0 && roomId != model.PublicRoomId {
+		this.json(ctx, nil, facade.Lang(ctx, "登录后即可查看该群聊的消息！"), 401)
+		return
+	}
+
 	// 自建群：不是成员不能看历史（大厅跳过；超级管理员可进任意群审消息）
-	if roomId != model.PublicRoomId && !model.RoomIsMember(roomId, uid) && !model.IsRootAdmin(uid) {
+	if uid > 0 && roomId != model.PublicRoomId && !model.RoomIsMember(roomId, uid) && !model.IsRootAdmin(uid) {
 		this.json(ctx, nil, facade.Lang(ctx, "你还不是该群聊的成员！"), 403)
 		return
 	}
