@@ -169,10 +169,16 @@ type Badge struct {
 	StartTime int64 `gorm:"type:int(32); comment:可获取开始时间; default:0;" json:"start_time"`
 	EndTime   int64 `gorm:"type:int(32); comment:可获取结束时间; default:0;" json:"end_time"`
 	// 获得后有效天数（0 = 永久）：>0 时发放瞬间算出 UserBadge.ExpireTime
-	ExpireDays int    `gorm:"type:int(32); comment:获得后有效天数（0=永久）; default:0;" json:"expire_days"`
-	Sort       int    `gorm:"type:int(32); comment:排序（越大越前）; default:0;" json:"sort"`
-	Status     int    `gorm:"tinyint; index; comment:状态（1 启用 0 停用）; default:1;" json:"status"`
-	Remark     string `gorm:"comment:备注; default:Null;" json:"remark"`
+	ExpireDays int `gorm:"type:int(32); comment:获得后有效天数（0=永久）; default:0;" json:"expire_days"`
+	// Renew 续期配置（JSON）：每枚勋章自己的续期档位，见 model/renew-plan.go
+	//
+	//	{"enabled":true,"options":[{"days":30,"price":100,"origin_price":150,"tag":"推荐"}]}
+	//
+	// 价格挂在勋章上而不是全站一套：勋章成本、稀有度都不同，公共档位改价会波及所有勋章。
+	Renew  any    `gorm:"type:longtext; comment:续期配置（JSON）; default:Null;" json:"renew"`
+	Sort   int    `gorm:"type:int(32); comment:排序（越大越前）; default:0;" json:"sort"`
+	Status int    `gorm:"tinyint; index; comment:状态（1 启用 0 停用）; default:1;" json:"status"`
+	Remark string `gorm:"comment:备注; default:Null;" json:"remark"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -227,6 +233,7 @@ func InitBadge() {
 func (this *Badge) AfterFind(tx *gorm.DB) (err error) {
 	this.Text = cast.ToString(this.Text)
 	this.Json = utils.Json.Decode(this.Json)
+	this.Renew = utils.Json.Decode(this.Renew)
 	this.Result = this.result()
 	return
 }
@@ -771,13 +778,15 @@ func BadgeProgress(uid int) []map[string]any {
 			"end_time":        badge.EndTime,
 			"expire_days":     badge.ExpireDays,
 			"expire_time":     expire,
-			"expired":         expired,
-			"available":       available,
-			"sort":            badge.Sort,
-			"held":            held,
-			"held_at":         at,
-			"current":         current,
-			"target":          target,
+			// 这枚勋章自己的续期档位（未配置 / 已关闭时是空数组，前台据此决定要不要显示续期入口）
+			"renew_options": RenewOptionsResult(badge.Renew),
+			"expired":       expired,
+			"available":     available,
+			"sort":          badge.Sort,
+			"held":          held,
+			"held_at":       at,
+			"current":       current,
+			"target":        target,
 		})
 	}
 

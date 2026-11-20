@@ -453,6 +453,8 @@ func MyDecorations(uid int) facade.H {
 		}
 
 		item["payload"] = decorationPayloadMap(item["payload"])
+		// 这件装扮自己的续期档位（未配置 / 已关闭时是空数组，前台据此决定要不要显示续期入口）
+		item["renew_options"] = RenewOptionsResult(item["renew"])
 		item["is_default"] = isDefault
 		item["owned"] = true
 		item["expire_time"] = expireTime
@@ -610,6 +612,12 @@ type Decoration struct {
 	MinExp int `gorm:"type:int(32); comment:兑换所需最低经验值（0=不限）; default:0;" json:"min_exp"`
 	// IsDefault 系统默认装扮：所有用户默认拥有（无需购买，也不写入用户装扮表）
 	IsDefault int `gorm:"tinyint; index; comment:系统默认（1=所有用户默认拥有）; default:0;" json:"is_default"`
+	// Renew 续期配置（JSON）：每件装扮自己的续期档位，见 model/renew-plan.go
+	//
+	//	{"enabled":true,"options":[{"days":30,"price":100,"origin_price":150,"tag":"推荐"}]}
+	//
+	// 价格挂在装扮上而不是全站一套：装扮成本各不相同，公共档位改价会波及所有装扮。
+	Renew any `gorm:"type:longtext; comment:续期配置（JSON）; default:Null;" json:"renew"`
 	// 以下为公共字段
 	Json       any                   `gorm:"type:longtext; comment:用于存储JSON数据;" json:"json"`
 	Text       any                   `gorm:"type:longtext; comment:用于存储文本数据;" json:"text"`
@@ -938,6 +946,7 @@ func (this *Decoration) AfterFind(tx *gorm.DB) (err error) {
 	this.Json = utils.Json.Decode(this.Json)
 	this.Payload = utils.Json.Decode(this.Payload)
 	this.Unlock = utils.Json.Decode(this.Unlock)
+	this.Renew = utils.Json.Decode(this.Renew)
 	this.Result = this.result()
 	return
 }

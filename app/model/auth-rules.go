@@ -298,6 +298,7 @@ var deprecatedAuthRules = [][2]string{
 	{"PUT", "/api/attachment/bind"},        // 附件绑定业务类型（控制器从未实现，调用只会返回 405）
 	{"PUT", "/api/user-collects/restore"},  // 收藏恢复（controller 的 IPUT 只有 update / uncollect）
 	{"PUT", "/api/user-likes/restore"},     // 点赞恢复（controller 的 IPUT 只有 update / unlike）
+	{"POST", "/api/comment/repair-live"},   // 补全历史评论实况图（新部署站点无历史数据可补，接口已移除）
 }
 
 // PruneAuthRules - 清理已下线接口残留的权限规则
@@ -782,12 +783,8 @@ func createAuthRules() (result []AuthRules) {
 				"path=flat&type=common&name=扁平化",
 				"path=counts&type=common&name=批量评论数",
 			),
-			"PUT": loginUpdate(),
-			"POST": loginCreate(
-				// 补全实况图是后台维护动作（批量修历史评论），不属于用户发评论，
-				// 因此单独标 default：普通用户不应能触发全表扫描。
-				"path=repair-live&type=default&name=补全评论实况图",
-			),
+			"PUT":    loginUpdate(),
+			"POST":   loginCreate(),
 			"DELETE": loginDelete(),
 		},
 		// @ 提及：候选列表只给「我关注的人」，登录即可用（写入没有独立接口 —— @ 在保存内容时解析）
@@ -1127,6 +1124,16 @@ func createAuthRules() (result []AuthRules) {
 				"path=remove&type=default&name=删除勋章分类",
 				"path=delete&type=default&name=彻底删除勋章分类",
 				"path=clear&type=default&name=清空勋章分类回收站",
+			},
+		},
+		// 续期下单：
+		//   续期档位挂在每个勋章 / 装扮自己的 renew 字段上（后台在对应编辑表单里维护），
+		//   所以这里只剩「给自己的资产续期」两个接口，登录即放行
+		//   （控制器内再校验持有关系、档位与积分）。
+		"renew": {
+			"POST": {
+				"path=badge&type=login&name=勋章续期",
+				"path=decoration&type=login&name=装扮续期",
 			},
 		},
 		"qps-warn": permModule(),

@@ -14,11 +14,13 @@ import (
 
 // decorationAllowFields - 管理员可写字段白名单
 // stock / min_exp 是装扮商城自身的售卖字段（不再同步到商品记录）
-const decorationAllowFields = "type,name,description,preview,payload,price_type,price,rarity,duration,unlock,category,status,sort,is_default,stock,min_exp,json,text"
+const decorationAllowFields = "type,name,description,preview,payload,price_type,price,rarity,duration,renew,unlock,category,status,sort,is_default,stock,min_exp,json,text"
 
 var decorationAllowFieldsSlice = []any{
 	"type", "name", "description", "preview", "payload", "price_type", "price", "rarity",
 	"duration", "unlock", "category", "status", "sort", "is_default",
+	// renew：这件装扮自己的续期档位（JSON），见 model/renew-plan.go
+	"renew",
 	"stock", "min_exp", "json", "text",
 }
 
@@ -49,7 +51,7 @@ func (this *Decoration) IGET(ctx *gin.Context) {
 		// 注意：不能叫 user，会与基类的 this.user(ctx) 取当前登录用户的方法重名
 		"user-decorations": this.userDecorations,
 		"count":            this.count,
-		"config":  this.config,
+		"config":           this.config,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -399,6 +401,27 @@ func (this *Decoration) save(ctx *gin.Context) {
 	this.update(ctx)
 }
 
+// checkRenew - 校验这件装扮的续期档位（天数 / 价格 / 划线价、开启时至少一个档位）
+//
+// 与勋章同一套规则（model.NormalizeRenewConfig）：校验通过后把 params["renew"]
+// 换成规整后的 map，脏数据不会入库。
+func (this *Decoration) checkRenew(ctx *gin.Context, params map[string]any) bool {
+	raw, exist := params["renew"]
+	if !exist {
+		return true
+	}
+
+	data, err := model.NormalizeRenewConfig(raw)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return false
+	}
+
+	params["renew"] = data
+
+	return true
+}
+
 // create - 新增装扮（管理员）
 func (this *Decoration) create(ctx *gin.Context) {
 	if !this.meta.permit(ctx) {
@@ -407,6 +430,10 @@ func (this *Decoration) create(ctx *gin.Context) {
 	}
 
 	params := this.params(ctx)
+	if !this.checkRenew(ctx, params) {
+		return
+	}
+
 	now := time.Now().Unix()
 	table := model.Decoration{CreateTime: now, UpdateTime: now}
 
@@ -447,6 +474,10 @@ func (this *Decoration) update(ctx *gin.Context) {
 	params := this.params(ctx)
 	if utils.Is.Empty(params["id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
+		return
+	}
+
+	if !this.checkRenew(ctx, params) {
 		return
 	}
 

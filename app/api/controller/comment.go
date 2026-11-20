@@ -22,22 +22,64 @@ type Comment struct {
 }
 
 const (
-	// 评论可见范围：1 公开 / 2 登录可见 / 4 仅作者可见；没有付费可见，因此不接受 scope_integral
-	commentAllowFields = "pid,content,images,bind_id,bind_type,editor,json,text,scope"
-	commentAllowQuery  = "id,pid,bind_id,bind_type,editor"
+	// 单条评论最多携带的图片数（前端同样限制，这里兜底防绕过）
+	maxCommentImages = 9
+	// 单条评论最多 @ 的人数（防止一条评论触发上千条站内信）
+	maxCommentMentions = 10
+	// 评论树最大展示层级，同时作为脏数据成环的熔断（每层一次查询，8 层已足够覆盖真实回复链）
+	maxCommentDepth = 8
+	// 评论批量审核一次最多处理多少条
+	maxCommentBatch = 200
 )
 
+// 可写入字段（create / update 白名单）；images 在写入前走 sanitizeCommentImages 单独校验
 var commentAllowFieldsSlice = []any{"pid", "content", "images", "bind_id", "bind_type", "editor", "json", "text", "scope"}
-var commentAllowQuerySlice = []any{"id", "pid", "bind_id", "bind_type", "editor"}
+
+// 可用于「按字段筛选」的字段
+var commentAllowQuerySlice = []any{"id", "pid", "uid", "bind_id", "bind_type", "editor", "audit", "scope", "create_time", "update_time"}
+
+// 评论支持的绑定类型：未知类型一律拒绝，防止往评论表塞任意 bind_type / bind_id 的脏数据
+var commentBindTypes = []any{"article", "page", "moments", "docs"}
+
+// commentWhereKeys - 允许出现在 where / or / not / null / notNull 里的字段
+//
+// 取评论表自己的列：接口返回的 ip / agent 已经脱敏，但 where[ip][like]=10.% 仍然
+// 可以靠「有没有结果」做布尔盲探，把脱敏后的 IP 前缀猜出来。
+var commentWhereKeys = func() map[string]bool {
+	keys := utils.Struct.Keys(&model.Comment{})
+	set := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		set[cast.ToString(key)] = true
+	}
+	return set
+}()
+
+// commentFilterWhere - 过滤条件字段白名单（非表字段一律丢弃）
+func commentFilterWhere(raw any) map[string]any {
+	list := cast.ToStringMap(raw)
+	if len(list) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(list))
+	for key, val := range list {
+		if commentWhereKeys[key] {
+			result[key] = val
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
 
 func (this *Comment) buildQuery(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
 	return query.
-		IWhere(params["where"]).
-		IOr(params["or"]).
+		IWhere(commentFilterWhere(params["where"])).
+		IOr(commentFilterWhere(params["or"])).
 		ILike(params["like"]).
-		INot(params["not"]).
-		INull(params["null"]).
-		INotNull(params["notNull"])
+		INot(commentFilterWhere(params["not"])).
+		INull(commentFilterWhere(params["null"])).
+		INotNull(commentFilterWhere(params["notNull"]))
 }
 
 func (this *Comment) withTrashOptions(query *facade.ModelStruct, params map[string]any) *facade.ModelStruct {
@@ -57,10 +99,267 @@ func (this *Comment) getFromCache(ctx *gin.Context, cacheName string) (any, bool
 	return facade.Cache.Get(cacheName), true
 }
 
+// setCache - 写缓存
+//
+// 这里必须同步写：以前用 go 异步写，会出现「刚查完的请求立刻再查一次仍然打库」，
+// 而且与写操作结尾的 delCache 协程存在竞态（delCache 先跑完、setCache 后落盘的旧数据会长期驻留）。
 func (this *Comment) setCache(ctx *gin.Context, cacheName string, data any) {
 	if this.cache.enable(ctx) {
-		go facade.Cache.Set(cacheName, data)
+		facade.Cache.Set(cacheName, data)
 	}
+}
+
+// sanitizeCommentImages - 校验并规范化评论配图
+//
+// 只做「结构 / 数量 / 协议」校验，不做域名白名单（站点可能配 COS 与本地多套域名，
+// 白名单会误伤），但必须挡掉 javascript: / data: / vbscript: 这类能进 <img src> 的伪协议。
+//
+// 允许三种形态：{{cos}} / {{localhost}} 域名模板（见 model.DomainTemp）、站内相对路径、http(s) 绝对地址。
+// 每一项可以是「封面」或「封面::视频」（实况图），两段分别校验。
+func sanitizeCommentImages(raw string) (string, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", true
+	}
+
+	parts := strings.Split(text, ",")
+	list := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+
+		for _, one := range strings.Split(item, "::") {
+			url := strings.TrimSpace(one)
+			if url == "" || strings.ContainsAny(url, " \t\r\n\"'<>") {
+				return "", false
+			}
+			lower := strings.ToLower(url)
+			switch {
+			case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
+			case strings.HasPrefix(url, "{{"), strings.HasPrefix(url, "/"):
+			default:
+				return "", false
+			}
+		}
+
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		list = append(list, item)
+		if len(list) > maxCommentImages {
+			return "", false
+		}
+	}
+
+	return strings.Join(list, ","), true
+}
+
+// commentContentExceeds - 正文是否超过站点配置的上限（maxLength <= 0 表示不限制）
+//
+// @ 与话题的规范化会把内容写长（@张三 → @[张三](/author/12)），
+// 所以 create / update 都必须在规范化**之后**再校验一次，否则会撞 varchar(1024) 上限。
+func commentContentExceeds(content string, maxLength int) bool {
+	return maxLength > 0 && utf8.RuneCountInString(content) > maxLength
+}
+
+// commentBindTarget - 评论目标内容的存在性 / 发布状态 / 可见性校验
+//
+// 四种绑定类型走同一套规则（文档此前单独实现过，这里统一）：
+//   - 内容必须存在，否则可以对着任意 id 评论，还能借「不存在 / 评论成功」的差异枚举未发布内容；
+//   - 作者本人与管理员可以评论自己的草稿（联调 / 后台处理）；
+//   - 其他人只能评论「已发布且审核通过」的内容；
+//   - 文档额外过 docsCanView（登录可见 / 指定角色组）。
+//
+// 返回的 item 供调用方复用 uid / title，errMsg 非空时调用方直接返回 400 / 401。
+func (this *Comment) commentBindTarget(ctx *gin.Context, bindType string, bindId int) (map[string]any, string) {
+	if bindId <= 0 {
+		return nil, facade.Lang(ctx, "%s 不能为空！", "bind_id")
+	}
+
+	var table any
+	switch bindType {
+	case "article":
+		table = &model.Article{}
+	case "page":
+		table = &model.Pages{}
+	case "moments":
+		table = &model.Moments{}
+	case "docs":
+		table = &model.Docs{}
+	default:
+		return nil, facade.Lang(ctx, "不支持的评论目标类型！")
+	}
+
+	item, _ := facade.DB.Model(table).Where("id", bindId).Find()
+	data := cast.ToStringMap(item)
+	if len(data) == 0 {
+		return nil, facade.Lang(ctx, "评论目标不存在！")
+	}
+
+	// 文档：不区分作者，未发布 / 无权查看一律拒绝（与改造前一致）
+	if bindType == "docs" {
+		var docs model.Docs
+		facade.DB.Model(&model.Docs{}).Where("id", bindId).Scan(&docs)
+		if docs.Status != 1 {
+			return nil, facade.Lang(ctx, "文档未发布！")
+		}
+		if !docsCanView(ctx, &docs) {
+			return nil, facade.Lang(ctx, "请先登录后查看！")
+		}
+		return data, ""
+	}
+
+	// 作者本人 / 管理员：草稿与未过审内容也允许评论
+	uid := cast.ToInt(data["uid"])
+	if user := this.meta.user(ctx); user.Id > 0 && (uid == user.Id) {
+		return data, ""
+	}
+	if this.canAuditAll(ctx) {
+		return data, ""
+	}
+
+	// Pages 没有 status 字段（页面创建即发布），只有 audit
+	if bindType != "page" && cast.ToInt(data["status"]) != 1 {
+		return nil, facade.Lang(ctx, "内容未发布，暂时无法评论！")
+	}
+	if cast.ToInt(data["audit"]) != AuditPassed {
+		return nil, facade.Lang(ctx, "内容未通过审核，暂时无法评论！")
+	}
+
+	return data, ""
+}
+
+// commentDescendantIds - 收集给定评论的全部子孙 id（BFS，按层批量查，最多 maxCommentDepth 层）
+//
+// 用于删除 / 恢复时的级联处理：只删父评论会让子回复的 pid 指向一条不存在的记录，
+// 而 flat 只取 pid=0 的顶级评论，这些子回复从此永远不可达。
+func (this *Comment) commentDescendantIds(rootIds []any, withTrashed, onlyTrashed bool) []any {
+	all := make([]any, 0, len(rootIds)*4)
+	if len(rootIds) == 0 {
+		return all
+	}
+
+	visited := make(map[int]bool, len(rootIds))
+	level := make([]int, 0, len(rootIds))
+
+	for _, raw := range rootIds {
+		id := cast.ToInt(raw)
+		if id <= 0 || visited[id] {
+			continue
+		}
+		visited[id] = true
+		level = append(level, id)
+	}
+	for depth := 0; depth < maxCommentDepth && len(level) > 0; depth++ {
+		raw, _ := facade.DB.Model(&model.Comment{}).
+			OnlyTrashed(onlyTrashed).
+			WithTrashed(withTrashed).
+			WhereIn("pid", level).
+			Column("id")
+
+		next := make([]int, 0, len(level)*2)
+		for _, item := range cast.ToSlice(raw) {
+			var id int
+			switch value := item.(type) {
+			case map[string]any:
+				id = cast.ToInt(value["id"])
+			default:
+				id = cast.ToInt(value)
+			}
+			if id <= 0 || visited[id] {
+				continue
+			}
+			visited[id] = true
+			next = append(next, id)
+			all = append(all, id)
+		}
+		level = next
+	}
+
+	return all
+}
+
+// commentReplyTree - 一次取出这批父评论的全部子孙回复，按 pid 分组返回
+//
+// 旧实现是「每个父评论递归一次 replies()」，而 replies() 每层一条 SQL：
+// 一页 20 条评论 × 3 层回复就是 60+ 次查询，再叠加 20 次 WhereIn。
+// 这里改成按层 WhereIn 批量查，整页固定只要「实际层数」次查询，并用 visited 熔断脏数据的环。
+func (this *Comment) commentReplyTree(rootIds []int, field any) map[int][]map[string]any {
+	result := make(map[int][]map[string]any)
+	if len(rootIds) == 0 {
+		return result
+	}
+
+	nodes := make(map[int]map[string]any)
+	children := make(map[int][]int)
+	visited := make(map[int]bool, len(rootIds)*2)
+	for _, id := range rootIds {
+		visited[id] = true
+	}
+
+	level := rootIds
+	for depth := 0; depth < maxCommentDepth && len(level) > 0; depth++ {
+		raw, _ := facade.DB.Model(&model.Comment{}).
+			WhereIn("pid", level).
+			Where("audit", AuditPassed).
+			Order("create_time asc").
+			Select()
+
+		rows := cast.ToSlice(raw)
+		projected := cast.ToSlice(utils.ArrayMapWithField(raw, field))
+
+		next := make([]int, 0, len(level)*2)
+		for index, item := range rows {
+			row := cast.ToStringMap(item)
+			id := cast.ToInt(row["id"])
+			pid := cast.ToInt(row["pid"])
+			if id <= 0 || visited[id] {
+				continue
+			}
+			visited[id] = true
+
+			node := row
+			if index < len(projected) {
+				if mapped, ok := projected[index].(map[string]any); ok && len(mapped) > 0 {
+					node = mapped
+				}
+			}
+
+			nodes[id] = node
+			children[pid] = append(children[pid], id)
+			next = append(next, id)
+		}
+		level = next
+	}
+
+	var build func(pid int) []map[string]any
+	build = func(pid int) []map[string]any {
+		list := make([]map[string]any, 0, len(children[pid]))
+		for _, id := range children[pid] {
+			node := nodes[id]
+			if node == nil {
+				continue
+			}
+			if sub := build(id); len(sub) > 0 {
+				node["replies"] = sub
+			}
+			list = append(list, node)
+		}
+		return list
+	}
+
+	for _, id := range rootIds {
+		if sub := build(id); len(sub) > 0 {
+			result[id] = sub
+		}
+	}
+
+	return result
 }
 
 // canAuditAll - 是否可见全部审核状态的评论
@@ -126,7 +425,8 @@ func (this *Comment) maskItem(item map[string]any) {
 }
 
 func (this *Comment) maskCommentData(ctx *gin.Context, data any) any {
-	if data == nil || this.meta.root(ctx) {
+	// 口径与 canAuditAll 保持一致：有「评论管理」权限点的后台用户也应看到原始 IP / UA
+	if data == nil || this.canAuditAll(ctx) {
 		return data
 	}
 	switch v := data.(type) {
@@ -214,206 +514,12 @@ func (this *Comment) IGET(ctx *gin.Context) {
 	}
 }
 
-// repairLive - 回填历史评论的实况图（管理员手动触发，可重复执行）
-//
-// 背景：早期评论上传时前端只读了封面地址、忽略了后端拆出来的视频，
-// 但视频附件本身还在库里 —— 命名约定是「<封面原始文件名去扩展名>-live.mp4」
-// （见 attachment.go 的 saveMotionVideo）。这里按这个约定把 comments.images
-// 里的「封面」改写成「封面::视频」，历史评论就能正常播放实况。
-//
-// 只处理不含 "::" 的项、命中才写库，所以重复执行不会重复拼接。
-func (this *Comment) repairLive(ctx *gin.Context) {
-
-	if !this.meta.permit(ctx) {
-		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
-		return
-	}
-
-	const batchSize = 500
-
-	lastId := 0
-	scanned := 0
-	fixed := 0
-
-	for {
-
-		data, err := facade.DB.Model(&model.Comment{}).
-			Where("id", ">", lastId).
-			OrderRaw("id asc").
-			Limit(batchSize).
-			Column("id", "images")
-
-		if err != nil {
-			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询评论失败")
-			break
-		}
-
-		rows, _ := data.([]map[string]any)
-		if len(rows) == 0 {
-			break
-		}
-
-		// 本批待处理的项：评论 id -> 配图原始项；covers 是待反查的封面地址（模板化后）
-		commentParts := make(map[int][]string, len(rows))
-		covers := make([]any, 0, len(rows))
-		coverSet := make(map[string]bool, len(rows))
-
-		for _, row := range rows {
-
-			id := cast.ToInt(row["id"])
-			if id > lastId {
-				lastId = id
-			}
-			scanned++
-
-			raw := strings.TrimSpace(cast.ToString(row["images"]))
-			if raw == "" {
-				continue
-			}
-
-			parts := make([]string, 0, 4)
-			for _, part := range strings.Split(raw, ",") {
-				item := strings.TrimSpace(part)
-				if item == "" {
-					continue
-				}
-				parts = append(parts, item)
-				// 已经是实况图（封面::视频）的跳过
-				if strings.Contains(item, "::") {
-					continue
-				}
-				templated := utils.Replace(item, model.DomainTemp2())
-				if !coverSet[templated] {
-					coverSet[templated] = true
-					covers = append(covers, templated)
-				}
-			}
-
-			if len(parts) > 0 {
-				commentParts[id] = parts
-			}
-		}
-
-		if len(covers) == 0 {
-			continue
-		}
-
-		// 1) 封面地址 -> 附件原始文件名，再由命名约定推出视频文件名
-		coverRows, err := facade.DB.Model(&model.Attachment{}).
-			WhereIn("full_url", covers).
-			Column("full_url", "original_name", "uploader_id")
-
-		if err != nil {
-			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询封面附件失败")
-			continue
-		}
-
-		coverList, _ := coverRows.([]map[string]any)
-
-		videoNames := make(map[string]string, len(coverList))
-		videoUids := make(map[string]int, len(coverList))
-		names := make([]any, 0, len(coverList))
-
-		for _, row := range coverList {
-			url := cast.ToString(row["full_url"])
-			name := cast.ToString(row["original_name"])
-			if url == "" || name == "" {
-				continue
-			}
-			base := name
-			if index := strings.LastIndex(name, "."); index > 0 {
-				base = name[:index]
-			}
-			videoNames[url] = base + "-live.mp4"
-			videoUids[url] = cast.ToInt(row["uploader_id"])
-			names = append(names, base+"-live.mp4")
-		}
-
-		if len(names) == 0 {
-			continue
-		}
-
-		// 2) 查配对视频：优先「上传者 + 文件名」精确匹配，退化到按文件名匹配
-		videoRows, err := facade.DB.Model(&model.Attachment{}).
-			WhereIn("original_name", names).
-			Where("file_ext", "mp4").
-			Column("full_url", "original_name", "uploader_id")
-
-		if err != nil {
-			facade.Log.Error(map[string]any{"error": err.Error()}, "实况图回填：查询视频附件失败")
-			continue
-		}
-
-		videoList, _ := videoRows.([]map[string]any)
-
-		byUid := make(map[string]string, len(videoList))
-		byName := make(map[string]string, len(videoList))
-
-		for _, row := range videoList {
-			url := cast.ToString(row["full_url"])
-			name := cast.ToString(row["original_name"])
-			if url == "" {
-				continue
-			}
-			byName[name] = url
-			byUid[fmt.Sprintf("%d|%s", cast.ToInt(row["uploader_id"]), name)] = url
-		}
-
-		// 3) 逐条回写：封面 --> 封面::视频（视频地址按当前域名展开）
-		for id, parts := range commentParts {
-
-			changed := false
-
-			for index, item := range parts {
-
-				if strings.Contains(item, "::") {
-					continue
-				}
-
-				templated := utils.Replace(item, model.DomainTemp2())
-				videoName, ok := videoNames[templated]
-				if !ok {
-					continue
-				}
-
-				videoURL := byUid[fmt.Sprintf("%d|%s", videoUids[templated], videoName)]
-				if videoURL == "" {
-					videoURL = byName[videoName]
-				}
-				if videoURL == "" {
-					continue
-				}
-
-				parts[index] = item + "::" + utils.Replace(videoURL, model.DomainTemp1())
-				changed = true
-			}
-
-			if !changed {
-				continue
-			}
-
-			if _, err := facade.DB.Model(&model.Comment{}).Where("id", id).UpdateColumn("images", strings.Join(parts, ",")); err != nil {
-				facade.Log.Error(map[string]any{"error": err.Error(), "id": id}, "实况图回填：更新评论失败")
-				continue
-			}
-
-			fixed++
-		}
-	}
-
-	this.json(ctx, gin.H{
-		"scanned": scanned,
-		"fixed":   fixed,
-	}, fmt.Sprintf("已扫描 %d 条评论，补全 %d 条实况图", scanned, fixed), 200)
-}
-
 func (this *Comment) IPOST(ctx *gin.Context) {
 	method := strings.ToLower(ctx.Param("method"))
 
 	allow := map[string]any{
-		"save":        this.save,
-		"create":      this.create,
-		"repair-live": this.repairLive,
+		"save":   this.save,
+		"create": this.create,
 	}
 	err := this.call(allow, method, ctx)
 
@@ -557,16 +663,26 @@ func (this *Comment) all(ctx *gin.Context) {
 	// 非管理员只看「审核通过」的评论（审核未通过 / 待审核的评论对前台不可见，口径同文章 / 动态）
 	query = this.withAuditFilter(query, ctx)
 
-	count, _ := query.Where(table).Count()
+	// count 与列表一起缓存：否则缓存命中时仍要走一次 COUNT 聚合，列表缓存等于白做
+	// v=2 是「列表 + count」的新结构，旧 key 里的纯列表数据不再命中
+	cacheName := this.auditCacheName(ctx) + "&v=2"
+	count := int64(0)
 
-	cacheName := this.auditCacheName(ctx)
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
-		data = cached
-	} else {
+		if cache, valid := cached.(map[string]any); valid {
+			data = cache["data"]
+			count = cast.ToInt64(cache["count"])
+		} else {
+			data = cached
+		}
+	}
+
+	if data == nil {
+		count, _ = query.Where(table).Count()
 		item, _ := query.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
 		data = utils.ArrayMapWithField(item, params["field"])
-		this.setCache(ctx, cacheName, data)
+		this.setCache(ctx, cacheName, map[string]any{"data": data, "count": count})
 	}
 
 	data = this.maskCommentData(ctx, data)
@@ -756,65 +872,38 @@ func (this *Comment) create(ctx *gin.Context) {
 		return
 	}
 
+	// 绑定类型白名单：未知类型不查内容直接入库，会给评论表塞进任意 bind_type / bind_id 的脏数据
+	bindType := cast.ToString(params["bind_type"])
+	if !utils.In.Array(bindType, commentBindTypes) {
+		this.json(ctx, nil, facade.Lang(ctx, "不支持的评论目标类型！"), 400)
+		return
+	}
+
+	bindId := cast.ToInt(params["bind_id"])
+
+	// 目标内容一次校验 + 一次查询：后面的邮件 / 站内信通知都复用这里的 title / uid，
+	// 改造前同一条文章在 create 里会被查 4 次（校验一次、邮件取标题一次、邮件取作者一次、通知一次）
+	bindTarget, bindErr := this.commentBindTarget(ctx, bindType, bindId)
+	if bindErr != "" {
+		this.json(ctx, nil, bindErr, 400)
+		return
+	}
+
 	// 评论开关优先级：全局 COMMENT.allow < 模块总开关（ARTICLE/MOMENTS/PAGE）< 内容自身 json.comment
 	// 内容 / 模块取值：0 继承、1 允许/显示、2 禁止/隐藏；全局 COMMENT.allow：0 关闭、1 开启
-	var comment map[string]any
-	var moduleComment map[string]any
+	comment := cast.ToStringMap(cast.ToStringMap(bindTarget["json"])["comment"])
+	if comment == nil {
+		comment = map[string]any{}
+	}
+	moduleComment := this.config(bindType, "comment")
 
-	switch params["bind_type"] {
-	case "article":
-		article, _ := facade.DB.Model(&model.Article{}).Where("id", params["bind_id"]).Find()
-		if utils.Is.Empty(article) {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的文章！"), 400)
-			return
-		}
-		comment = cast.ToStringMap(cast.ToStringMap(article["json"])["comment"])
-		moduleComment = this.config("article", "comment")
-	case "page":
-		page, _ := facade.DB.Model(&model.Pages{}).Where("id", params["bind_id"]).Find()
-		if utils.Is.Empty(page) {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的页面！"), 400)
-			return
-		}
-		comment = cast.ToStringMap(cast.ToStringMap(page["json"])["comment"])
-		moduleComment = this.config("page", "comment")
-	case "moments":
-		moments, _ := facade.DB.Model(&model.Moments{}).Where("id", params["bind_id"]).Find()
-		if utils.Is.Empty(moments) {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的动态！"), 400)
-			return
-		}
-		comment = cast.ToStringMap(cast.ToStringMap(moments["json"])["comment"])
-		moduleComment = this.config("moments", "comment")
-	case "docs":
-		// 文档：开关来自项目级「启用评论」，同时必须校验文档真实存在、已发布且当前访客可见，
-		// 否则可以对不存在的 id、或「登录可见 / 指定角色组」的文档匿名发评论
-		var docs model.Docs
-		facade.DB.Model(&model.Docs{}).Where("id", params["bind_id"]).Scan(&docs)
-
-		if docs.Id == 0 {
-			this.json(ctx, nil, facade.Lang(ctx, "不存在的文档！"), 400)
-			return
-		}
-		if docs.Status != 1 {
-			this.json(ctx, nil, facade.Lang(ctx, "文档未发布！"), 400)
-			return
-		}
-		if !docsCanView(ctx, &docs) {
-			this.json(ctx, nil, facade.Lang(ctx, "请先登录后查看！"), 401)
-			return
-		}
-
-		moduleComment = this.config("docs", "comment")
-
+	if bindType == "docs" {
 		// 项目级开关直接落成 allow/show，不走「0 继承」那套：
 		// 项目禁用评论就是 2，启用就是 1，优先级低于模块总开关
 		comment = facade.H{"allow": 1, "show": 1}
-		if !model.DocsProjectCommentEnabled(docs.Version) {
+		if !model.DocsProjectCommentEnabled(cast.ToString(bindTarget["version"])) {
 			comment["allow"] = 2
 		}
-	default:
-		comment = this.config("comment")
 	}
 
 	// 模块总开关为「禁止 / 隐藏」时，覆盖内容自身的设置
@@ -850,31 +939,45 @@ func (this *Comment) create(ctx *gin.Context) {
 
 	commentConfig := this.config("comment")
 
+	// 评论限流：固定窗口计数，用缓存的原子自增
+	//
+	// 旧实现是 Get → 算 +1 → Set：并发请求会读到同一个旧值，等于没限流；
+	// key 里带 ctx.ClientIP() 也不合适 —— Gin 的 ClientIP 取 X-Forwarded-For，
+	// 伪造请求头就能换一个计数桶，所以只按 uid 计。
 	rateLimit := cast.ToStringMap(commentConfig["rate_limit"])
 	if cast.ToInt(rateLimit["enabled"]) == 1 {
 		maxCount := cast.ToInt(rateLimit["max_count"])
 		timeWindow := cast.ToInt(rateLimit["time_window"])
 
-		now := time.Now().Unix()
-		timeWindowKey := now / int64(timeWindow)
-		cacheKey := fmt.Sprintf("comment:rate_limit:%d:%s:%d", user.Id, ctx.ClientIP(), timeWindowKey)
+		if maxCount > 0 {
+			if timeWindow <= 0 {
+				timeWindow = 60
+			}
 
-		currentCount := 0
-		cacheValue := facade.Cache.Get(cacheKey)
-		if cacheValue != nil {
-			currentCount = cast.ToInt(cacheValue)
+			windowKey := time.Now().Unix() / int64(timeWindow)
+			cacheKey := fmt.Sprintf("comment:rate_limit:%d:%d", user.Id, windowKey)
+
+			current, ok := facade.Cache.Incr(cacheKey, 1)
+			if !ok {
+				// 缓存不可用时放行：限流是附加保护，不能反过来把正常评论挡死
+				current = 0
+			}
+			if current == 1 {
+				// 窗口内的第一次计数挂上过期时间，窗口过去后自动清零
+				facade.Cache.Expire(cacheKey, time.Duration(timeWindow)*time.Second)
+			}
+
+			if current > int64(maxCount) {
+				// 被拒绝的这次不占额度，否则窗口内每失败一次都会少一次机会
+				facade.Cache.Incr(cacheKey, -1)
+				this.json(ctx, nil, facade.Lang(ctx, "评论过于频繁，请稍后再试！"), 429)
+				return
+			}
 		}
-
-		if currentCount >= maxCount {
-			this.json(ctx, nil, facade.Lang(ctx, "评论过于频繁，请稍后再试！"), 429)
-			return
-		}
-
-		facade.Cache.Set(cacheKey, currentCount+1, time.Duration(timeWindow)*time.Second)
 	}
 
 	maxLength := cast.ToInt(commentConfig["max_length"])
-	if maxLength > 0 && utf8.RuneCountInString(cast.ToString(params["content"])) > maxLength {
+	if commentContentExceeds(cast.ToString(params["content"]), maxLength) {
 		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
 		return
 	}
@@ -910,7 +1013,7 @@ func (this *Comment) create(ctx *gin.Context) {
 	// ⚠ 必须直接赋值：Struct.Set 按小写 tag（json:"audit"）匹配，传 "Audit" 会静默失效
 	// 是否开启本地审核：只查一次库，后面「要不要再调云端机审」也用它
 	commentAuditSwitch := contentAuditSwitch("COMMENT")
-	table.Audit = auditForCreate(commentAuditSwitch && !this.meta.root(ctx), false)
+	table.Audit = auditForCreate(commentAuditSwitch && !this.canAuditAll(ctx), false)
 
 	for key, val := range params {
 		if utils.In.Array(key, commentAllowFieldsSlice) {
@@ -928,6 +1031,14 @@ func (this *Comment) create(ctx *gin.Context) {
 		}
 	}
 
+	// 配图：数量 / 协议校验（images 是 text 字段，前端限制可以绕过）
+	images, imagesValid := sanitizeCommentImages(table.Images)
+	if !imagesValid {
+		this.json(ctx, nil, facade.Lang(ctx, "配图格式不正确或数量超出限制！"), 400)
+		return
+	}
+	table.Images = images
+
 	// 敏感词：评论高频，按规则动作处理 —— block / limit 拒绝，review 进待审核，
 	// warn / log 放行（warn 的提示随成功消息返回，命中审计由 model 层统一记录）。
 	sensitive := (&model.Sensitive{}).Decide(model.SceneComment, user.Id, table.Content)
@@ -936,7 +1047,7 @@ func (this *Comment) create(ctx *gin.Context) {
 			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
 			return
 		}
-		if sensitive.Action == model.ActionReview && !this.meta.root(ctx) {
+		if sensitive.Action == model.ActionReview && !this.canAuditAll(ctx) {
 			table.Audit = AuditPending
 		}
 	}
@@ -951,12 +1062,18 @@ func (this *Comment) create(ctx *gin.Context) {
 	mentionTargets := []model.MentionTarget{}
 	table.Content, mentionTargets = (&model.Mention{}).Normalize(table.Content, user.Id)
 
+	// 通知对象同样要限流：候选来自「我关注的人」（上限 500），一条评论能把关注列表 @ 满，
+	// 于是几百条站内信 + 邮件在创建时被一次性打出去
+	if len(mentionTargets) > maxCommentMentions {
+		mentionTargets = mentionTargets[:maxCommentMentions]
+	}
+
 	// 话题：#话题# 规范化为 #[话题名](/topic/12)，前端渲染成可点击链接。
 	// 评论表没有 tags 字段，所以只做链接、不参与话题内容聚合（见 model/topics.go）。
 	// 同样放在长度校验之前：规范化会让内容变长。
 	table.Content, _ = (&model.Topic{}).Parse(table.Content)
 
-	if maxLength > 0 && utf8.RuneCountInString(table.Content) > maxLength {
+	if commentContentExceeds(table.Content, maxLength) {
 		this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
 		return
 	}
@@ -1018,39 +1135,17 @@ func (this *Comment) create(ctx *gin.Context) {
 			userEmail := cast.ToString(cast.ToStringMap(userInfo)["email"])
 			facade.Log.Info(map[string]any{"user_id": user.Id, "user_email": facade.Comm.MaskEmail(userEmail), "user_name": cast.ToString(cast.ToStringMap(userInfo)["name"])}, "获取评论用户信息")
 
-			title := ""
-			bindLabel := ""
-			switch table.BindType {
-			case "article":
-				article, _ := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(article) {
-					title = cast.ToString(cast.ToStringMap(article)["title"])
-				}
-				bindLabel = "文章"
-			case "page":
-				page, _ := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(page) {
-					title = cast.ToString(cast.ToStringMap(page)["title"])
-				}
-				bindLabel = "页面"
-			case "moments":
-				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(moment) {
-					content := cast.ToString(cast.ToStringMap(moment)["content"])
-					runes := []rune(content)
-					if len(runes) > 50 {
-						title = string(runes[:50]) + "..."
-					} else {
-						title = content
-					}
-				}
-				bindLabel = "动态"
-			case "docs":
-				docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(docs) {
-					title = cast.ToString(cast.ToStringMap(docs)["title"])
-				}
-				bindLabel = "文档"
+			// 标题直接复用 create 开头解析好的 bindTarget，不再按绑定类型重复查一次内容表
+			bindLabel := map[string]string{
+				"article": "文章",
+				"page":    "页面",
+				"moments": "动态",
+				"docs":    "文档",
+			}[table.BindType]
+
+			title := strings.TrimSpace(cast.ToString(bindTarget["title"]))
+			if title == "" {
+				title = commentSummary(cast.ToString(bindTarget["content"]))
 			}
 
 			createdAt := time.Now().Format("2006-01-02 15:04:05")
@@ -1071,50 +1166,12 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 			facade.Log.Info(map[string]any{"comment_id": table.Id, "bind_type": table.BindType, "bind_id": table.BindId}, "评论通知处理")
 
+			// 内容作者：bindTarget 已带 uid，这里只需要一次用户查询
 			var authorEmail string
-			switch table.BindType {
-			case "article":
-				article, _ := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(article) {
-					authorId := cast.ToInt(cast.ToStringMap(article)["uid"])
-					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
-					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"article_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文章作者信息")
-				} else {
-					facade.Log.Warn(map[string]any{"article_id": table.BindId}, "文章不存在，跳过发送给作者")
-				}
-			case "page":
-				page, _ := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(page) {
-					authorId := cast.ToInt(cast.ToStringMap(page)["uid"])
-					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
-					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"page_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取页面作者信息")
-				} else {
-					facade.Log.Warn(map[string]any{"page_id": table.BindId}, "页面不存在，跳过发送给作者")
-				}
-			case "moments":
-				moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(moment) {
-					authorId := cast.ToInt(cast.ToStringMap(moment)["uid"])
-					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
-					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"moment_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取动态作者信息")
-				} else {
-					facade.Log.Warn(map[string]any{"moment_id": table.BindId}, "动态不存在，跳过发送给作者")
-				}
-			case "docs":
-				docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
-				if !utils.Is.Empty(docs) {
-					authorId := cast.ToInt(cast.ToStringMap(docs)["uid"])
-					author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
-					authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
-					facade.Log.Info(map[string]any{"docs_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取文档作者信息")
-				} else {
-					facade.Log.Warn(map[string]any{"docs_id": table.BindId}, "文档不存在，跳过发送给作者")
-				}
-			default:
-				facade.Log.Warn(map[string]any{"bind_type": table.BindType}, "未知绑定类型，跳过发送给作者")
+			if authorId := cast.ToInt(bindTarget["uid"]); authorId > 0 {
+				author, _ := facade.DB.Model(&model.Users{}).Where("id", authorId).Find()
+				authorEmail = cast.ToString(cast.ToStringMap(author)["email"])
+				facade.Log.Info(map[string]any{"bind_id": table.BindId, "author_id": authorId, "author_email": facade.Comm.MaskEmail(authorEmail)}, "获取内容作者信息")
 			}
 
 			// 评论通知：发给内容作者（场景 comment.notify）
@@ -1151,39 +1208,11 @@ func (this *Comment) create(ctx *gin.Context) {
 			}
 		}()
 
-		var authorId int
-		var bindTitle string
-
-		switch table.BindType {
-		case "article":
-			article, _ := facade.DB.Model(&model.Article{}).Where("id", table.BindId).Find()
-			if !utils.Is.Empty(article) {
-				authorId = cast.ToInt(cast.ToStringMap(article)["uid"])
-				bindTitle = cast.ToString(cast.ToStringMap(article)["title"])
-			}
-		case "page":
-			page, _ := facade.DB.Model(&model.Pages{}).Where("id", table.BindId).Find()
-			if !utils.Is.Empty(page) {
-				authorId = cast.ToInt(cast.ToStringMap(page)["uid"])
-				bindTitle = cast.ToString(cast.ToStringMap(page)["title"])
-			}
-		case "moments":
-			moment, _ := facade.DB.Model(&model.Moments{}).Where("id", table.BindId).Find()
-			if !utils.Is.Empty(moment) {
-				authorId = cast.ToInt(cast.ToStringMap(moment)["uid"])
-				content := cast.ToString(cast.ToStringMap(moment)["content"])
-				if len([]rune(content)) > 30 {
-					bindTitle = string([]rune(content)[:30]) + "..."
-				} else {
-					bindTitle = content
-				}
-			}
-		case "docs":
-			docs, _ := facade.DB.Model(&model.Docs{}).Where("id", table.BindId).Find()
-			if !utils.Is.Empty(docs) {
-				authorId = cast.ToInt(cast.ToStringMap(docs)["uid"])
-				bindTitle = cast.ToString(cast.ToStringMap(docs)["title"])
-			}
+		// 内容作者与标题都来自 create 开头解析好的 bindTarget，不再重复查内容表
+		authorId := cast.ToInt(bindTarget["uid"])
+		bindTitle := strings.TrimSpace(cast.ToString(bindTarget["title"]))
+		if bindTitle == "" {
+			bindTitle = commentSummary(cast.ToString(bindTarget["content"]))
 		}
 
 		if authorId > 0 && authorId != user.Id {
@@ -1235,6 +1264,16 @@ func commenterAccount(commenter map[string]any) string {
 func (this *Comment) update(ctx *gin.Context) {
 	params := this.params(ctx)
 
+	// 批量审核：后台列表勾选后一次提交 { ids: [...], audit: 1, reason: "" }
+	//
+	// 不单独开 audit-batch 接口 —— 批量只是「把同一个 audit 应用到一组 id」，
+	// 单开接口要在 auth-rules.go 里多登记一条规则（漏登记会让所有人 403），
+	// 前端也要多记一个地址，而 update 本来就是同一个语义。
+	if batchIds := utils.Unity.Ids(params["ids"]); len(batchIds) > 0 {
+		this.auditBatch(ctx, batchIds)
+		return
+	}
+
 	if utils.Is.Empty(params["id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "id"), 400)
 		return
@@ -1252,13 +1291,22 @@ func (this *Comment) update(ctx *gin.Context) {
 		}
 	}
 
+	// 口径统一用 canAuditAll（= meta.permit）：只认 root() 会把「有评论管理权限点、
+	// 但分组不是 root」的后台用户判成普通用户，界面上能看见待审核列表却点不动审核按钮
+	admin := this.canAuditAll(ctx)
 	table := model.Comment{}
 	allow := []any{"content", "images", "editor", "json", "text"}
 	async := utils.Async[map[string]any]()
 
-	root := this.meta.root(ctx)
-	if root {
-		// audit / reason 只对管理员开放：这是后台列表「通过 / 驳回」的操作入口
+	// audit / reason 只对管理员开放：这是后台列表「通过 / 驳回」的操作入口。
+	// 无权限却提交了这两个字段时显式 403 —— 以前是被 allow 过滤掉、然后照样返回「更新成功」。
+	_, hasAudit := params["audit"]
+	_, hasReason := params["reason"]
+	if !admin && (hasAudit || hasReason) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+	if admin {
 		allow = append(allow, "pid", "bind_id", "bind_type", "audit", "reason")
 	}
 
@@ -1281,7 +1329,14 @@ func (this *Comment) update(ctx *gin.Context) {
 	item := facade.DB.Model(&table).WithTrashed().Where("id", params["id"])
 
 	itemData, _ := item.Find()
-	if !root && cast.ToInt(itemData["uid"]) != this.user(ctx).Id {
+	if len(itemData) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "评论不存在！"), 404)
+		return
+	}
+
+	// 未登录时 uid 也是 0，不能靠「0 == 0」命中历史数据里 uid=0 的评论，所以先判登录态
+	user := this.user(ctx)
+	if !admin && (user.Id == 0 || cast.ToInt(itemData["uid"]) != user.Id) {
 		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
 		return
 	}
@@ -1293,6 +1348,16 @@ func (this *Comment) update(ctx *gin.Context) {
 		payload["reason"] = ""
 	}
 
+	// 配图：与新建同一套数量 / 协议校验（images 直通 text 字段，前端限制可绕过）
+	if raw, ok := payload["images"]; ok {
+		images, valid := sanitizeCommentImages(cast.ToString(raw))
+		if !valid {
+			this.json(ctx, nil, facade.Lang(ctx, "配图格式不正确或数量超出限制！"), 400)
+			return
+		}
+		payload["images"] = images
+	}
+
 	// @ 提及：编辑评论时同样规范化（匹配范围仍是评论作者已关注的人），
 	// 否则手动输入的 @昵称 永远变不成链接
 	// sensitive 在块外声明：warn 的提示要拼进成功消息
@@ -1302,13 +1367,29 @@ func (this *Comment) update(ctx *gin.Context) {
 		// 话题：与新建一致，只做链接不做聚合（评论没有 tags 字段）
 		payload["content"], _ = (&model.Topic{}).Parse(cast.ToString(payload["content"]))
 
+		// 规范化会让内容变长（@张三 → @[张三](/author/12)），长度要按转换后的结果再校验一次，
+		// 否则编辑评论会撞 Comment.Content 的 varchar(1024) 上限
+		maxLength := cast.ToInt(this.config("comment")["max_length"])
+		if commentContentExceeds(cast.ToString(payload["content"]), maxLength) {
+			this.json(ctx, nil, facade.Lang(ctx, "评论内容过长，最多允许%d个字符！", maxLength), 400)
+			return
+		}
+
 		// 敏感词：编辑评论同样按场景判定；命中 review 的编辑重新进入待审核
 		sensitive = (&model.Sensitive{}).Decide(model.SceneComment, cast.ToInt(itemData["uid"]), cast.ToString(payload["content"]))
 		if sensitive.Blocked() {
 			this.json(ctx, nil, facade.Lang(ctx, sensitive.UserMessage()), 400)
 			return
 		}
-		if sensitive.Action == model.ActionReview && !root {
+		if sensitive.Action == model.ActionReview && !admin {
+			payload["audit"] = AuditPending
+		}
+
+		// 非管理员修改正文 → 重新进待审核（站点开启评论审核时）
+		//
+		// 否则「先发一条正常评论通过审核、再编辑成违规内容」可以完全绕过人工审核。
+		// 只在正文真的变化时降级，避免前端原样重提交把已通过的评论白白打回。
+		if !admin && contentAuditSwitch("COMMENT") && cast.ToString(payload["content"]) != cast.ToString(itemData["content"]) {
 			payload["audit"] = AuditPending
 		}
 	}
@@ -1352,13 +1433,91 @@ func (this *Comment) update(ctx *gin.Context) {
 	this.json(ctx, gin.H{"id": table.Id}, msg, 200)
 }
 
+// auditBatch - 批量审核评论（update 带 ids 时的分支，后台列表勾选后一次提交）
+//
+// 一条条 PUT update 的话，50 条待审核就是 50 次请求 + 50 次全量 delCache；
+// 这里合并成一次。只做「状态真的变化」的那部分通知，避免重复点「通过」时
+// 给评论者发一堆重复站内信。
+//
+// 只处理 audit / reason，不接受正文等字段 —— 批量改内容没有业务含义。
+func (this *Comment) auditBatch(ctx *gin.Context, ids []any) {
+	if !this.canAuditAll(ctx) {
+		this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+		return
+	}
+
+	params := this.params(ctx)
+	audit := cast.ToInt(params["audit"])
+	reason := strings.TrimSpace(cast.ToString(params["reason"]))
+
+	if audit != AuditPending && audit != AuditPassed && audit != AuditReject {
+		this.json(ctx, nil, facade.Lang(ctx, "审核状态不正确！"), 400)
+		return
+	}
+
+	// 上限保护：一次勾选上千条会把一条请求拖成长事务
+	if len(ids) > maxCommentBatch {
+		ids = ids[:maxCommentBatch]
+	}
+
+	raw, _ := facade.DB.Model(&model.Comment{}).WithTrashed().WhereIn("id", ids).Select()
+	rows := cast.ToSlice(raw)
+
+	if len(rows) == 0 {
+		this.json(ctx, nil, facade.Lang(ctx, "无可操作数据！"), 204)
+		return
+	}
+
+	payload := map[string]any{"audit": audit}
+	if audit == AuditPassed {
+		// 通过时清掉历史驳回原因，避免列表残留旧原因
+		payload["reason"] = ""
+	} else if reason != "" {
+		payload["reason"] = reason
+	}
+
+	done := make([]int, 0, len(rows))
+
+	for _, item := range rows {
+		row := cast.ToStringMap(item)
+		id := cast.ToInt(row["id"])
+		if id <= 0 {
+			continue
+		}
+
+		if _, err := facade.DB.Model(&model.Comment{}).Where("id", id).Update(payload); err != nil {
+			facade.Log.Error(map[string]any{"error": err.Error(), "id": id}, "批量审核：更新评论失败")
+			continue
+		}
+
+		done = append(done, id)
+
+		if cast.ToInt(row["audit"]) == audit {
+			continue
+		}
+
+		go notifyCommentAudit(
+			cast.ToInt(row["uid"]), cast.ToString(row["content"]), audit,
+			cast.ToString(payload["reason"]),
+			cast.ToString(row["bind_type"]), cast.ToInt(row["bind_id"]),
+		)
+
+		if audit == AuditPassed {
+			go model.NotifyMentionsOnCommentApprove(id)
+		}
+	}
+
+	this.json(ctx, gin.H{"ids": done, "count": len(done)}, facade.Lang(ctx, "更新成功！"), 200)
+}
+
 func (this *Comment) count(ctx *gin.Context) {
 	params := this.params(ctx)
 	query := this.withTrashOptions(facade.DB.Model(&model.Comment{}), params)
 	query = this.buildQuery(query, params)
 
-	// 非管理员只统计「审核通过」的评论：保证前台显示的评论数与列表一致
-	if !this.meta.root(ctx) {
+	// 非管理员只统计「审核通过」的评论：保证前台显示的评论数与列表一致。
+	// 口径必须与 all 的 withAuditFilter（canAuditAll）完全一致，否则后台列表条数对不上
+	if !this.canAuditAll(ctx) {
 		query = query.Where("audit", AuditPassed)
 	}
 
@@ -1376,6 +1535,10 @@ func (this *Comment) counts(ctx *gin.Context) {
 	bindType := cast.ToString(params["bind_type"])
 	if bindType == "" {
 		this.json(ctx, nil, facade.Lang(ctx, "%s 不能为空！", "bind_type"), 400)
+		return
+	}
+	if !utils.In.Array(bindType, commentBindTypes) {
+		this.json(ctx, nil, facade.Lang(ctx, "不支持的评论目标类型！"), 400)
 		return
 	}
 
@@ -1481,8 +1644,13 @@ func (this *Comment) remove(ctx *gin.Context) {
 
 	item := facade.DB.Model(&model.Comment{})
 
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
+	if !this.canAuditAll(ctx) {
+		user := this.user(ctx)
+		if user.Id == 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+			return
+		}
+		item.Where("uid", user.Id)
 	}
 
 	columnData, _ := item.WhereIn("id", ids).Column("id")
@@ -1493,11 +1661,21 @@ func (this *Comment) remove(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Delete(ids)
+	// 级联子回复：只删父评论会让子回复的 pid 指向一条不存在的记录，
+	// 而 flat 只取 pid=0 的顶级评论，这些回复从此永远不可达。
+	// 子孙的删除不再带 uid 条件 —— 评论者删自己的评论时，别人在其下的回复同样要一起走。
+	children := this.commentDescendantIds(ids, false, false)
+
+	_, err := facade.DB.Model(&model.Comment{}).WhereIn("id", ids).Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
+	}
+
+	if len(children) > 0 {
+		facade.DB.Model(&model.Comment{}).WhereIn("id", children).Delete(children)
+		ids = append(ids, children...)
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
@@ -1514,8 +1692,13 @@ func (this *Comment) delete(ctx *gin.Context) {
 
 	item := facade.DB.Model(&model.Comment{}).WithTrashed()
 
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
+	if !this.canAuditAll(ctx) {
+		user := this.user(ctx)
+		if user.Id == 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+			return
+		}
+		item.Where("uid", user.Id)
 	}
 
 	ids = utils.Unity.Ids(item.WhereIn("id", ids).Column("id"))
@@ -1525,11 +1708,19 @@ func (this *Comment) delete(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete(ids)
+	// 物理删除同样级联子孙（含回收站里的），否则会留下再也无法访问的孤立回复
+	children := this.commentDescendantIds(ids, true, false)
+
+	_, err := facade.DB.Model(&model.Comment{}).WithTrashed().WhereIn("id", ids).Force().Delete(ids)
 
 	if err != nil {
 		this.json(ctx, nil, facade.Lang(ctx, "删除失败！"), 400)
 		return
+	}
+
+	if len(children) > 0 {
+		facade.DB.Model(&model.Comment{}).WithTrashed().WhereIn("id", children).Force().Delete(children)
+		ids = append(ids, children...)
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "删除成功！"), 200)
@@ -1539,8 +1730,14 @@ func (this *Comment) clear(ctx *gin.Context) {
 	table := model.Comment{}
 	item := facade.DB.Model(&table).OnlyTrashed()
 
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
+	admin := this.canAuditAll(ctx)
+	if !admin {
+		user := this.user(ctx)
+		if user.Id == 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+			return
+		}
+		item.Where("uid", user.Id)
 	}
 
 	columnData, _ := item.Column("id")
@@ -1551,11 +1748,19 @@ func (this *Comment) clear(ctx *gin.Context) {
 		return
 	}
 
-	_, err := item.Force().Delete()
-
-	if err != nil {
-		this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
-		return
+	// 管理员清空整个回收站；普通用户只清自己的，但要连带清掉自己评论下的子孙，
+	// 否则那些回复会留在回收站里、永远恢复不回来（父评论已经没了）
+	if admin {
+		if _, err := item.Force().Delete(); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+			return
+		}
+	} else {
+		ids = append(ids, this.commentDescendantIds(ids, true, true)...)
+		if _, err := facade.DB.Model(&table).WithTrashed().WhereIn("id", ids).Force().Delete(ids); err != nil {
+			this.json(ctx, nil, facade.Lang(ctx, "清空失败！"), 400)
+			return
+		}
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "清空成功！"), 200)
@@ -1572,8 +1777,13 @@ func (this *Comment) restore(ctx *gin.Context) {
 
 	item := facade.DB.Model(&model.Comment{}).OnlyTrashed().WhereIn("id", ids)
 
-	if !this.meta.root(ctx) {
-		item.Where("uid", this.user(ctx).Id)
+	if !this.canAuditAll(ctx) {
+		user := this.user(ctx)
+		if user.Id == 0 {
+			this.json(ctx, nil, facade.Lang(ctx, "无权限！"), 403)
+			return
+		}
+		item.Where("uid", user.Id)
 	}
 
 	columnData, _ := item.Column("id")
@@ -1584,6 +1794,10 @@ func (this *Comment) restore(ctx *gin.Context) {
 		return
 	}
 
+	// 恢复父评论时一并恢复它名下的子孙（未删除的 id 对 Restore 是 no-op），
+	// 否则回复会留在回收站里，父评论恢复后依然看不到它们
+	ids = append(ids, this.commentDescendantIds(ids, true, false)...)
+
 	_, err := facade.DB.Model(&model.Comment{}).OnlyTrashed().Restore(ids)
 
 	if err != nil {
@@ -1592,25 +1806,6 @@ func (this *Comment) restore(ctx *gin.Context) {
 	}
 
 	this.json(ctx, gin.H{"ids": ids}, facade.Lang(ctx, "恢复成功！"), 200)
-}
-
-func (this *Comment) replies(pid any, ctx *gin.Context) (ids []int) {
-	params := this.params(ctx)
-
-	var result []model.Comment
-	mold := facade.DB.Model(&result).OnlyTrashed(cast.ToBool(params["onlyTrashed"])).WithTrashed(cast.ToBool(params["withTrashed"]))
-	mold = mold.Where("pid", pid)
-	// 子回复只取审核通过的：否则「通过」的父评论下会带出待审核的回复
-	mold = mold.Where("audit", AuditPassed)
-	mold.Column("id")
-	mold.Select()
-
-	for _, val := range result {
-		ids = append(ids, val.Id)
-		ids = append(ids, this.replies(val.Id, ctx)...)
-	}
-
-	return ids
 }
 
 func (this *Comment) flat(ctx *gin.Context) {
@@ -1626,6 +1821,12 @@ func (this *Comment) flat(ctx *gin.Context) {
 
 	if utils.Is.Empty(params["bind_id"]) {
 		this.json(ctx, nil, facade.Lang(ctx, "bind_id 不能为空！"), 400)
+		return
+	}
+
+	// 与 create / counts 同一套白名单：避免用一个不存在的 bind_type 反复探测
+	if !utils.In.Array(cast.ToString(params["bind_type"]), commentBindTypes) {
+		this.json(ctx, nil, facade.Lang(ctx, "不支持的评论目标类型！"), 400)
 		return
 	}
 
@@ -1647,26 +1848,44 @@ func (this *Comment) flat(ctx *gin.Context) {
 	// （含作者本人与管理员）都不展示，避免把审核中内容当成已发布内容显示。
 	// 刚提交的评论由前端本地「待审核」占位提示，审核通过后重新拉取才会出现。
 	mold = mold.Where("audit", AuditPassed)
-	count, _ := mold.Where(table).Count()
 
-	// key 带 audit=passed 后缀：让加入过滤前写入的旧缓存（可能含待审核评论）自然失效
-	cacheName := this.cache.name(ctx) + "&audit=passed"
+	// key 带 audit=passed 后缀：让加入过滤前写入的旧缓存（可能含待审核评论）自然失效；
+	// v=2 是「评论树 + count」的新结构，旧 key 里的纯列表数据不再命中
+	cacheName := this.cache.name(ctx) + "&audit=passed&v=2"
+	count := int64(0)
+
 	if cached, ok := this.getFromCache(ctx, cacheName); ok {
 		msg[1] = "（来自缓存）"
-		data = cached
-	} else {
-		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
-		data = utils.ArrayMapWithField(item, params["field"])
+		if cache, valid := cached.(map[string]any); valid {
+			data = cache["data"]
+			count = cast.ToInt64(cache["count"])
+		} else {
+			data = cached
+		}
+	}
 
-		list := cast.ToSlice(data)
-		for key, val := range list {
-			ids := this.replies(cast.ToStringMap(val)["id"], ctx)
-			replies, _ := facade.DB.Model(&[]model.Comment{}).WhereIn("id", ids).Order("create_time asc").Select()
-			cast.ToStringMap(list[key])["replies"] = utils.ArrayMapWithField(replies, params["field"])
+	if data == nil {
+		count, _ = mold.Where(table).Count()
+		item, _ := mold.Where(table).Limit(limit).Page(page).Order(params["order"]).Select()
+		list := cast.ToSlice(utils.ArrayMapWithField(item, params["field"]))
+
+		// 一次取出本页所有父评论的子孙回复（旧的 replies() 是「每条父评论 × 每层一次 SQL」）
+		roots := make([]int, 0, len(list))
+		for _, val := range list {
+			if id := cast.ToInt(cast.ToStringMap(val)["id"]); id > 0 {
+				roots = append(roots, id)
+			}
+		}
+		tree := this.commentReplyTree(roots, params["field"])
+		for index := range list {
+			node := cast.ToStringMap(list[index])
+			if replies, exist := tree[cast.ToInt(node["id"])]; exist {
+				node["replies"] = replies
+			}
 		}
 
 		data = list
-		this.setCache(ctx, cacheName, data)
+		this.setCache(ctx, cacheName, map[string]any{"data": data, "count": count})
 	}
 
 	data = this.maskCommentData(ctx, data)

@@ -23,12 +23,14 @@ import (
 // 自动发放（发布文章、注册满 N 天等）不在这里触发：条件判定见 model/badge.go
 // 的 BadgeAutoGrant（发布动作后异步调用）与 app/timer/badge.go（每小时兜底扫描）。
 
-const badgeAllowFields = "name,description,icon,image,color,condition,condition_value,category_id,rarity,start_time,end_time,expire_days,sort,status,remark,json,text"
+const badgeAllowFields = "name,description,icon,image,color,condition,condition_value,category_id,rarity,start_time,end_time,expire_days,renew,sort,status,remark,json,text"
 
 var badgeAllowFieldsSlice = []any{
 	"name", "description", "icon", "image", "color",
 	"condition", "condition_value", "category_id",
 	"rarity", "start_time", "end_time", "expire_days",
+	// renew：这枚勋章自己的续期档位（JSON），见 model/renew-plan.go
+	"renew",
 	"sort", "status", "remark", "json", "text",
 }
 
@@ -261,6 +263,27 @@ func (this *Badge) checkCategory(ctx *gin.Context, params map[string]any) bool {
 	return true
 }
 
+// checkRenew - 校验这枚勋章的续期档位（天数 / 价格 / 划线价、开启时至少一个档位）
+//
+// 校验通过后把 params["renew"] 换成规整后的 map：天数为 0、重复档位、
+// 划线价倒挂这类脏数据在入库前就被拦下，前台不会看到「填了却不显示」的档位。
+func (this *Badge) checkRenew(ctx *gin.Context, params map[string]any) bool {
+	raw, exist := params["renew"]
+	if !exist {
+		return true
+	}
+
+	data, err := model.NormalizeRenewConfig(raw)
+	if err != nil {
+		this.json(ctx, nil, err.Error(), 400)
+		return false
+	}
+
+	params["renew"] = data
+
+	return true
+}
+
 // save 保存（有 id 走更新）
 func (this *Badge) save(ctx *gin.Context) {
 	params := this.params(ctx)
@@ -298,6 +321,10 @@ func (this *Badge) create(ctx *gin.Context) {
 
 	if !model.BadgeRarityKeyValid(cast.ToString(params["rarity"])) {
 		this.json(ctx, nil, facade.Lang(ctx, "稀有度不合法！"), 400)
+		return
+	}
+
+	if !this.checkRenew(ctx, params) {
 		return
 	}
 
@@ -348,6 +375,10 @@ func (this *Badge) update(ctx *gin.Context) {
 
 	if rarity, exist := params["rarity"]; exist && !model.BadgeRarityKeyValid(cast.ToString(rarity)) {
 		this.json(ctx, nil, facade.Lang(ctx, "稀有度不合法！"), 400)
+		return
+	}
+
+	if !this.checkRenew(ctx, params) {
 		return
 	}
 

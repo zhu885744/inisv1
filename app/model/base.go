@@ -138,6 +138,7 @@ func InitTable() {
 		{"Badge", InitBadge},
 		// 勋章分类必须排在 Badge 之后：播种时要读 Badge 表给存量勋章归类
 		{"BadgeCategory", InitBadgeCategory},
+		// 续期不再单独建表：档位分别挂在 badges.renew / decorations.renew 上（见 model/renew-plan.go）
 		{"IntegralCard", InitIntegralCard},
 		{"RewardCard", InitRewardCard},
 	}
