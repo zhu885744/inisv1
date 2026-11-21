@@ -1,0 +1,98 @@
+# GoReleaser v2 配置：交叉编译 + 内嵌前端（-tags embed）+ GitHub Release
+#
+# 本地验证（不发布，产物在 dist/，版本号取「下一个补丁号-next」）：
+#   goreleaser release --snapshot --clean
+#
+# 正式发布（推 tag 后由 .github/workflows/release.yml 自动执行）：
+#   git tag v1.0.8 && git push origin v1.0.8
+#
+# 产物：inis_<version>_<os>_<arch>.tar.gz / .zip
+#       单文件部署 —— 主题（Mellow 前端产物）已打进二进制，部署只要「二进制 + config 目录」。
+version: 2
+
+project_name: inis
+
+before:
+  hooks:
+    # theme/theme_embed.go 用 //go:embed all:dist 打包 theme/dist，
+    # 这里先把 Mellow 构建出来并同步过去（否则 -tags embed 编译失败）
+    - node scripts/prepare-frontend.mjs
+    - go mod download
+
+builds:
+  - id: inis
+    main: .
+    binary: inis
+    # 内嵌主题：与 build.sh / build.bat 的「内嵌前端」模式一致
+    tags:
+      - embed
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      # 与 build.sh 同一套裁剪参数；Version 由 tag 注入（facade.Version 是 var）
+      - -s -w -buildid=
+      - -X inis/app/facade.Version={{ .Version }}
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # 归档内文件的修改时间统一取提交时间，build 可复现
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: release
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+# 用 git log 生成发布说明（不依赖 GitHub API，本地 --snapshot 也能跑通）
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^Merge pull request'
+      - '^Merge branch'
+  groups:
+    - title: 新增
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: 修复
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: 其他
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: 'INIS v{{ .Version }}'
+  header: |
+    ## INIS v{{ .Version }}
+
+    单文件部署：下载对应平台的压缩包，解压后直接运行 `inis`，
+    首次启动会在同级目录生成 `config`，无需另外分发主题文件。
+  footer: |
+    完整更新日志见压缩包内的 `CHANGELOG.md`（仓库根目录同名文件）。

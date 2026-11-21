@@ -1,6 +1,8 @@
 /.idea
 /.vscode
-/.github
+# .github 整体忽略，只放行 CI 工作流（GoReleaser 发布用，见 .goreleaser.yaml）
+/.github/*
+!/.github/workflows/
 /runtime
 /frontend
 /dist
@@ -12,3 +14,5 @@
 /inis-cms
 # 运行时生成的配置：数据库密码、短信密钥、云端审核 AK/SK 都在这里，不进仓库
 /app/config/*.toml
+# Added by goreleaser init:
+dist/
