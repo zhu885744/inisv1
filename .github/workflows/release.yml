@@ -37,6 +37,10 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+      # GoReleaser 的 upx 步骤依赖系统里的 upx 命令（见 .goreleaser.yaml 的 upx 段）
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

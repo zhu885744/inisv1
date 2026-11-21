@@ -44,6 +44,17 @@ builds:
     # 归档内文件的修改时间统一取提交时间，build 可复现
     mod_timestamp: '{{ .CommitTimestamp }}'
 
+# UPX 压缩：内嵌前端后单个二进制有几十 MB，LZMA 通常还能再压掉一半以上。
+# - macOS 跳过：Mach-O 压缩后容易破坏签名 / 公证（build.bat 也一直跳过 darwin）
+# - 需要执行环境里装有 upx 命令（本地 / CI 都见下文说明）
+upx:
+  - enabled: true
+    ids: [inis]
+    goos: [linux, windows]
+    # -9 + LZMA：体积最小，压缩耗时最长
+    compress: best
+    lzma: true
+
 archives:
   - id: release
     formats: [tar.gz]
