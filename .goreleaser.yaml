@@ -75,7 +75,9 @@ checksum:
 snapshot:
   version_template: '{{ incpatch .Version }}-next'
 
-# 用 git log 生成发布说明（不依赖 GitHub API，本地 --snapshot 也能跑通）
+# 自动 changelog 只作兜底：正式发布时 CI 会用 --release-notes 传入
+# CHANGELOG.md 里本版本的段落（见 scripts/extract-release-notes.mjs），
+# 该参数存在时 GoReleaser 不会再生成本段内容。
 changelog:
   sort: asc
   filters:
@@ -100,10 +102,11 @@ release:
   draft: false
   prerelease: auto
   name_template: 'INIS v{{ .Version }}'
+  # 正文 = header + 发布说明 + footer。
+  # 发布说明来自 CHANGELOG.md 的 `## INIS-cms vX.Y.Z` 段落，所以这里不要再写版本标题，
+  # 否则会出现两个「vX.Y.Z」大标题。
   header: |
-    ## INIS v{{ .Version }}
-
-    单文件部署：下载对应平台的压缩包，解压后直接运行 `inis`，
-    首次启动会在同级目录生成 `config`，无需另外分发主题文件。
+    > 单文件部署：下载对应平台的压缩包，解压后直接运行 `inis`，
+    > 首次启动会在同级目录生成 `config`及 `runtime `日志相关。
   footer: |
     完整更新日志见压缩包内的 `CHANGELOG.md`（仓库根目录同名文件）。

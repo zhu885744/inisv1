@@ -41,11 +41,15 @@ jobs:
       - name: Install UPX
         run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
+      # Release 正文取自 CHANGELOG.md 里 `## INIS-cms vX.Y.Z` 段落（GITHUB_REF_NAME 即 tag）
+      - name: Extract release notes
+        run: node scripts/extract-release-notes.mjs
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          args: release --clean --release-notes=release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

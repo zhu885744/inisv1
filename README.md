@@ -181,6 +181,10 @@ Linux / Windows 的二进制会用 **UPX（`-9` + LZMA）** 再压一道：内�
 macOS 因签名问题跳过（与 `build.bat` 的处理一致）。构建机需要预装 `upx`，
 CI 里由 `apt-get install upx-ucl` 提供。
 
+**Release 正文取自 `CHANGELOG.md`**：CI 先用 `scripts/extract-release-notes.mjs` 截取本版本段落
+（标题约定为 `## INIS-cms v1.0.8`），再通过 `--release-notes` 交给 GoReleaser；
+找不到对应段落时流水线直接失败，避免发出没有更新内容的 Release（本地调试可加 `--allow-missing`）。
+
 ```bash
 # 本地试跑（不发布，版本为「下一个补丁号-next」）
 goreleaser release --snapshot --clean

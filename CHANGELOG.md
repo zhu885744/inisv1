@@ -1,6 +1,6 @@
-最新版下载地址：[INIS-cms-cms/releases](https://github.com/zhu885744/INIS-cms-cms/releases)
+最新版下载地址：[INIS-cms/releases](https://github.com/zhu885744/INIS-cms/releases)
 
-## INIS-cms-cms v1.0.8
+## INIS-cms v1.0.8
 ### 新增
 - 装扮、勋章支持续期操作，管理员可在后台管理设置续期档位，所需积分等
 

@@ -27,3 +27,5 @@
 /app/config/*.toml
 # Added by goreleaser init:
 dist/
+# 发布说明临时文件（CI 从 CHANGELOG.md 截取后传给 GoReleaser，见 scripts/extract-release-notes.mjs）
+/release-notes.md
