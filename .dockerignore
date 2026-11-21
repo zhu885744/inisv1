@@ -1,0 +1,14 @@
+# 手动 docker build 时排除无关内容（GoReleaser 构建用的是它自备的临时上下文）
+.git
+.github
+dist
+public
+docs
+theme/dist
+Mellow/node_modules
+Mellow/dist
+inis-app
+*.md
+!README.md
+Dockerfile
+.dockerignore

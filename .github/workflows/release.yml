@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  # 推送 Docker 镜像到 GHCR 需要
+  packages: write
 
 jobs:
   release:
@@ -30,6 +32,21 @@ jobs:
           node-version: '22.23.4'
           cache: npm
           cache-dependency-path: Mellow/package-lock.json
+
+      # 多架构 Docker 镜像：QEMU 让 Dockerfile 里的 apk 能在 arm64 下执行，
+      # buildx 负责跨平台构建，login 用于把镜像推到 GHCR
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # 失败即阻断，防止有漏洞的版本被发布
       - name: Run govulncheck

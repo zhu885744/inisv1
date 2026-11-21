@@ -46,6 +46,7 @@ INIS-cms 是一套 **Go 后端 + Vue 主题/后台 + uni-app x 移动端** 的�
 
 - **单文件部署**：`-tags embed` 内嵌主题与安装向导，首次启动自动生成 `config/`、`runtime/`、`storage/`
 - **多平台发布**：GoReleaser 一次产出 Linux / Windows / macOS × amd64 / arm64 六个平台包
+- **容器化**：同时构建 `linux/amd64` + `linux/arm64` 多架构 Docker 镜像并推送到 GHCR
 - **国际化**：内置 zh-cn / en-us / ko-kr / ru-ru 语言包，单二进制部署也会自动释放
 - **发布前漏洞阻断**：CI 内 `govulncheck` 命中漏洞即终止发布
 
@@ -101,6 +102,7 @@ INIS-cms 是一套 **Go 后端 + Vue 主题/后台 + uni-app x 移动端** 的�
 | 分类 | 技术 | 说明 |
 |------|------|------|
 | 打包 | GoReleaser v2 | 6 平台交叉编译 + 内嵌前端 + UPX 压缩 + checksum + changelog |
+| 容器镜像 | Docker + buildx | `dockers_v2` 多架构镜像（amd64 / arm64），基于 alpine，推送 GHCR |
 | CI | GitHub Actions | 推 `v*` tag 自动发布；发布前跑 `govulncheck` 阻断有漏洞的版本 |
 | 本地脚本 | `build.bat` / `build.sh` | 交互式单平台 / 批量编译，可选 UPX 压缩 |
 
@@ -201,6 +203,26 @@ checkout → setup-go(1.27.4) → setup-node(22) → govulncheck → goreleaser 
 ```
 
 任一环节失败即不产出 Release；`govulncheck` 命中漏洞会直接终止（避免带漏洞的版本被发布）。
+
+### Docker 镜像
+
+发布时同时产出多架构镜像 `ghcr.io/zhu885744/inis`（`linux/amd64` + `linux/arm64` 合并为一个 manifest）：
+
+- 标签：`<version>`，非预发布版本额外打 `latest`
+- 运行镜像基于 `alpine`，非 root 用户，暴露 `8642`
+- 需要持久化 `/app/config`（数据库 / 短信 / 存储密钥都在这里）、`/app/storage`、`/app/runtime`
+
+```bash
+docker run -d --name inis -p 8642:8642 \
+  -v "$PWD/inis/config:/app/config" \
+  -v "$PWD/inis/storage:/app/storage" \
+  -v "$PWD/inis/runtime:/app/runtime" \
+  -e TZ=Asia/Shanghai \
+  ghcr.io/zhu885744/inis:latest
+```
+
+首次启动会自动生成 `config/`，访问 <http://localhost:8642> 跳转 `/install` 完成安装。
+本地手动构建见仓库根 `Dockerfile` 头部注释（`docker build -t inis:local .`，需要先有一个叫 `inis` 的二进制）。
 
 ### 单文件部署
 

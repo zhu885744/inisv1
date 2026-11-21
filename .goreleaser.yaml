@@ -72,6 +72,30 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# Docker 镜像：把当前平台的二进制放进 alpine 运行镜像，多架构合并成一个 manifest 推到 GHCR。
+# - 构建环境需要 buildx（CI 里由 docker/setup-buildx-action 提供；本地无 Docker 时会跳过或报错）
+# - 本地 `--snapshot` 默认只构建不推送
+dockers_v2:
+  - ids: [inis]
+    dockerfile: Dockerfile
+    # 本地 --snapshot 不构建镜像（多数开发机没装 Docker；正式发布时才需要）
+    disable: '{{ .IsSnapshot }}'
+    images:
+      - ghcr.io/zhu885744/inis
+    tags:
+      - '{{ .Version }}'
+      # 预发布版本不打 latest
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: '{{ .ProjectName }}'
+      org.opencontainers.image.version: '{{ .Version }}'
+      org.opencontainers.image.revision: '{{ .FullCommit }}'
+      org.opencontainers.image.source: https://github.com/zhu885744/INIS-cms
+      org.opencontainers.image.licenses: Apache-2.0
+
 snapshot:
   version_template: '{{ incpatch .Version }}-next'
 
