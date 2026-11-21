@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- ========== 基础 SEO ========== -->
+    <title>mellow</title>
+    <meta name="robots" content="index, follow" />
+    <!-- ========== 图标 ========== -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <!-- ========== 主题色 ========== -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)" />
+
+    <!-- ========== 主题配色（运行时注入） ==========
+      配色通过 /api/theme/active 下发（{ version, css }），由 main.js 注入
+      <style id="theme-runtime">。接口带 no-store，不会像静态 .css 那样被 CDN 强缓存。
+      下面这段同步应用上次缓存的样式，避免自定义配色首屏闪一下默认色。 -->
+    <script>
+      (function () {
+        try {
+          var cached = JSON.parse(localStorage.getItem('inis_theme_css') || 'null')
+          if (cached && cached.css) {
+            var style = document.createElement('style')
+            style.id = 'theme-runtime'
+            style.textContent = cached.css
+            document.head.appendChild(style)
+          }
+        } catch (e) {
+          /* 隐私模式下 localStorage 不可用，交给 main.js 拉取 */
+        }
+      })()
+    </script>
+
+    <!-- ========== 首屏加载动画样式（内联，避免额外请求） ========== -->
+    <style>
+      #app-loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background: #ffffff;
+        color: #666;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 9999;
+        transition: opacity 0.3s ease;
+      }
+      /* 暗色主题下跟随 */
+      html[data-theme='dark'] #app-loading {
+        background: #1a1a1a;
+        color: #999;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme='light']) #app-loading {
+          background: #1a1a1a;
+          color: #999;
+        }
+      }
+
+      /* 旋转圆环 */
+      .app-loading__spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(128, 128, 128, 0.2);
+        border-top-color: #4a90e2; /* 换你主题主色 */
+        border-radius: 50%;
+        animation: app-loading-spin 0.8s linear infinite;
+      }
+      @keyframes app-loading-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .app-loading__text {
+        font-size: 14px;
+        letter-spacing: 1px;
+        opacity: 0.7;
+      }
+
+      /* 可选：淡出效果 */
+      #app-loading.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+
+    <!-- ========== 防闪烁主题脚本 ========== -->
+    <!-- 主题只有 light / dark 两态；没存过（或旧版存了 auto）时按系统偏好取一次 -->
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('mellow_theme') || 'auto'
+          var dark = m === 'dark' ||
+            (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.dataset.theme = 'dark'
+        } catch (e) { /* ignore */ }
+      })()
+    </script>
+    <!-- ========== 运行时配置 ========== -->
+    <!-- defer：与入口 module 脚本同属「延迟队列」并按文档顺序执行，
+       既保证运行时机早于 main.js，又不再阻塞 HTML 解析 -->
+  <script defer src="/runtime-config.js"></script>
+  </head>
+  <body>
+    <!-- 加载动画：Vue mount 时会自动替换掉 #app 里的内容 -->
+    <div id="app">
+      <div id="app-loading">
+        <div class="app-loading__spinner"></div>
+        <div class="app-loading__text">加载中…</div>
+      </div>
+    </div>
+
+    <noscript>
+      <div style="padding:2rem;text-align:center;font-family:sans-serif;">
+        <h1>朱某的生活印记</h1>
+        <p>本站需要启用 JavaScript 才能正常浏览，请在浏览器设置中开启后刷新页面。</p>
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
