@@ -6,6 +6,17 @@
 /runtime
 /frontend
 /dist
+# 前端（Mellow）依赖与产物：构建 / 发布时生成，不进仓库
+# （Mellow/.gitignore 已删除，规则统一收在这里，避免两处规则漂移）
+/Mellow/node_modules
+/Mellow/dist
+/Mellow/.vite
+/Mellow/*.log
+/Mellow/.DS_Store
+# 前端本地覆写配置：真实后端地址 / 密钥，绝不能进仓库
+# （VITE_ 前缀会被打进产物，即使不提交也等于公开；.env 本身是共享默认值）
+/Mellow/.env.local
+/Mellow/.env.*.local
 # 内嵌主题产物（构建时由 Mellow/dist 拷入，见 build.bat / build.sh）
 /theme/dist
 *.exe*
